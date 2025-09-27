@@ -262,6 +262,8 @@ int IncoreClusterStateLedger::onLogRolloverCb(const mqbu::StorageKey& oldLogId,
     if (rc != 0) {
         return 10 * rc + rc_WRITE_HEADER_FAILURE;  // RETURN
     }
+    d_clusterData_p->stats().setCslOffsetBytes(
+        d_ledger_mp->currentLog()->currentOffset());
 
     if (oldLogId.isNull()) {
         // If this is a brand new ledger
@@ -308,6 +310,7 @@ int IncoreClusterStateLedger::onLogRolloverCb(const mqbu::StorageKey& oldLogId,
     if (rc != 0) {
         return 10 * rc + rc_WRITE_RECORD_FAILURE;  // RETURN
     }
+    d_clusterData_p->stats().addCslOffsetBytes(snapshotRecord->length());
 
     // Write uncommitted advisories into ledger
     for (AdvisoriesMapIter advisoryIt = d_uncommittedAdvisories.begin();
@@ -341,6 +344,7 @@ int IncoreClusterStateLedger::onLogRolloverCb(const mqbu::StorageKey& oldLogId,
         if (rc != 0) {
             return 10 * rc + rc_WRITE_RECORD_FAILURE;  // RETURN
         }
+        d_clusterData_p->stats().addCslOffsetBytes(record->length());
     }
 
     return rc_SUCCESS;
@@ -486,11 +490,16 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
                            << ", rc: " << rc << "]";
             return rc * 10 + rc_WRITE_FAILURE;  // RETURN
         }
+        d_clusterData_p->stats().addCslOffsetBytes(record.length() -
+                                                   recordOffset);
 
         ClusterMessageInfo info;
         info.d_clusterMessage = clusterMessage;
         info.d_ackCount       = 0;
-        d_uncommittedAdvisories.insert(bsl::make_pair(sequenceNumber, info));
+        const AdvisoriesMap::iterator advIt =
+            d_uncommittedAdvisories
+                .insert(bsl::make_pair(sequenceNumber, info))
+                .first;
 
         if (isSelfLeader()) {
             // TBD: How/if to handle timeout for this message?
@@ -507,6 +516,10 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
             // If self is leader who initiated a snapshot or update record, the
             // record offset should be 0.
             BSLS_ASSERT_SAFE(recordOffset == 0);
+
+            // Save the replication start time
+            advIt->second.d_timestampNs =
+                bdlt::CurrentTime::now().totalNanoseconds();
 
             bsl::shared_ptr<bdlbb::Blob> advisoryEvent =
                 d_blobSpPool_p->getObject();
@@ -620,8 +633,15 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
                            << ", rc: " << rc << "]";
             return rc * 10 + rc_WRITE_FAILURE;  // RETURN
         }
+        d_clusterData_p->stats().addCslOffsetBytes(record.length() -
+                                                   recordOffset);
 
         if (isSelfLeader()) {
+            bsls::Types::Int64 replicationTimeNs =
+                bdlt::CurrentTime::now().totalNanoseconds() -
+                iter->second.d_timestampNs;
+            d_clusterData_p->stats().setCslReplicationTime(replicationTimeNs);
+
             bsl::shared_ptr<bdlbb::Blob> commitEvent =
                 d_blobSpPool_p->getObject();
 
@@ -644,12 +664,11 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
         //       the commit callback should be enqueued to be invoked from the
         //       cluster dispatcher thread.
         // TODO: In phase 2 of IncoreCSL, this can return to enqueueing on
-        // the
-        //       cluster dispatcher thread
+        //       the cluster dispatcher thread.
         d_commitCb(committedControlMessage,
                    ClusterStateLedgerCommitStatus::e_SUCCESS);
 
-        d_uncommittedAdvisories.erase(commit.sequenceNumberCommitted());
+        d_uncommittedAdvisories.erase(iter);
     } break;  // BREAK
     case (ClusterStateRecordType::e_ACK): {
         // PRECONDITIONS
@@ -1278,6 +1297,8 @@ int IncoreClusterStateLedger::open()
     if (rc != 0) {
         return 10 * rc + rc_INTERNAL_LEDGER_ERROR;  // RETURN
     }
+    d_clusterData_p->stats().setCslOffsetBytes(
+        d_ledger_mp->currentLog()->currentOffset());
 
     d_isOpen = true;
 
