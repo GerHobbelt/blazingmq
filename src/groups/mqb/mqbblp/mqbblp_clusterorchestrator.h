@@ -353,15 +353,6 @@ class ClusterOrchestrator {
     processQueueAssignmentRequest(const bmqp_ctrlmsg::ControlMessage& request,
                                   mqbnet::ClusterNode* requester);
 
-    /// Process the specified queue assignment advisory `message` from the
-    /// specified `source`.
-    ///
-    /// THREAD: This method is invoked in the associated cluster's
-    ///         dispatcher thread.
-    void
-    processQueueAssignmentAdvisory(const bmqp_ctrlmsg::ControlMessage& message,
-                                   mqbnet::ClusterNode*                source);
-
     /// Process the queue unAssigned advisory in the specified `msg`
     /// received from the specified `source`.
     ///
@@ -379,23 +370,6 @@ class ClusterOrchestrator {
     void
     processQueueUnAssignmentAdvisory(const bmqp_ctrlmsg::ControlMessage& msg,
                                      mqbnet::ClusterNode* source);
-
-    /// Process the specified partition primary advisory `message` from the
-    /// specified `source`.
-    ///
-    /// THREAD: This method is invoked in the associated cluster's
-    ///         dispatcher thread.
-    void processPartitionPrimaryAdvisory(
-        const bmqp_ctrlmsg::ControlMessage& message,
-        mqbnet::ClusterNode*                source);
-
-    /// Process the specified partition primary advisory `message` from the
-    /// specified `source`.
-    ///
-    /// THREAD: This method is invoked in the associated cluster's
-    ///         dispatcher thread.
-    void processLeaderAdvisory(const bmqp_ctrlmsg::ControlMessage& message,
-                               mqbnet::ClusterNode*                source);
 
     /// Process the specified storage sync request `message` from the
     /// specified `source`.

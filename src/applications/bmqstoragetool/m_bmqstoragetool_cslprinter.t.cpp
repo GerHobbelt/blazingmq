@@ -23,6 +23,7 @@
 
 // BDE
 #include <bdljsn_jsonutil.h>
+#include <bslim_printer.h>
 
 // TEST DRIVER
 #include <bmqtst_testhelper.h>
@@ -73,13 +74,14 @@ static void test1_humanReadableShortResultTest()
     // Prepare expected output
     bmqu::MemOutStream expectedStream(bmqtst::TestHelperUtil::allocator());
     {
-        bslim::Printer printer(&expectedStream, 0, -1);
-        printer.start();
-        printer.printAttribute("recordType", header.recordType());
-        printer.printAttribute("electorTerm", header.electorTerm());
-        printer.printAttribute("sequenceNumber", header.sequenceNumber());
-        printer.printAttribute("timestamp", header.timestamp());
-        printer.end();
+        bslim::Printer expectedPrinter(&expectedStream, 0, -1);
+        expectedPrinter.start();
+        expectedPrinter.printAttribute("recordType", header.recordType());
+        expectedPrinter.printAttribute("electorTerm", header.electorTerm());
+        expectedPrinter.printAttribute("sequenceNumber",
+                                       header.sequenceNumber());
+        expectedPrinter.printAttribute("timestamp", header.timestamp());
+        expectedPrinter.end();
         expectedStream << recordId << '\n';
     }
 
@@ -133,10 +135,12 @@ static void test2_humanReadableDetailResultTest()
         bmqu::MemOutStream recordStream(bmqtst::TestHelperUtil::allocator());
         record.print(recordStream, 2, 2);
 
-        CslRecordPrinter<bmqu::AlignedPrinter> printer(
+        CslRecordPrinter<bmqu::AlignedPrinter> expectedPrinter(
             expectedStream,
             bmqtst::TestHelperUtil::allocator());
-        printer.printRecordDetails(recordStream.str(), header, recordId);
+        expectedPrinter.printRecordDetails(recordStream.str(),
+                                           header,
+                                           recordId);
     }
 
     BMQTST_ASSERT_EQ(expectedStream.str(), resultStream.str());
@@ -321,12 +325,10 @@ static void test5_humanReadableSummaryTest()
         << "4 commit record(s) found.\n\n"
         << "5 ack record(s) found.\n\n"
         << "2 Queues found:\n"
-        << "[ uri = \"bmq://bmq.test.persistent.priority/second-queue\" key = "
-           "[ 62 ]\n"
-        << " partitionId = 3 appIds = [ ] ]\n"
-        << "[ uri = \"bmq://bmq.test.persistent.priority/first-queue\" key = "
-           "[ 61 ]\n"
-        << " partitionId = 2 appIds = [ ] ]\n";
+        << "[ uri = \"bmq://bmq.test.persistent.priority/second-queue\"  key "
+           "= [ 62 ] partitionId = 3 appIds = [ ] ]\n"
+        << "[ uri = \"bmq://bmq.test.persistent.priority/first-queue\"  key = "
+           "[ 61 ] partitionId = 2 appIds = [ ] ]\n";
 
     BMQTST_ASSERT_EQ(expectedStream.str(), resultStream.str());
 }

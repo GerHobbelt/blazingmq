@@ -487,6 +487,7 @@ RemoteQueue::RemoteQueue(QueueState*       state,
 , d_allocator_p(allocator)
 {
     // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_state_p);
     BSLS_ASSERT_SAFE(d_state_p->id() != bmqp::QueueId::k_UNASSIGNED_QUEUE_ID);
     BSLS_ASSERT_SAFE(d_state_p->id() != bmqp::QueueId::k_PRIMARY_QUEUE_ID);
     // A RemoteQueue must have an upstream id
@@ -750,15 +751,12 @@ void RemoteQueue::onHandleReleased(
                     // previously added virtual storage
                     const bsl::string& appId =
                         handleParameters.subIdInfo().value().appId();
-                    mqbu::StorageKey appKey;
-                    const bool       hasVirtualStorage =
+                    mqbu::StorageKey             appKey;
+                    BSLA_MAYBE_UNUSED const bool hasVirtualStorage =
                         d_state_p->storage()->hasVirtualStorage(appId,
                                                                 &appKey);
                     BSLS_ASSERT_SAFE(hasVirtualStorage);
                     d_state_p->storage()->removeVirtualStorage(appKey, false);
-
-                    (void)
-                        hasVirtualStorage;  // Compiler happiness in opt build
                 }
             }
             else if (!bmqt::QueueFlagsUtil::isReader(
@@ -869,6 +867,10 @@ void RemoteQueue::onDispatcherEvent(const mqbi::DispatcherEvent& event)
 
 void RemoteQueue::flush()
 {
+    if (d_state_p->storage()) {
+        const bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
+        d_state_p->storage()->gcHistory(now);
+    }
     if (d_queueEngine_mp) {
         const bmqt::MessageGUID dummy;
         d_queueEngine_mp->afterNewMessage(dummy, 0);
@@ -1044,6 +1046,10 @@ void RemoteQueue::postMessage(const bmqp::PutHeader&              putHeaderIn,
 
     d_state_p->stats()->onEvent<mqbstat::QueueStatsDomain::EventType::e_PUT>(
         appData->length());
+
+    if (d_queueEngine_mp) {
+        d_queueEngine_mp->afterPostMessage();
+    }
 }
 
 void RemoteQueue::confirmMessage(const bmqt::MessageGUID& msgGUID,

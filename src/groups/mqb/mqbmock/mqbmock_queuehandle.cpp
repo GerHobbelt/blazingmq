@@ -25,7 +25,6 @@
 
 // BMQ
 #include <bmqt_queueflags.h>
-
 #include <bmqu_memoutstream.h>
 #include <bmqu_outstreamformatsaver.h>
 #include <bmqu_printutil.h>
@@ -37,6 +36,7 @@
 #include <bsl_numeric.h>
 #include <bsl_string.h>
 #include <bsl_utility.h>
+#include <bsla_annotations.h>
 
 namespace BloombergLP {
 namespace mqbmock {
@@ -299,11 +299,11 @@ void QueueHandle::deliverMessage(
 
         GUIDMap& guids = mapIter->second.d_unconfirmedMessages;
 
-        bsl::pair<GUIDMap::iterator, bool> insertRC = guids.insert(
-            bsl::make_pair(message.guid(),
-                           bsl::make_pair(message.appData(), sId)));
+        BSLA_MAYBE_UNUSED bsl::pair<GUIDMap::iterator, bool> insertRC =
+            guids.insert(
+                bsl::make_pair(message.guid(),
+                               bsl::make_pair(message.appData(), sId)));
         BSLS_ASSERT_OPT(insertRC.second);
-        (void)insertRC;  // Compiler happiness
     }
 }
 

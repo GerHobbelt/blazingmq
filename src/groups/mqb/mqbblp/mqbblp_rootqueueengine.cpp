@@ -259,10 +259,15 @@ RootQueueEngine::RootQueueEngine(QueueState*             queueState,
 : d_queueState_p(queueState)
 , d_consumptionMonitor(
       queueState,
+      bdlf::BindUtil::bind(&RootQueueEngine::haveUndeliveredCb,
+                           this,
+                           bdlf::PlaceHolders::_1,   // alarmTime_p
+                           bdlf::PlaceHolders::_2,   // appId
+                           bdlf::PlaceHolders::_3),  // now
       bdlf::BindUtil::bind(&RootQueueEngine::logAlarmCb,
                            this,
-                           bdlf::PlaceHolders::_1,   // appKey
-                           bdlf::PlaceHolders::_2),  // enableLog
+                           bdlf::PlaceHolders::_1,   // appId
+                           bdlf::PlaceHolders::_2),  // oldestMsgIt
       allocator)
 , d_apps(allocator)
 , d_hasAppSubscriptions(false)
@@ -403,9 +408,7 @@ int RootQueueEngine::configure(bsl::ostream& errorDescription,
     }
 
     if (!QueueEngineUtil::isBroadcastMode(d_queueState_p->queue())) {
-        d_consumptionMonitor.setMaxIdleTime(
-            config().maxIdleTime() *
-            bdlt::TimeUnitRatio::k_NANOSECONDS_PER_SECOND);
+        d_consumptionMonitor.setMaxIdleTime(config().maxIdleTime());
     }
 
     return rc_SUCCESS;
@@ -698,11 +701,11 @@ mqbi::QueueHandle* RootQueueEngine::getHandle(
     if (queueHandle) {
         // Already aware of this queueId from this client.
 
-        bmqt::Uri   uri;
-        bsl::string error;
-        int rc = bmqt::UriParser::parse(&uri, &error, handleParameters.uri());
+        bmqt::Uri             uri;
+        bsl::string           error;
+        BSLA_MAYBE_UNUSED int rc =
+            bmqt::UriParser::parse(&uri, &error, handleParameters.uri());
         BSLS_ASSERT_SAFE(rc == 0);
-        (void)rc;  // compiler happiness
         BSLS_ASSERT_SAFE(queueHandle->queue()->uri().asString() ==
                          queueHandle->queue()->uri().canonical());
         // Queue's 'uri' should always be the canonical uri
@@ -1321,13 +1324,12 @@ void RootQueueEngine::afterNewMessage(
 
     if (QueueEngineUtil::isBroadcastMode(d_queueState_p->queue())) {
         // Clear storage status
-        mqbi::StorageResult::Enum rc =
+        BSLA_MAYBE_UNUSED mqbi::StorageResult::Enum rc =
             d_queueState_p->queue()->storage()->removeAll(
                 mqbu::StorageKey::k_NULL_KEY);
         // Intended to be used with 'InMemoryStorage'.  Since 'appKey' isn't
         //  used while calling 'removeAll()', it should always succeed.
         BSLS_ASSERT_SAFE(mqbi::StorageResult::e_SUCCESS == rc);
-        (void)rc;  // Compiler happiness
 
         d_storageIter_mp->reset();
     }
@@ -1401,9 +1403,10 @@ int RootQueueEngine::onConfirmMessage(mqbi::QueueHandle*       handle,
     return rc_ERROR;
 }
 
-int RootQueueEngine::onRejectMessage(mqbi::QueueHandle*       handle,
-                                     const bmqt::MessageGUID& msgGUID,
-                                     unsigned int             subQueueId)
+int RootQueueEngine::onRejectMessage(
+    BSLA_MAYBE_UNUSED mqbi::QueueHandle* handle,
+    const bmqt::MessageGUID&             msgGUID,
+    unsigned int                         subQueueId)
 {
     // executed by the *QUEUE DISPATCHER* thread
 
@@ -1465,7 +1468,7 @@ int RootQueueEngine::onRejectMessage(mqbi::QueueHandle*       handle,
         // iterators will be recreated with the correct 'rdaInfo' received from
         // primary, if a new consumer connects to the replica/proxy.
         const int      maxDeliveryAttempts = config().maxDeliveryAttempts();
-        const bool     domainIsUnlimited = (maxDeliveryAttempts == 0);
+        const bool     domainIsUnlimited   = (maxDeliveryAttempts == 0);
         bmqp::RdaInfo& rda = message->appMessageState(app.ordinal()).d_rdaInfo;
 
         if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(domainIsUnlimited !=
@@ -1596,7 +1599,7 @@ void RootQueueEngine::afterQueuePurged(const bsl::string&      appId,
     iter->second->clear();
 }
 
-void RootQueueEngine::onTimer(bsls::Types::Int64 currentTimer)
+void RootQueueEngine::afterPostMessage()
 {
     // executed by the *QUEUE DISPATCHER* thread
 
@@ -1604,7 +1607,7 @@ void RootQueueEngine::onTimer(bsls::Types::Int64 currentTimer)
     BSLS_ASSERT_SAFE(d_queueState_p->queue()->dispatcher()->inDispatcherThread(
         d_queueState_p->queue()));
 
-    d_consumptionMonitor.onTimer(currentTimer);
+    d_consumptionMonitor.onMessagePosted();
 }
 
 bsl::ostream&
@@ -1732,8 +1735,44 @@ RootQueueEngine::logAppSubscriptionInfo(bsl::ostream&     stream,
     return stream;
 }
 
-bool RootQueueEngine::logAlarmCb(const bsl::string& appId,
-                                 bool               enableLog) const
+bslma::ManagedPtr<mqbi::StorageIterator>
+RootQueueEngine::haveUndeliveredCb(bsls::TimeInterval*       alarmTime_p,
+                                   const bsl::string&        appId,
+                                   const bsls::TimeInterval& now) const
+{
+    // executed by the *QUEUE DISPATCHER* thread
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_queueState_p->queue()->dispatcher()->inDispatcherThread(
+        d_queueState_p->queue()));
+    BSLS_ASSERT_SAFE(alarmTime_p);
+
+    // Get AppState by appKey.
+    Apps::const_iterator cItApp = d_apps.find(appId);
+    BSLS_ASSERT_SAFE(cItApp != d_apps.end());
+
+    const AppStateSp& app = cItApp->second;
+
+    // Check if there are un-delivered messages
+    bslma::ManagedPtr<mqbi::StorageIterator> headIt = head(app);
+
+    if (headIt) {
+        // Get the arrival time delta of the oldest un-delivered message.
+        bsls::Types::Int64 arrivaTimelDelta = 0;
+        mqbs::StorageUtil::loadArrivalTimeDelta(&arrivaTimelDelta,
+                                                headIt->attributes());
+        // Calculate alarm time
+        const bsls::TimeInterval alarmTime =
+            d_consumptionMonitor.calculateAlarmTime(arrivaTimelDelta, now);
+        *alarmTime_p = alarmTime;
+    }
+
+    return headIt;
+}
+
+void RootQueueEngine::logAlarmCb(
+    const bsl::string&                              appId,
+    const bslma::ManagedPtr<mqbi::StorageIterator>& oldestMsgIt) const
 {
     // executed by the *QUEUE DISPATCHER* thread
 
@@ -1743,23 +1782,9 @@ bool RootQueueEngine::logAlarmCb(const bsl::string& appId,
 
     // Get AppState by appKey.
     Apps::const_iterator cItApp = d_apps.find(appId);
-    if (cItApp == d_apps.end()) {
-        BALL_LOG_WARN << "No app found for appId: " << appId;
-        return false;  // RETURN
-    }
+    BSLS_ASSERT_SAFE(cItApp != d_apps.end());
+
     const AppStateSp& app = cItApp->second;
-
-    // Check if there are un-delivered messages
-    bslma::ManagedPtr<mqbi::StorageIterator> headIt = head(app);
-
-    if (!headIt) {
-        // No un-delivered messages, do nothing.
-        return false;  // RETURN
-    }
-    if (!enableLog) {
-        // There are un-delivered messages, but log is disabled.
-        return true;  // RETURN
-    }
 
     // Logging alarm info
     bdlma::LocalSequentialAllocator<4096> localAllocator(d_allocator_p);
@@ -1847,14 +1872,12 @@ bool RootQueueEngine::logAlarmCb(const bsl::string& appId,
 
     mqbs::StoragePrintUtil::listMessage(&result.makeMessage(),
                                         storage,
-                                        *headIt);
+                                        *oldestMsgIt);
 
     mqbcmd::HumanPrinter::print(out, result);
     out << "\n";
 
     BMQTSK_ALARMLOG_ALARM("QUEUE_STUCK") << out.str() << BMQTSK_ALARMLOG_END;
-
-    return true;
 }
 
 void RootQueueEngine::afterAppIdRegistered(
@@ -2054,15 +2077,15 @@ RootQueueEngine::head(const AppStateSp app) const
 {
     bslma::ManagedPtr<mqbi::StorageIterator> out;
 
-    if (!app->putAsideList().empty()) {
-        d_queueState_p->storage()->getIterator(&out,
-                                               app->appKey(),
-                                               app->putAsideList().first());
-    }
-    else if (!d_storageIter_mp->atEnd()) {
-        d_queueState_p->storage()->getIterator(&out,
-                                               app->appKey(),
-                                               d_storageIter_mp->guid());
+    // Try to get the oldest message iterator from the
+    // redelivery list, put aside list, or resume point.
+    if (!app->getOldestMessageIterator(&out)) {
+        // No oldest message found, try d_storageIter_mp
+        if (!d_storageIter_mp->atEnd()) {
+            d_queueState_p->storage()->getIterator(&out,
+                                                   app->appKey(),
+                                                   d_storageIter_mp->guid());
+        }
     }
 
     return out;

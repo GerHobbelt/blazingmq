@@ -72,6 +72,7 @@
 #include <bsl_limits.h>
 #include <bsl_sstream.h>
 #include <bsl_string.h>
+#include <bsla_annotations.h>
 #include <bslma_allocator.h>
 #include <bslma_usesbslmaallocator.h>
 #include <bslmf_allocatorargt.h>
@@ -174,33 +175,29 @@ class MonitoredQueue {
 
     StateCallback d_stateChangedCb;
 
+    /// How full the queue is.
+    ///   0: below high watermark
+    ///   1: reached high watermark but never filled queue
+    ///   2: reached high watermark 2 but never full
+    ///   3: filled queue
+    /// The state doesn't go down until the queue size reaches the low
+    /// watermark.
     bsls::AtomicInt d_state;
-    // How full the queue is.
-    //   0: below high watermark
-    //   1: reached high watermark but never filled queue
-    //   2: reached high watermark 2 but never full
-    //   3: filled queue
-    // The state doesn't go down until the queue size
-    // reaches the low watermark.
 
     QUEUE d_queue;
 
     bsls::AtomicInt64 d_queueLength;
 
+    /// Whether timed operations are supported (timedPopFront). This has a
+    /// slight performance impact (conditionVariable.signal()), so it should be
+    /// enabled only if any timed operations will be used on the queue.
     bool d_supportTimedOperations;
-    // Whether timed operations are supported
-    // (timedPopFront). This has a slight performance
-    // impact (conditionVariable.signal()), so it should
-    // be enabled only if any timed operations will be
-    // used on the queue.
 
+    /// Mutex to use with the below condition variable for timed operations
     bslmt::Mutex d_timedOperationsMutex;
-    // Mutex to use with the below condition variable for
-    // timed operations
 
+    /// Condition variable to notify timedOperation of data added to the queue
     bslmt::Condition d_timedOperationsCondition;
-    // Condition variable to notify timedOperation of
-    // data added to the queue
 
     // PRIVATE MANIPULATORS
 
@@ -489,7 +486,7 @@ MonitoredQueue<QUEUE, QUEUE_TRAITS>::setWatermarks(
     bsls::Types::Int64 highWatermark,
     bsls::Types::Int64 highWatermark2)
 {
-    const bsls::Types::Int64 intMax =
+    BSLA_MAYBE_UNUSED const bsls::Types::Int64 intMax =
         bsl::numeric_limits<bsls::Types::Int64>::max();
     BSLS_ASSERT(lowWatermark >= 0);
     BSLS_ASSERT(lowWatermark < highWatermark);
@@ -500,8 +497,6 @@ MonitoredQueue<QUEUE, QUEUE_TRAITS>::setWatermarks(
     d_lowWatermark   = lowWatermark;
     d_highWatermark  = highWatermark;
     d_highWatermark2 = highWatermark2;
-
-    (void)intMax;  // prod-build compiler happiness
 
     return *this;
 }

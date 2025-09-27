@@ -32,6 +32,7 @@
 // BDE
 #include <bdls_filesystemutil.h>
 #include <bdls_pathutil.h>
+#include <bsla_annotations.h>
 
 namespace BloombergLP {
 namespace m_bmqstoragetool {
@@ -206,9 +207,8 @@ FileManagerImpl::CslFileHandler::CslFileHandler(const bsl::string& path,
 FileManagerImpl::CslFileHandler::~CslFileHandler()
 {
     if (d_ledger_p) {
-        const int rc = d_ledger_p->close();
+        BSLA_MAYBE_UNUSED const int rc = d_ledger_p->close();
         BSLS_ASSERT(rc == 0);
-        (void)rc;  // Compiler happiness
     }
 }
 
@@ -271,7 +271,7 @@ bool FileManagerImpl::CslFileHandler::resetIterator(
 
     if (d_cslFromBegin) {
         // Move iterator to the first record.
-        const int rc = d_iter_p->next();
+        rc = d_iter_p->next();
         if (rc != 0) {
             errorDescription << "CSL file either empty or corrupted: rc="
                              << rc;

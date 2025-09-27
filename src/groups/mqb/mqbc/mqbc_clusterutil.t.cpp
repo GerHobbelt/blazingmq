@@ -26,9 +26,9 @@
 
 // BDE
 #include <bdlb_print.h>
-#include <bdlbb_pooledblobbufferfactory.h>
 #include <bsl_string.h>
 #include <bsl_utility.h>
+#include <bsla_annotations.h>
 
 // TEST DRIVER
 #include <bmqtst_testhelper.h>
@@ -45,17 +45,16 @@ using namespace bsl;
 struct Tester {
   private:
     // DATA
-    bdlbb::PooledBlobBufferFactory d_bufferFactory;
-    mqbmock::Cluster               d_cluster;
-    bslma::Allocator*              d_allocator_p;
+    bslma::Allocator* d_allocator_p;
+    mqbmock::Cluster  d_cluster;
 
   public:
     // CREATORS
     Tester(bslma::Allocator* allocator = bmqtst::TestHelperUtil::allocator())
-    : d_bufferFactory(256, allocator)
-    , d_cluster(&d_bufferFactory, allocator)
-    , d_allocator_p(allocator)
+    : d_allocator_p(bslma::Default::allocator(allocator))
+    , d_cluster(d_allocator_p)
     {
+        // NOTHING
     }
 
     mqbi::Cluster* cluster() { return &d_cluster; }
@@ -69,11 +68,11 @@ struct Tester {
         return domainState;
     }
 
-    mqbc::ClusterState::QueueInfoSp
-    createQueueInfoSp(const bsl::string&                  uriString,
-                      const mqbu::StorageKey&             key,
-                      int                                 partitionId,
-                      const mqbc::ClusterState::AppInfos& appIdInfos)
+    mqbc::ClusterState::QueueInfoSp createQueueInfoSp(
+        const bsl::string&      uriString,
+        const mqbu::StorageKey& key,
+        int                     partitionId,
+        BSLA_UNUSED const mqbc::ClusterState::AppInfos& appIdInfos)
     {
         bmqp_ctrlmsg::QueueInfo advisory(bmqtst::TestHelperUtil::allocator());
 

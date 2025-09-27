@@ -293,7 +293,7 @@ void InitialConnectionHandler::complete(
     const bsl::string&                      error,
     const bsl::shared_ptr<mqbnet::Session>& session)
 {
-    context->initialConnectionCompleteCb()(rc, error, session);
+    context->complete(rc, error, session);
 }
 
 InitialConnectionHandler::InitialConnectionHandler(
@@ -311,12 +311,23 @@ InitialConnectionHandler::~InitialConnectionHandler()
 void InitialConnectionHandler::handleInitialConnection(
     const InitialConnectionContextSp& context)
 {
+    // The only counted references to 'InitialConnectionContextSp' are two
+    // callbacks:
+    //  1.  'InitialConnectionHandler::complete' which is constructed and
+    //      destructed on stack.
+    //  2.  'InitialConnectionHandler::readCallback' which the channel holds
+    //      (see 'InitialConnectionHandler::scheduleRead').
+    // That means 'InitialConnectionContext' lives as long as there is the need
+    // to read from the channel.  As soon as it sets '*numNeeded = 0', it gets
+    // destructed after 'InitialConnectionHandler::readCallback' returns.
+    // If there is a need to keep 'InitialConnectionContext' longer, there
+    // should be explicit 'bsl::shared_ptr<mqbnet::InitialConnectionContext>'.
+
     // Create an NegotiationContext for that connection
     bsl::shared_ptr<mqbnet::NegotiationContext> negotiationContext;
     negotiationContext.createInplace(d_allocator_p);
 
     negotiationContext->d_initialConnectionContext_p = context.get();
-    negotiationContext->d_isReversed                 = false;
     negotiationContext->d_clusterName                = "";
     negotiationContext->d_connectionType = mqbnet::ConnectionType::e_UNKNOWN;
 
@@ -343,9 +354,8 @@ void InitialConnectionHandler::handleInitialConnection(
         rc = scheduleRead(errStream, context);
     }
     else {
-        rc = d_negotiator_mp->negotiateOutboundOrReverse(
-            errStream,
-            context->negotiationContext());
+        rc = d_negotiator_mp->negotiateOutbound(errStream,
+                                                context->negotiationContext());
 
         // Send outbound request success, continue to read
         if (rc == 0) {

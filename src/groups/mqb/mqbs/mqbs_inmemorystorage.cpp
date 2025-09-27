@@ -174,9 +174,10 @@ InMemoryStorage::put(mqbi::StorageMessageAttributes*     attributes,
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(appData);
-    BSLS_ASSERT_SAFE(appData->length() == attributes->appDataLen());
+    BSLS_ASSERT_SAFE(static_cast<unsigned int>(appData->length()) ==
+                     attributes->appDataLen());
 
-    const int    msgSize  = attributes->appDataLen();
+    const int    msgSize  = static_cast<int>(attributes->appDataLen());
     unsigned int refCount = attributes->refCount();
     // Proxies are unaware of the number of apps unlike Replicas.
     // The latter can check for duplicates.
@@ -524,19 +525,16 @@ int InMemoryStorage::gcExpiredMessages(
     return numMsgsDeleted;
 }
 
-bool InMemoryStorage::gcHistory()
+int InMemoryStorage::gcHistory(bsls::Types::Int64 now)
 {
-    bool hasMoreToGc = d_items.gc(bmqsys::Time::highResolutionTimer(),
-                                  k_GC_MESSAGES_BATCH_SIZE);
-
-    if (queue()) {
+    const int rc = d_items.gc(now, k_GC_MESSAGES_BATCH_SIZE);
+    if (0 != rc && queue()) {
         queue()
             ->stats()
             ->onEvent<mqbstat::QueueStatsDomain::EventType::e_UPDATE_HISTORY>(
                 d_items.historySize());
     }
-
-    return hasMoreToGc;
+    return rc;
 }
 
 void InMemoryStorage::selectForAutoConfirming(const bmqt::MessageGUID& msgGUID)
@@ -547,10 +545,8 @@ void InMemoryStorage::selectForAutoConfirming(const bmqt::MessageGUID& msgGUID)
 
 mqbi::StorageResult::Enum
 InMemoryStorage::autoConfirm(const mqbu::StorageKey& appKey,
-                             bsls::Types::Uint64     timestamp)
+                             BSLA_UNUSED bsls::Types::Uint64 timestamp)
 {
-    (void)timestamp;
-
     d_autoConfirms.emplace_back(appKey);
 
     return mqbi::StorageResult::e_SUCCESS;

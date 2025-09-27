@@ -28,6 +28,7 @@
 #include <bsl_iostream.h>
 #include <bsl_limits.h>
 #include <bsl_string.h>
+#include <bsla_annotations.h>
 #include <bslmt_semaphore.h>
 #include <bslmt_threadattributes.h>
 #include <bslmt_threadutil.h>
@@ -39,7 +40,7 @@
 #include <bmqtst_testhelper.h>
 
 // BENCHMARKING LIBRARY
-#ifdef BSLS_PLATFORM_OS_LINUX
+#ifdef BMQTST_BENCHMARK_ENABLED
 #include <benchmark/benchmark.h>
 #endif
 
@@ -204,10 +205,10 @@ static void test1_MonitoredQueue_breathingTest()
         //
         // Verify timed popFront is undefined
         // // int                      item    = -1;
-        // const bsls::TimeInterval timeout = bsls::TimeInterval(
+        // BSLA_MAYBE_UNUSED const bsls::TimeInterval timeout =
+        // bsls::TimeInterval(
         //     0, 5 * bdlt::TimeUnitRatio::k_NANOSECONDS_PER_MILLISECOND);
         // BMQTST_ASSERT_SAFE_FAIL(queue.timedPopFront(&item, timeout));
-        // (void)timeout;  // prod-build compiler happiness
 
         // popfront two items
         item = -1;
@@ -554,7 +555,7 @@ static void testN1_MonitoredQueue_performance()
     PRINT("s_antiOptimization = " << s_antiOptimization);
 }
 
-#ifdef BSLS_PLATFORM_OS_LINUX
+#ifdef BMQTST_BENCHMARK_ENABLED
 static void
 testN1_MonitoredQueue_performance_GoogleBenchmark(benchmark::State& state)
 // ------------------------------------------------------------------------
@@ -814,7 +815,7 @@ static void testN1_bdlccFixedQueueThreaded_performance_GoogleBenchmark(
         }
     }
 }
-#endif  // BSLS_PLATFORM_OS_LINUX
+#endif  // BMQTST_BENCHMARK_ENABLED
 
 //=============================================================================
 //                                MAIN PROGRAM
@@ -829,7 +830,7 @@ int main(int argc, char* argv[])
     case 2: test2_MonitoredQueue_reset(); break;
     case 1: test1_MonitoredQueue_breathingTest(); break;
     case -1:
-#ifdef BSLS_PLATFORM_OS_LINUX
+#ifdef BMQTST_BENCHMARK_ENABLED
         BENCHMARK(testN1_MonitoredQueue_performance_GoogleBenchmark)
             ->Unit(benchmark::kMillisecond);
         BENCHMARK(testN1_MonitoredQueueThreaded_performance_GoogleBenchmark)

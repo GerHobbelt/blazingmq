@@ -67,6 +67,7 @@
 #include <bsl_streambuf.h>
 #include <bsl_string.h>
 #include <bsl_vector.h>
+#include <bsla_annotations.h>
 #include <bslim_printer.h>
 #include <bslma_allocator.h>
 #include <bsls_assert.h>
@@ -267,14 +268,6 @@ struct ProtocolUtil {
     /// `length`.  Note that `length` can be less than length of the `blob`.
     static int calcUnpaddedLength(const bdlbb::Blob& blob, int length);
 
-    /// Return true if the specified `value` is a valid padding byte for a
-    /// word sized alignment and false otherwise.
-    static bool isValidWordPaddingByte(char value);
-
-    /// Return true if the specified `value` is a valid padding byte for a
-    /// double word sized alignment and false otherwise.
-    static bool isValidDWordPaddingByte(char value);
-
     /// HEARTBEAT
     ///---------
     static const bdlbb::Blob& heartbeatReqBlob();
@@ -283,22 +276,6 @@ struct ProtocolUtil {
     /// blob corresponding to a heartbeat request or heartbeat response
     /// event.
     static const bdlbb::Blob& heartbeatRspBlob();
-
-    /// Hex/Binary conversion
-    ///---------------------
-
-    /// Load into the specified `buffer` of specified `length` the binary
-    /// representation of the specified hexadecimal `hex` buffer.  The
-    /// behavior is undefined unless length of `hex` buffer is twice
-    /// `length`.
-    static void hexToBinary(char* buffer, int length, const char* hex);
-
-    /// Load into the specified `buffer` the hex representation of the
-    /// specified `binary` buffer of the specified `binaryBufferlength`
-    /// size.  The behavior is undefined unless the length of `buffer` is
-    /// twice `binaryBufferlength`.
-    static void
-    binaryToHex(char* buffer, const char* binary, int binaryBufferlength);
 
     /// Message encoding/decoding
     ///-------------------------
@@ -1114,10 +1091,10 @@ ProtocolUtil::QueueInfo<VALUE>::insert(const bsl::string& appId,
     iterator itStream(result.first);
 
     for (size_t i = 0; i < subscriptions.size(); ++i) {
-        bsl::pair<typename SubscriptionsMap::iterator, bool> insertRC =
-            d_subscriptions.insert(bsl::make_pair(subscriptions[i], itStream));
+        BSLA_MAYBE_UNUSED bsl::pair<typename SubscriptionsMap::iterator, bool>
+                          insertRC = d_subscriptions.insert(
+                bsl::make_pair(subscriptions[i], itStream));
         BSLS_ASSERT_SAFE(insertRC.second);
-        (void)insertRC;
     }
     return itStream;
 }
@@ -1319,10 +1296,10 @@ inline void ProtocolUtil::QueueInfo<VALUE>::addSubscriptions(
     for (Subscriptions::const_iterator it = subscriptions.begin();
          it != subscriptions.end();
          ++it) {
-        bsl::pair<typename SubscriptionsMap::iterator, bool> insertRC =
-            d_subscriptions.insert(bsl::make_pair(it->sId(), itStream));
+        BSLA_MAYBE_UNUSED bsl::pair<typename SubscriptionsMap::iterator, bool>
+                          insertRC = d_subscriptions.insert(
+                bsl::make_pair(it->sId(), itStream));
         BSLS_ASSERT_SAFE(insertRC.second);
-        (void)insertRC;
     }
 }
 

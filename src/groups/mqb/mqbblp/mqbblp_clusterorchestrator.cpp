@@ -75,6 +75,16 @@ void ClusterOrchestrator::processElectorEventDispatched(
     BSLS_ASSERT_SAFE(event.isValid());
     BSLS_ASSERT_SAFE(source);
 
+    if (d_clusterData_p->membership().selfNodeStatus() ==
+        bmqp_ctrlmsg::NodeStatus::E_STOPPING) {
+        // No need to process the event since self is stopping.
+        BALL_LOG_INFO << d_cluster_p->description()
+                      << ": Not processing elector event from node "
+                      << source->nodeDescription()
+                      << " since self is stopping.";
+        return;  // RETURN
+    }
+
     d_elector_mp->processEvent(event, source);
 }
 
@@ -119,15 +129,15 @@ void ClusterOrchestrator::onElectorStateChange(
     }
 }
 
-void ClusterOrchestrator::electorTransitionToDormant(int leaderNodeId,
-                                                     bsls::Types::Uint64 term)
+void ClusterOrchestrator::electorTransitionToDormant(
+    BSLA_MAYBE_UNUSED int leaderNodeId,
+    bsls::Types::Uint64   term)
 {
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
     BSLS_ASSERT(mqbnet::Elector::k_INVALID_NODE_ID == leaderNodeId);
-    (void)leaderNodeId;  // Compiler happiness
 
     if (mqbnet::ElectorState::e_DORMANT ==
         d_clusterData_p->electorInfo().electorState()) {
@@ -226,8 +236,8 @@ void ClusterOrchestrator::electorTransitionToFollower(int leaderNodeId,
 }
 
 void ClusterOrchestrator::electorTransitionToCandidate(
-    int                 leaderNodeId,
-    bsls::Types::Uint64 term)
+    BSLA_MAYBE_UNUSED int leaderNodeId,
+    bsls::Types::Uint64   term)
 {
     // executed by the cluster *DISPATCHER* thread
 
@@ -236,7 +246,6 @@ void ClusterOrchestrator::electorTransitionToCandidate(
     BSLS_ASSERT(mqbnet::ElectorState::e_CANDIDATE !=
                 d_clusterData_p->electorInfo().electorState());
     BSLS_ASSERT(mqbnet::Elector::k_INVALID_NODE_ID == leaderNodeId);
-    (void)leaderNodeId;  // Compiler happiness
 
     d_clusterData_p->electorInfo().setElectorInfo(
         mqbnet::ElectorState::e_CANDIDATE,
@@ -245,8 +254,9 @@ void ClusterOrchestrator::electorTransitionToCandidate(
         mqbc::ElectorInfoLeaderStatus::e_UNDEFINED);
 }
 
-void ClusterOrchestrator::electorTransitionToLeader(int leaderNodeId,
-                                                    bsls::Types::Uint64 term)
+void ClusterOrchestrator::electorTransitionToLeader(
+    BSLA_MAYBE_UNUSED int leaderNodeId,
+    bsls::Types::Uint64   term)
 {
     // executed by the *DISPATCHER* thread
 
@@ -257,7 +267,6 @@ void ClusterOrchestrator::electorTransitionToLeader(int leaderNodeId,
         leaderNodeId);
     BSLS_ASSERT_SAFE(mqbnet::ElectorState::e_CANDIDATE ==
                      d_clusterData_p->electorInfo().electorState());
-    (void)leaderNodeId;  // Compiler happiness
 
     // The 'leaderMessageSequence' of this node should NOT be updated with new
     // term and sequenceNum of zero, because it will be used during leader
@@ -508,71 +517,6 @@ void ClusterOrchestrator::dropPeerQueues(mqbc::ClusterNodeSession* ns)
     }
 }
 
-void ClusterOrchestrator::timerCb()
-{
-    // executed by the *SCHEDULER* thread
-
-    d_clusterData_p->dispatcherClientData().dispatcher()->execute(
-        bdlf::BindUtil::bind(&ClusterOrchestrator::timerCbDispatched, this),
-        &d_clusterData_p->cluster());
-}
-
-void ClusterOrchestrator::timerCbDispatched()
-{
-    // executed by the *CLUSTER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        dispatcher()->inDispatcherThread(&d_clusterData_p->cluster()));
-
-    const bsls::Types::Int64 timer = bmqsys::Time::highResolutionTimer();
-
-    for (size_t partitionId = 0;
-         partitionId < clusterState()->partitions().size();
-         ++partitionId) {
-        if (!clusterState()->isSelfActivePrimary(partitionId)) {
-            continue;  // CONTINUE
-        }
-
-        const mqbs::FileStore& fs = d_storageManager_p->fileStore(partitionId);
-
-        if (!fs.isOpen()) {
-            continue;  // CONTINUE
-        }
-
-        dispatcher()->execute(
-            bdlf::BindUtil::bind(&ClusterOrchestrator::onQueueActivityTimer,
-                                 this,
-                                 timer,
-                                 partitionId),
-            fs.dispatcherClientData());
-    }
-}
-
-void ClusterOrchestrator::onQueueActivityTimer(bsls::Types::Int64 timer,
-                                               int                partitionId)
-{
-    // executed by *QUEUE_DISPATCHER* thread associated with 'partitionId'
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_storageManager_p->fileStore(partitionId).inDispatcherThread());
-
-    struct local {
-        static void onTimerFunctor(mqbi::Queue*       _queue,
-                                   bsls::Types::Int64 _timer)
-        {
-            _queue->queueEngine()->onTimer(_timer);
-        }
-    };
-
-    d_storageManager_p->applyForEachQueue(
-        partitionId,
-        bdlf::BindUtil::bind(local::onTimerFunctor,
-                             bdlf::PlaceHolders::_1,  // queue
-                             timer));
-}
-
 // CREATORS
 ClusterOrchestrator::ClusterOrchestrator(
     mqbcfg::ClusterDefinition& clusterConfig,
@@ -719,14 +663,6 @@ int ClusterOrchestrator::start(bsl::ostream& errorDescription)
         errorDescription << "Failed to start elector";
         return rc * 10 + rc_ELECTOR_FAILURE;  // RETURN
     }
-
-    bsls::TimeInterval interval;
-    interval.setTotalMilliseconds(
-        d_clusterConfig.queueOperations().consumptionMonitorPeriodMs());
-    d_clusterData_p->scheduler().scheduleRecurringEvent(
-        &d_consumptionMonitorEventHandle,
-        interval,
-        bdlf::BindUtil::bind(&ClusterOrchestrator::timerCb, this));
 
     d_isStarted = true;
     return rc_SUCCESS;
@@ -1291,16 +1227,6 @@ void ClusterOrchestrator::processElectorEvent(const bmqp::Event&   event,
         return;  // RETURN
     }
 
-    if (d_clusterData_p->membership().selfNodeStatus() ==
-        bmqp_ctrlmsg::NodeStatus::E_STOPPING) {
-        // No need to process the event since self is stopping.
-        BALL_LOG_INFO << d_cluster_p->description()
-                      << ": Not processing elector event from node "
-                      << source->nodeDescription()
-                      << " since self is stopping.";
-        return;  // RETURN
-    }
-
     // Enqueue elector events in the dispatcher thread as well.  Note that its
     // important that elector events are processed in the dispatcher thread
     // too, otherwise, depending upon thread scheduling, a new node may get
@@ -1341,18 +1267,6 @@ void ClusterOrchestrator::processQueueAssignmentRequest(
         d_cluster_p->dispatcher()->inDispatcherThread(d_cluster_p));
 
     d_stateManager_mp->processQueueAssignmentRequest(request, requester);
-}
-
-void ClusterOrchestrator::processQueueAssignmentAdvisory(
-    const bmqp_ctrlmsg::ControlMessage& message,
-    mqbnet::ClusterNode*                source)
-{
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
-
-    d_stateManager_mp->processQueueAssignmentAdvisory(message, source);
 }
 
 void ClusterOrchestrator::processQueueUnassignedAdvisory(
@@ -1402,30 +1316,6 @@ void ClusterOrchestrator::processClusterStateEvent(
     BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
 
     d_stateManager_mp->processClusterStateEvent(event);
-}
-
-void ClusterOrchestrator::processPartitionPrimaryAdvisory(
-    const bmqp_ctrlmsg::ControlMessage& message,
-    mqbnet::ClusterNode*                source)
-{
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
-
-    d_stateManager_mp->processPartitionPrimaryAdvisory(message, source);
-}
-
-void ClusterOrchestrator::processLeaderAdvisory(
-    const bmqp_ctrlmsg::ControlMessage& message,
-    mqbnet::ClusterNode*                source)
-{
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
-
-    d_stateManager_mp->processLeaderAdvisory(message, source);
 }
 
 void ClusterOrchestrator::processStorageSyncRequest(
@@ -1609,6 +1499,7 @@ void ClusterOrchestrator::processPrimaryStatusAdvisory(
     // This routine is invoked when the status of a primary 'source' node has
     // changed.
 
+    BSLS_ASSERT_SAFE(source);
     BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
     BSLS_ASSERT_SAFE(message.choice()
                          .clusterMessage()
@@ -1751,7 +1642,7 @@ void ClusterOrchestrator::processPrimaryStatusAdvisory(
                       << ". Self node status: "
                       << d_clusterData_p->membership().selfNodeStatus();
 
-        if (pinfo.primaryNode() == source) {
+        if (pinfo.primaryNodeId() == source->nodeId()) {
             // Self node is receiving primary status advisory the second time.
 
             BSLS_ASSERT_SAFE(pinfo.primaryLeaseId() ==
@@ -1761,9 +1652,6 @@ void ClusterOrchestrator::processPrimaryStatusAdvisory(
                 ns->isPrimaryForPartition(primaryAdv.partitionId()));
         }
         else {
-            if (!d_cluster_p->isCSLModeEnabled()) {
-                ns->addPartitionRaw(primaryAdv.partitionId());
-            }
             d_stateManager_mp->setPrimary(primaryAdv.partitionId(),
                                           primaryAdv.primaryLeaseId(),
                                           source);

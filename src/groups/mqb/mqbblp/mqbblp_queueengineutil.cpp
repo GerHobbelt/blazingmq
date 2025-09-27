@@ -54,6 +54,7 @@
 #include <bsl_fstream.h>
 #include <bsl_iostream.h>
 #include <bsl_string.h>
+#include <bsla_annotations.h>
 #include <bsls_assert.h>
 #include <bsls_performancehint.h>
 #include <bsls_timeinterval.h>
@@ -208,10 +209,11 @@ int QueueEngineUtil::validateUri(
     mqbi::QueueHandle*                         handle,
     const mqbi::QueueHandleRequesterContext&   clientContext)
 {
-    bmqt::Uri   uri;
-    bsl::string error;
-    int rc = bmqt::UriParser::parse(&uri, &error, handleParameters.uri());
-    (void)rc;  // compiler happiness
+    bmqt::Uri       uri;
+    bsl::string     error;
+    BSLA_UNUSED int rc = bmqt::UriParser::parse(&uri,
+                                                &error,
+                                                handleParameters.uri());
     if (handle->queue()->uri().canonical() != uri.canonical()) {
         BALL_LOG_ERROR_BLOCK
         {
@@ -1472,6 +1474,58 @@ void QueueEngineUtil_AppState::reportStats(
             timeDelta,
             appId());
     }
+}
+
+bool QueueEngineUtil_AppState::getOldestMessageIterator(
+    bslma::ManagedPtr<mqbi::StorageIterator>* out)
+{
+    // PRECONDITIONS
+
+    BSLS_ASSERT_SAFE(d_queue_p->storage());
+
+    bool isFound = false;
+
+    // Check in the following order: redelivery list, put aside list and resume
+    // point.
+    isFound = getOldestMessageIteratorFromList(out, d_redeliveryList);
+
+    if (!isFound) {
+        isFound = getOldestMessageIteratorFromList(out, d_putAsideList);
+    }
+
+    if (!isFound && !d_resumePoint.isUnset()) {
+        mqbi::StorageResult::Enum res =
+            d_queue_p->storage()->getIterator(out, d_appKey, d_resumePoint);
+        isFound = (res == mqbi::StorageResult::e_SUCCESS);
+    }
+
+    return isFound;
+}
+
+bool QueueEngineUtil_AppState::getOldestMessageIteratorFromList(
+    bslma::ManagedPtr<mqbi::StorageIterator>* out,
+    RedeliveryList&                           list)
+{
+    if (list.empty()) {
+        return false;  // RETURN
+    }
+
+    RedeliveryList::iterator it = list.begin();
+
+    // Iterate through the list until the oldest valid message is found.
+    while (!list.isEnd(it)) {
+        mqbi::StorageResult::Enum res =
+            d_queue_p->storage()->getIterator(out, d_appKey, *it);
+        if (res == mqbi::StorageResult::e_SUCCESS) {
+            // Successfully retrieved an iterator for the message.
+            return true;  // RETURN
+        }
+
+        list.next(&it);
+    }
+
+    // There is no valid message in the list.
+    return false;
 }
 
 }  // close namespace mqbblp

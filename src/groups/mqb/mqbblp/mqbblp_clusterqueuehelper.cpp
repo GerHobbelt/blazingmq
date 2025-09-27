@@ -144,7 +144,8 @@ void afterAppIdUnregisteredDispatched(
     queue->queueEngine()->afterAppIdUnregistered(appInfos);
 }
 
-void handleHolderDummy(const bsl::shared_ptr<mqbi::QueueHandle>& handle)
+void handleHolderDummy(
+    BSLA_MAYBE_UNUSED const bsl::shared_ptr<mqbi::QueueHandle>& handle)
 {
     // executed by ONE of the *QUEUE* dispatcher threads
 
@@ -1914,9 +1915,9 @@ bool ClusterQueueHelper::createQueue(
             context->d_handleParameters),
         d_allocator_p);
 
-    bdlma::LocalSequentialAllocator<1024>      la(d_allocator_p);
-    bmqu::MemOutStream                         errorDescription(&la);
-    bmqp_ctrlmsg::Status                       status;
+    bdlma::LocalSequentialAllocator<1024> la(d_allocator_p);
+    bmqu::MemOutStream                    errorDescription(&la);
+    bmqp_ctrlmsg::Status                  status;
 
     bsl::shared_ptr<mqbi::Queue> queue = createQueueFactory(errorDescription,
                                                             *context,
@@ -4061,9 +4062,6 @@ void ClusterQueueHelper::onQueueAssigned(
     QueueContextSp      queueContext;
     QueueContextMapIter queueContextIt = d_queues.find(info->uri());
 
-    mqbc::ClusterState::DomainState& domainState =
-        *d_clusterState_p->domainStates().at(info->uri().qualifiedDomain());
-
     if (queueContextIt != d_queues.end()) {
         // We already have a queueContext created for that queue
         queueContext = queueContextIt->second;
@@ -4106,6 +4104,8 @@ void ClusterQueueHelper::onQueueAssigned(
 
         d_queues[info->uri()] = queueContext;
     }
+    mqbc::ClusterState::DomainState& domainState =
+        *d_clusterState_p->domainStates().at(info->uri().qualifiedDomain());
 
     domainState.adjustQueueCount(1);
 
@@ -4116,30 +4116,25 @@ void ClusterQueueHelper::onQueueAssigned(
     BALL_LOG_INFO << d_cluster_p->description()
                   << ": Assigned queue: " << *info;
 
-    // Note: In non-CSL mode, the queue creation callback is instead invoked at
-    // replica nodes when they receive a queue creation record from the primary
-    // in the partition stream.
-    if (d_cluster_p->isCSLModeEnabled()) {
-        if (!d_clusterState_p->isSelfPrimary(info->partitionId())) {
-            // This is a replica node
+    if (!d_clusterState_p->isSelfPrimary(info->partitionId())) {
+        // This is a replica node
 
-            // Note: It's possible that the queue has already been registered
-            // in the StorageMgr if it was a queue found during storage
-            // recovery. Therefore, we will allow for duplicate registration
-            // which will simply result in a no-op.
-            d_storageManager_p->registerQueueReplica(info->partitionId(),
-                                                     info->uri(),
-                                                     info->key(),
-                                                     domainState.domain(),
-                                                     true);  // allowDuplicate
+        // Note: It's possible that the queue has already been registered
+        // in the StorageMgr if it was a queue found during storage
+        // recovery. Therefore, we will allow for duplicate registration
+        // which will simply result in a no-op.
+        d_storageManager_p->registerQueueReplica(info->partitionId(),
+                                                 info->uri(),
+                                                 info->key(),
+                                                 domainState.domain(),
+                                                 true);  // allowDuplicate
 
-            d_storageManager_p->updateQueueReplica(info->partitionId(),
-                                                   info->uri(),
-                                                   info->key(),
-                                                   info->appInfos(),
-                                                   domainState.domain(),
-                                                   true);  // allowDuplicate
-        }
+        d_storageManager_p->updateQueueReplica(info->partitionId(),
+                                               info->uri(),
+                                               info->key(),
+                                               info->appInfos(),
+                                               domainState.domain(),
+                                               true);  // allowDuplicate
     }
 
     // NOTE: Even if it is not needed to invoke 'onQueueContextAssigned' in the
@@ -4276,16 +4271,10 @@ void ClusterQueueHelper::onQueueUnassigned(
             removeQueueRaw(queueContextIt);
         }
 
-        // Note: In non-CSL mode, the queue deletion callback is instead
-        // invoked at nodes when they receive a queue deletion record from the
-        // primary in the partition stream.
-
-        if (d_cluster_p->isCSLModeEnabled()) {
-            d_storageManager_p->unregisterQueueReplica(info->partitionId(),
-                                                       info->uri(),
-                                                       info->key(),
-                                                       mqbu::StorageKey());
-        }
+        d_storageManager_p->unregisterQueueReplica(info->partitionId(),
+                                                   info->uri(),
+                                                   info->key(),
+                                                   mqbu::StorageKey());
     }
 
     d_clusterState_p->queueKeys().erase(info->key());
@@ -4297,10 +4286,11 @@ void ClusterQueueHelper::onQueueUnassigned(
                   << ": Unassigned queue: " << *info;
 }
 
-void ClusterQueueHelper::onQueueUpdated(const bmqt::Uri&   uri,
-                                        const bsl::string& domain,
-                                        const AppInfos&    addedAppIds,
-                                        const AppInfos&    removedAppIds)
+void ClusterQueueHelper::onQueueUpdated(
+    const bmqt::Uri&        uri,
+    BSLA_MAYBE_UNUSED const bsl::string& domain,
+    const AppInfos&                      addedAppIds,
+    const AppInfos&                      removedAppIds)
 {
     // executed by the cluster *DISPATCHER* thread
 
@@ -4325,34 +4315,27 @@ void ClusterQueueHelper::onQueueUpdated(const bmqt::Uri&   uri,
     const int      partitionId  = queueContext.partitionId();
     BSLS_ASSERT_SAFE(partitionId != mqbs::DataStore::k_INVALID_PARTITION_ID);
 
-    if (d_cluster_p->isCSLModeEnabled()) {
+    if (!d_clusterState_p->isSelfPrimary(partitionId) || queue == 0) {
+        d_storageManager_p->updateQueueReplica(partitionId,
+                                               uri,
+                                               queueContext.key(),
+                                               addedAppIds,
+                                               d_clusterState_p->domainStates()
+                                                   .at(uri.qualifiedDomain())
+                                                   ->domain());
+    }
+
+    for (AppInfos::const_iterator cit = removedAppIds.cbegin();
+         cit != removedAppIds.cend();
+         ++cit) {
         if (!d_clusterState_p->isSelfPrimary(partitionId) || queue == 0) {
-            // Note: In non-CSL mode, the queue creation callback is
-            // invoked at replica nodes when they receive a queue creation
+            // Note: In non-CSL mode, the queue deletion callback is
+            // invoked at replica nodes when they receive a queue deletion
             // record from the primary in the partition stream.
-
-            d_storageManager_p->updateQueueReplica(
-                partitionId,
-                uri,
-                queueContext.key(),
-                addedAppIds,
-                d_clusterState_p->domainStates()
-                    .at(uri.qualifiedDomain())
-                    ->domain());
-        }
-
-        for (AppInfos::const_iterator cit = removedAppIds.cbegin();
-             cit != removedAppIds.cend();
-             ++cit) {
-            if (!d_clusterState_p->isSelfPrimary(partitionId) || queue == 0) {
-                // Note: In non-CSL mode, the queue deletion callback is
-                // invoked at replica nodes when they receive a queue deletion
-                // record from the primary in the partition stream.
-                d_storageManager_p->unregisterQueueReplica(partitionId,
-                                                           uri,
-                                                           queueContext.key(),
-                                                           cit->second);
-            }
+            d_storageManager_p->unregisterQueueReplica(partitionId,
+                                                       uri,
+                                                       queueContext.key(),
+                                                       cit->second);
         }
     }
 
@@ -4694,7 +4677,7 @@ void ClusterQueueHelper::openQueue(
         QueueContextSp queueContext;
         queueContext.createInplace(d_allocator_p, uriKey, d_allocator_p);
 
-        d_queues[uriKey]         = queueContext;
+        d_queues[uriKey] = queueContext;
         context->setQueueContext(queueContext.get());
 
         // Register the context to the pending list.
@@ -5156,13 +5139,12 @@ void ClusterQueueHelper::requestToStopPushing()
 }
 
 void ClusterQueueHelper::contextHolder(
-    const bsl::shared_ptr<StopContext>& contextSp,
-    const VoidFunctor&                  action)
+    BSLA_UNUSED const bsl::shared_ptr<StopContext>& contextSp,
+    const VoidFunctor&                              action)
 {
     if (action) {
         action();
     }
-    (void)contextSp;
 }
 
 void ClusterQueueHelper::sendErrorResponse(
@@ -6421,7 +6403,7 @@ void ClusterQueueHelper::loadState(
     int qIdx = 0;
     for (QueueContextMapConstIter it = d_queues.begin(); it != d_queues.end();
          ++it, ++qIdx) {
-        const QueueLiveState&                info = it->second->d_liveQInfo;
+        const QueueLiveState&                  info = it->second->d_liveQInfo;
         const bsl::vector<OpenQueueContextSp>& contexts =
             it->second->d_liveQInfo.d_pending;
         const int pid = it->second->partitionId();

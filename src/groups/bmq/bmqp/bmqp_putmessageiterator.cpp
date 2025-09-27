@@ -31,10 +31,30 @@
 // BDE
 #include <bdlma_localsequentialallocator.h>
 #include <bsl_iostream.h>
+#include <bsla_annotations.h>
 #include <bsls_performancehint.h>
 
 namespace BloombergLP {
 namespace bmqp {
+
+namespace {
+
+inline bool isValidWordPaddingByte(char value)
+{
+    switch (value) {
+    case 1: BSLA_FALLTHROUGH;
+    case 2: BSLA_FALLTHROUGH;
+    case 3: BSLA_FALLTHROUGH;
+    case 4: {
+        return true;  // RETURN
+    }
+    default: {
+        return false;  // RETURN
+    }
+    }
+}
+
+}  // close unnamed namespace
 
 // ------------------------
 // class PutMessageIterator
@@ -70,9 +90,8 @@ void PutMessageIterator::initCachedOptionsView() const
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(d_optionsView.isNull())) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         // Load options iterator
-        int rc = loadOptionsView(&d_optionsView.makeValue());
+        BSLA_MAYBE_UNUSED int rc = loadOptionsView(&d_optionsView.makeValue());
         BSLS_ASSERT_SAFE(rc == 0);
-        (void)rc;  // compiler happiness
     }
 
     // POSTCONDITIONS
@@ -107,7 +126,7 @@ int PutMessageIterator::compressedApplicationDataSize() const
                         .data()[lastBytePos.byte()];
 
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(
-            !ProtocolUtil::isValidWordPaddingByte(lastByte))) {
+            !isValidWordPaddingByte(lastByte))) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         // If the 'lastByte' is not a padding byte then message is malformed
         return -1;  // RETURN

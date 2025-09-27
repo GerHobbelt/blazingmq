@@ -296,9 +296,10 @@ FileBackedStorage::put(mqbi::StorageMessageAttributes*     attributes,
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(appData);
-    BSLS_ASSERT_SAFE(appData->length() == attributes->appDataLen());
+    BSLS_ASSERT_SAFE(static_cast<unsigned int>(appData->length()) ==
+                     attributes->appDataLen());
 
-    const int msgSize = attributes->appDataLen();
+    const int msgSize = static_cast<int>(attributes->appDataLen());
 
     // Store the specified message in the 'physical' as well as *all*
     // virtual storages.
@@ -854,16 +855,15 @@ int FileBackedStorage::gcExpiredMessages(
     return numMsgsDeleted;
 }
 
-bool FileBackedStorage::gcHistory()
+int FileBackedStorage::gcHistory(bsls::Types::Int64 now)
 {
-    bool hasMoreToGc = d_handles.gc(bmqsys::Time::highResolutionTimer(),
-                                    k_GC_MESSAGES_BATCH_SIZE);
-
-    d_queueStats_sp
-        ->onEvent<mqbstat::QueueStatsDomain::EventType::e_UPDATE_HISTORY>(
-            d_handles.historySize());
-
-    return hasMoreToGc;
+    const int rc = d_handles.gc(now, k_GC_MESSAGES_BATCH_SIZE);
+    if (0 != rc) {
+        d_queueStats_sp
+            ->onEvent<mqbstat::QueueStatsDomain::EventType::e_UPDATE_HISTORY>(
+                d_handles.historySize());
+    }
+    return rc;
 }
 
 void FileBackedStorage::processMessageRecord(

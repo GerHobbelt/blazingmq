@@ -30,6 +30,7 @@
 
 // BDE
 #include <bsl_string.h>
+#include <bsla_annotations.h>
 #include <bsls_assert.h>
 
 namespace BloombergLP {
@@ -40,7 +41,8 @@ namespace mqbc {
 // ===================
 int RecoveryUtil::loadFileDescriptors(mqbs::MappedFileDescriptor* journalFd,
                                       mqbs::MappedFileDescriptor* dataFd,
-                                      const mqbs::FileStoreSet&   fileSet)
+                                      const mqbs::FileStoreSet&   fileSet,
+                                      mqbs::MappedFileDescriptor* qlistFd)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(journalFd);
@@ -56,7 +58,8 @@ int RecoveryUtil::loadFileDescriptors(mqbs::MappedFileDescriptor* journalFd,
     int                rc = mqbs::FileStoreUtil::openFileSetReadMode(errorDesc,
                                                       fileSet,
                                                       journalFd,
-                                                      dataFd);
+                                                      dataFd,
+                                                      qlistFd);
     if (rc != 0) {
         BALL_LOG_WARN << "File set: " << fileSet
                       << " failed to open. Reason: " << errorDesc.str()
@@ -64,15 +67,19 @@ int RecoveryUtil::loadFileDescriptors(mqbs::MappedFileDescriptor* journalFd,
         return rc * 10 + rc_FAIL_OPEN_FILE_SET;  // RETURN
     }
 
-    rc = mqbs::FileStoreUtil::validateFileSet(*journalFd,
-                                              *dataFd,
-                                              mqbs::MappedFileDescriptor());
+    rc = mqbs::FileStoreUtil::validateFileSet(
+        *journalFd,
+        *dataFd,
+        qlistFd ? *qlistFd : mqbs::MappedFileDescriptor());
     if (rc != 0) {
         // Close this set
         BALL_LOG_ERROR << "File set: " << fileSet
                        << " validation failed, rc: " << rc;
         mqbs::FileSystemUtil::close(journalFd);
         mqbs::FileSystemUtil::close(dataFd);
+        if (qlistFd) {
+            mqbs::FileSystemUtil::close(qlistFd);
+        }
         return rc * 10 + rc_INVALID_FILE_SET;  // RETURN
     }
 
@@ -197,19 +204,15 @@ int RecoveryUtil::loadOffsets(
 }
 
 void RecoveryUtil::validateArgs(
-    const bmqp_ctrlmsg::PartitionSequenceNumber& beginSeqNum,
-    const bmqp_ctrlmsg::PartitionSequenceNumber& endSeqNum,
-    mqbnet::ClusterNode*                         destination)
+    BSLA_MAYBE_UNUSED const bmqp_ctrlmsg::PartitionSequenceNumber& beginSeqNum,
+    BSLA_MAYBE_UNUSED const bmqp_ctrlmsg::PartitionSequenceNumber& endSeqNum,
+    BSLA_MAYBE_UNUSED mqbnet::ClusterNode* destination)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(beginSeqNum < endSeqNum);
     BSLS_ASSERT_SAFE(0 < endSeqNum.primaryLeaseId());
     BSLS_ASSERT_SAFE(0 < endSeqNum.sequenceNumber());  // TBD: Is this ok?
     BSLS_ASSERT_SAFE(destination);
-
-    (void)beginSeqNum;  // Compiler happiness
-    (void)endSeqNum;    // Compiler happiness
-    (void)destination;  // Compiler happiness
 }
 
 int RecoveryUtil::bootstrapCurrentSeqNum(
@@ -300,13 +303,14 @@ void RecoveryUtil::processJournalRecord(
     int*                              payloadRecordLen,
     const mqbs::JournalFileIterator&  journalIt,
     const mqbs::MappedFileDescriptor& dataFd,
-    bool                              fsmWorkflow,
+    bool                              qlistAware,
     const mqbs::MappedFileDescriptor& qlistFd)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(storageMsgType);
     BSLS_ASSERT_SAFE(payloadRecordBase);
     BSLS_ASSERT_SAFE(payloadRecordLen);
+    BSLS_ASSERT_SAFE(qlistAware == qlistFd.isValid());
 
     if (mqbs::RecordType::e_JOURNAL_OP == journalIt.recordType()) {
         *storageMsgType = bmqp::StorageMessageType::e_JOURNAL_OP;
@@ -317,7 +321,7 @@ void RecoveryUtil::processJournalRecord(
         BSLS_ASSERT_SAFE(mqbs::QueueOpType::e_UNDEFINED != rec.type());
 
         // We dont fetch queue related records from qlistFd.
-        if (fsmWorkflow) {
+        if (!qlistAware) {
             if (mqbs::QueueOpType::e_CREATION == rec.type() ||
                 mqbs::QueueOpType::e_ADDITION == rec.type()) {
                 *storageMsgType = bmqp::StorageMessageType::e_QLIST;
