@@ -143,7 +143,7 @@ struct CommandDefinition {
     {"CLUSTERS CLUSTER <name> STORAGE REPLICATION [GET|GET_ALL] <parameter>",
      "Get the value of the replication 'parameter' of cluster 'name'",
      "Get the value of the replication 'parameter' of cluster 'name'. If "
-     "GET_ALL is used then get the paramter value for all nodes in the "
+     "GET_ALL is used then get the parameter value for all nodes in the "
      "cluster."},
     {"CLUSTERS CLUSTER <name> STORAGE REPLICATION LIST_TUNABLES",
      "Get the supported settable parameters for the replication of cluster "
@@ -153,7 +153,7 @@ struct CommandDefinition {
     {"CLUSTERS CLUSTER <name> STATE ELECTOR [SET|SET_ALL] <parameter> <value>",
      "Set the 'parameter' of the elector of cluster 'name' to 'value'",
      "Set the 'parameter' of the elector of cluster 'name' to 'value'. If "
-     "SET_ALL is used then set the paramter for all nodes in the cluster."},
+     "SET_ALL is used then set the parameter for all nodes in the cluster."},
     {"CLUSTERS CLUSTER <name> STATE ELECTOR [GET|GET_ALL] <parameter>",
      "Get the 'parameter' of the elector of cluster 'name'",
      "Get the 'parameter' of the elector of cluster 'name'. If GET_ALL is "
