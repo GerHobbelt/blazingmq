@@ -39,10 +39,10 @@
 #include <bdlt_currenttime.h>
 #include <bsl_atomic.h>
 #include <bsl_vector.h>
+#include <bsla_annotations.h>
 #include <bslmt_condition.h>
 #include <bslmt_mutex.h>
 #include <bslmt_threadutil.h>
-#include <bsls_annotation.h>
 #include <bsls_performancehint.h>
 
 // PROMETHEUS
@@ -160,7 +160,7 @@ PrometheusStatConsumer::~PrometheusStatConsumer()
 
 PrometheusStatConsumer::PrometheusStatConsumer(
     const StatContextsMap& statContextsMap,
-    BSLS_ANNOTATION_UNUSED bslma::Allocator* allocator)
+    BSLA_UNUSED bslma::Allocator* allocator)
 : d_contextsMap(statContextsMap)
 , d_publishInterval(0)
 , d_snapshotInterval(0)
@@ -180,8 +180,7 @@ PrometheusStatConsumer::PrometheusStatConsumer(
     d_channelsStatContext_p     = getStatContext("channels");
 }
 
-int PrometheusStatConsumer::start(
-    BSLS_ANNOTATION_UNUSED bsl::ostream& errorDescription)
+int PrometheusStatConsumer::start(BSLA_UNUSED bsl::ostream& errorDescription)
 {
     d_consumerConfig_p = mqbplug::StatConsumerUtil::findConsumerConfig(name());
     if (!d_consumerConfig_p) {
@@ -730,8 +729,12 @@ void PrometheusStatConsumer::captureClusterPartitionsStats()
             const bsl::string rollover_time = prefix + "rollover_time";
             const bsl::string journal_outstanding_bytes =
                 prefix + "journal_outstanding_bytes";
+            const bsl::string journal_utilization = prefix +
+                                                    "journal_utilization_max";
             const bsl::string data_outstanding_bytes =
                 prefix + "data_outstanding_bytes";
+            const bsl::string data_utilization = prefix +
+                                                 "data_utilization_max";
 
             const DatapointDef defs[] = {
                 {rollover_time.c_str(),
@@ -740,8 +743,15 @@ void PrometheusStatConsumer::captureClusterPartitionsStats()
                 {journal_outstanding_bytes.c_str(),
                  mqbstat::ClusterStats::Stat::e_PARTITION_JOURNAL_CONTENT,
                  false},
+                {journal_utilization.c_str(),
+                 mqbstat::ClusterStats::Stat::
+                     e_PARTITION_JOURNAL_UTILIZATION_MAX,
+                 false},
                 {data_outstanding_bytes.c_str(),
                  mqbstat::ClusterStats::Stat::e_PARTITION_DATA_CONTENT,
+                 false},
+                {data_utilization.c_str(),
+                 mqbstat::ClusterStats::Stat::e_PARTITION_DATA_UTILIZATION_MAX,
                  false}};
 
             Tagger tagger;

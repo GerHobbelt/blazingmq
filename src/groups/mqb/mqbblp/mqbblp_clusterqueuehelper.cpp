@@ -76,12 +76,12 @@
 #include <bsl_cstring.h>
 #include <bsl_iostream.h>
 #include <bsl_limits.h>
+#include <bsla_annotations.h>
 #include <bslma_allocator.h>
 #include <bslma_default.h>
 #include <bslma_managedptr.h>
 #include <bslmf_allocatorargt.h>
 #include <bslmf_assert.h>
-#include <bsls_annotation.h>
 #include <bsls_timeinterval.h>
 
 namespace BloombergLP {
@@ -2159,6 +2159,9 @@ void ClusterQueueHelper::onHandleReleasedDispatched(
 
     if (result.hasNoHandleClients() || (result.hasNoHandleStreamConsumers() &&
                                         result.hasNoHandleStreamProducers())) {
+        // Expect `handle` to be non-empty with these values in `result`
+        BSLS_ASSERT_SAFE(handle);
+
         // An event that may need erasing stream(s)
         CNSQueueHandleMapIter it = requester->queueHandles().find(queueId);
         if (it != requester->queueHandles().end()) {
@@ -2212,10 +2215,14 @@ void ClusterQueueHelper::onHandleReleasedDispatched(
     // Releasing the handle in the queue's thread allows to keep the handle
     // alive until the check is complete.
 
-    handle->queue()->dispatcher()->execute(
-        bdlf::BindUtil::bind(&handleHolderDummy, handle),
-        handle->queue(),
-        mqbi::DispatcherEventType::e_DISPATCHER);
+    if (handle) {
+        // We might call this callback with empty `handle`,
+        // no need to keep it alive in dispatcher in this case
+        handle->queue()->dispatcher()->execute(
+            bdlf::BindUtil::bind(&handleHolderDummy, handle),
+            handle->queue(),
+            mqbi::DispatcherEventType::e_DISPATCHER);
+    }
 }
 
 void ClusterQueueHelper::onHandleConfigured(
@@ -2629,9 +2636,8 @@ void ClusterQueueHelper::notifyQueue(QueueContext*       queueContext,
 }
 
 void ClusterQueueHelper::reconfigureCallback(
-    BSLS_ANNOTATION_UNUSED const bmqp_ctrlmsg::Status& status,
-    BSLS_ANNOTATION_UNUSED const bmqp_ctrlmsg::StreamParameters&
-                                 streamParameters)
+    BSLA_UNUSED const bmqp_ctrlmsg::Status& status,
+    BSLA_UNUSED const bmqp_ctrlmsg::StreamParameters& streamParameters)
 {
     onResponseToPendingQueueRequest();
 }
@@ -4080,23 +4086,6 @@ void ClusterQueueHelper::onQueueAssigned(
             return;  // RETURN
         }
         else {
-            if (1 == d_clusterState_p->queueKeys().count(info->key())) {
-                // Self node's queue context is unaware of the assigned queue,
-                // but queueKey specified in the advisory is present in the
-                // 'queueKeys' data structure.
-
-                BMQTSK_ALARMLOG_ALARM("CLUSTER_STATE")
-                    << d_cluster_p->description()
-                    << ": attempting to apply queue assignment for a known but"
-                    << " unassigned queue, but queueKey is not unique. "
-                    << "QueueKey [" << info->key() << "], URI [" << info->uri()
-                    << "], Partition [" << info->partitionId()
-                    << "]. Current leader is: '" << leaderDescription
-                    << "'. Ignoring this entry in the advisory."
-                    << BMQTSK_ALARMLOG_END;
-                return;  // RETURN
-            }
-
             // Update queue's mapping etc.
             BSLA_MAYBE_UNUSED mqbc::ClusterState::QueueKeysInsertRc insertRc =
                 d_clusterState_p->queueKeys().insert(info->key());
@@ -4106,21 +4095,9 @@ void ClusterQueueHelper::onQueueAssigned(
     else {
         // First time hearing about this queue.  Update 'queueKeys' and
         // ensure that queue key is unique.
-        mqbc::ClusterState::QueueKeysInsertRc insertRc =
+        BSLA_MAYBE_UNUSED mqbc::ClusterState::QueueKeysInsertRc insertRc =
             d_clusterState_p->queueKeys().insert(info->key());
-
-        if (false == insertRc.second) {
-            // QueueKey is not unique.
-
-            BMQTSK_ALARMLOG_ALARM("CLUSTER_STATE")
-                << d_cluster_p->description()
-                << ": attempting to apply queue assignment for an unknown "
-                << "queue [" << info->uri() << "] assigned to Partition ["
-                << info->partitionId() << "], but queueKey [" << info->key()
-                << "] is not unique. Current leader is: '" << leaderDescription
-                << "'. Ignoring this assignment." << BMQTSK_ALARMLOG_END;
-            return;  // RETURN
-        }
+        BSLS_ASSERT_SAFE(insertRc.second);
 
         // Create the queueContext.
         queueContext.reset(new (*d_allocator_p)
@@ -5753,8 +5730,7 @@ void ClusterQueueHelper::continueStopSequence(
     const QueueContextSp&               queueContextSp,
     unsigned int                        subId,
     const bmqp_ctrlmsg::Status&         status,
-    BSLS_ANNOTATION_UNUSED const        bmqp_ctrlmsg::StreamParameters&
-                                        streamParameters)
+    BSLA_UNUSED const bmqp_ctrlmsg::StreamParameters& streamParameters)
 {
     // executed by the cluster *DISPATCHER* thread
 

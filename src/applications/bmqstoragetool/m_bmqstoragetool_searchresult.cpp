@@ -14,8 +14,8 @@
 // limitations under the License.
 
 // bmqstoragetool
-#include "m_bmqstoragetool_compositesequencenumber.h"
-#include "m_bmqstoragetool_parameters.h"
+#include <m_bmqstoragetool_compositesequencenumber.h>
+#include <m_bmqstoragetool_parameters.h>
 #include <m_bmqstoragetool_recordprinter.h>
 #include <m_bmqstoragetool_searchresult.h>
 
@@ -338,8 +338,8 @@ bslma::Allocator* SearchShortResult::allocator() const
 
 bool SearchShortResult::processMessageRecord(
     const mqbs::MessageRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     GuidData guidData = bsl::make_pair(record.messageGUID(),
                                        record.messageOffsetDwords());
@@ -356,17 +356,17 @@ bool SearchShortResult::processMessageRecord(
 }
 
 bool SearchShortResult::processConfirmRecord(
-    BSLS_ANNOTATION_UNUSED const mqbs::ConfirmRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED const mqbs::ConfirmRecord& record,
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     return false;
 }
 
 bool SearchShortResult::processDeletionRecord(
     const mqbs::DeletionRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     if (!d_printImmediately && (d_printOnDelete || d_eraseDeleted)) {
         GuidDataMap::iterator it = d_guidMap.find(record.messageGUID());
@@ -547,8 +547,8 @@ bool SearchDetailResult::processDeletionRecord(
 
 bool SearchDetailResult::processQueueOpRecord(
     const mqbs::QueueOpRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     bsl::optional<bmqp_ctrlmsg::QueueInfo> queueInfo =
         d_queueMap.findInfoByKey(record.queueKey());
@@ -576,8 +576,8 @@ bool SearchDetailResult::processQueueOpRecord(
 
 bool SearchDetailResult::processJournalOpRecord(
     const mqbs::JournalOpRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     RecordDetails<mqbs::JournalOpRecord> details(record,
                                                  recordIndex,
@@ -892,8 +892,8 @@ bool SearchGuidDecorator::processDeletionRecord(
     SearchResultDecorator::processDeletionRecord(record,
                                                  recordIndex,
                                                  recordOffset);
-    // return true (stop search) when details needed and search is done (map is
-    // empty).
+    // return true (stop search) when details needed and search is done
+    // (map is empty).
     return (d_withDetails && d_guidsMap.empty());
 }
 
@@ -936,7 +936,8 @@ bool SearchOffsetDecorator::processMessageRecord(
         d_offsets.erase(it);
     }
 
-    // return true (stop search) if no detail is needed and d_offsets is empty.
+    // return true (stop search) if no detail is needed and d_offsets is
+    // empty.
     return (!d_withDetails && d_offsets.empty());
 }
 
@@ -1032,7 +1033,8 @@ bool SearchSequenceNumberDecorator::processMessageRecord(
         d_seqNums.erase(it);
     }
 
-    // return true (stop search) if no detail is needed and d_seqNums is empty.
+    // return true (stop search) if no detail is needed and d_seqNums is
+    // empty.
     return (!d_withDetails && d_seqNums.empty());
 }
 
@@ -1134,8 +1136,8 @@ SummaryProcessor::SummaryProcessor(
 
 bool SummaryProcessor::processMessageRecord(
     const mqbs::MessageRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     d_totalRecordsCount++;
 
@@ -1158,8 +1160,8 @@ bool SummaryProcessor::processMessageRecord(
 
 bool SummaryProcessor::processConfirmRecord(
     const mqbs::ConfirmRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     d_totalRecordsCount++;
 
@@ -1187,8 +1189,8 @@ bool SummaryProcessor::processConfirmRecord(
 
 bool SummaryProcessor::processDeletionRecord(
     const mqbs::DeletionRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     d_totalRecordsCount++;
 
@@ -1216,8 +1218,8 @@ bool SummaryProcessor::processDeletionRecord(
 
 bool SummaryProcessor::processQueueOpRecord(
     const mqbs::QueueOpRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     d_totalRecordsCount++;
 
@@ -1240,9 +1242,9 @@ bool SummaryProcessor::processQueueOpRecord(
 }
 
 bool SummaryProcessor::processJournalOpRecord(
-    BSLS_ANNOTATION_UNUSED const mqbs::JournalOpRecord& record,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLS_ANNOTATION_UNUSED bsls::Types::Uint64 recordOffset)
+    BSLA_UNUSED const mqbs::JournalOpRecord& record,
+    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
+    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
 {
     d_totalRecordsCount++;
 
@@ -1324,8 +1326,7 @@ void SummaryProcessor::outputResult()
     }
 }
 
-void SummaryProcessor::outputResult(
-    BSLS_ANNOTATION_UNUSED const GuidsList& guidFilter)
+void SummaryProcessor::outputResult(BSLA_UNUSED const GuidsList& guidFilter)
 {
     outputResult();
 }

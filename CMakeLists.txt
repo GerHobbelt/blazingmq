@@ -1,10 +1,10 @@
 cmake_minimum_required( VERSION 3.23 )
 
-project( BMQ LANGUAGES C CXX )
-    # o We need the above line because, per CMake 'project' command
-    #   documentation, "The top-level CMakeLists.txt file for a project must
-    #   contain a literal, direct call to the project() command; loading one
-    #   through the include() command is not sufficient."
+project(BMQ
+  VERSION 99.99.99
+  DESCRIPTION "A modern high-performance open source message queuing system"
+  HOMEPAGE_URL "https://bloomberg.github.io/blazingmq/"
+  LANGUAGES C CXX)
 
 # -----------------------------------------------------------------------------
 #                                    MODULES
@@ -298,6 +298,7 @@ add_subdirectory( "src/groups" )
 add_subdirectory( "src/applications" )
 add_subdirectory( "src/tutorials" )
 add_subdirectory( "src/plugins" )
+add_subdirectory( "src/integration-tests" )
 
 
 # -----------------------------------------------------------------------------
