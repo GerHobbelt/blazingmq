@@ -55,9 +55,11 @@
 #include <bdlt_epochutil.h>
 #include <bdlt_timeunitratio.h>
 #include <bsl_algorithm.h>
+#include <bsl_ios.h>
 #include <bsl_iostream.h>
 #include <bsl_iterator.h>
 #include <bsl_limits.h>
+#include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bslma_managedptr.h>
 #include <bsls_assert.h>
@@ -145,8 +147,7 @@ void RootQueueEngine::deliverMessages(AppState* app)
         // continue the delivery from the queue position in the stream.
         // Cannot rely on 'LocalQueue' calling 'afterNewMessage' since it turns
         // off 'd_hasNewMessages'.  Just call it explicitly.
-        const bmqt::MessageGUID dummy;
-        afterNewMessage(dummy, 0);
+        afterNewMessage();
     }
 }
 
@@ -460,6 +461,19 @@ int RootQueueEngine::initializeAppId(const bsl::string& appId,
         iter->second->authorize(appKey, ordinal);
 
         d_consumptionMonitor.registerSubStream(appId);
+
+        const bsls::Types::Int64 appNumMessages =
+            d_queueState_p->storage()->numMessages(appKey);
+        const bsls::Types::Int64 appNumBytes =
+            d_queueState_p->storage()->numBytes(appKey);
+
+        d_queueState_p->queue()->stats()->setOutstandingData(appNumMessages,
+                                                             appNumBytes,
+                                                             appId);
+        BALL_LOG_INFO << "Set outstanding data for appId[" << appId
+                      << "], queue [" << d_queueState_p->uri() << "]: ("
+                      << appNumMessages << " msgs, " << appNumBytes
+                      << " bytes)";
 
         BALL_LOG_INFO << "Found virtual storage for appId [" << appId
                       << "], queue [" << d_queueState_p->uri() << "], appKey ["
@@ -1279,9 +1293,7 @@ void RootQueueEngine::onHandleUsable(mqbi::QueueHandle* handle,
     }
 }
 
-void RootQueueEngine::afterNewMessage(
-    BSLA_UNUSED const bmqt::MessageGUID& msgGUID,
-    BSLA_UNUSED mqbi::QueueHandle* source)
+void RootQueueEngine::afterNewMessage()
 {
     // executed by the *QUEUE DISPATCHER* thread
 

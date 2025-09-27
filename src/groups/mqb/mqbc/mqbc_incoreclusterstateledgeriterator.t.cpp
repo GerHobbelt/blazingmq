@@ -154,14 +154,14 @@ createClusterMessage(bmqp_ctrlmsg::ClusterMessage*              message,
                                    "12345");
         key.loadBinary(&qinfo.key());
 
-        bmqp_ctrlmsg::QueueUnassignedAdvisory advisory;
+        bmqp_ctrlmsg::QueueUnAssignmentAdvisory advisory;
         advisory.sequenceNumber() = sequenceNumber;
         advisory.primaryNodeId()  = 1;
         advisory.partitionId()    = 1U;
         advisory.primaryLeaseId() = 1U;
         advisory.queues().push_back(qinfo);
 
-        message->choice().makeQueueUnassignedAdvisory(advisory);
+        message->choice().makeQueueUnAssignmentAdvisory(advisory);
 
         return mqbc::ClusterStateRecordType::e_UPDATE;
     }
@@ -455,7 +455,6 @@ int main(int argc, char* argv[])
 
     bmqsys::Time::initialize(bmqtst::TestHelperUtil::allocator());
     bmqp::ProtocolUtil::initialize(bmqtst::TestHelperUtil::allocator());
-    bmqp::Crc32c::initialize();
 
     switch (_testCase) {
     case 0:

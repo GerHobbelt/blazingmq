@@ -48,6 +48,7 @@
 #include <bdlf_memfn.h>
 #include <bdlf_placeholder.h>
 #include <bsl_iostream.h>
+#include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bslma_default.h>
 #include <bslmf_allocatorargt.h>
@@ -633,7 +634,6 @@ void MockSession::initialize(bslma::Allocator* allocator)
     g_alloc_p = bslma::Default::globalAllocator(allocator);
 
     bmqsys::Time::initialize(g_alloc_p);
-    bmqp::Crc32c::initialize();
     bmqp::ProtocolUtil::initialize(g_alloc_p);
     bmqt::UriParser::initialize(g_alloc_p);
 

@@ -39,6 +39,8 @@
 #include <bmqp_pusheventbuilder.h>
 #include <bmqp_puteventbuilder.h>
 #include <bmqt_subscription.h>
+#include <bsl_cstdlib.h>
+#include <bsl_cstring.h>
 
 // CONVENIENCE
 using namespace BloombergLP;
@@ -412,9 +414,6 @@ static void test4_subscriptionHandle()
     // allocate memory for an automatically generated CorrelationId.
 
     bmqtst::TestHelper::printTestName("SUBSCRIPTION HANDLE ACCESSOR TEST");
-
-    // Initialize Crc32c
-    bmqp::Crc32c::initialize();
 
     typedef bsl::shared_ptr<bmqimp::Event> EventImplSp;
 

@@ -64,6 +64,7 @@
 #include <bsl_ctime.h>
 #include <bsl_functional.h>
 #include <bsl_iostream.h>
+#include <bsl_memory.h>
 #include <bslma_allocator.h>
 #include <bslmt_latch.h>
 #include <bslmt_lockguard.h>
@@ -118,7 +119,6 @@ void Application::oneTimeInit()
         // Make MessageGUID generation thread-safe by calling initialize
         mqbu::MessageGUIDUtil::initialize();
 
-        bmqp::Crc32c::initialize();
         bmqt::UriParser::initialize();
         bmqp::ProtocolUtil::initialize();
     }
@@ -160,8 +160,12 @@ Application::Application(bdlmt::EventScheduler* scheduler,
                                     bdlf::PlaceHolders::_2),  // allocator
                k_BLOB_POOL_GROWTH_STRATEGY,
                d_allocators.get("BlobSpPool"))
-, d_pushElementsPool(sizeof(mqbblp::PushStream::Element),
-                     d_allocators.get("PushElementsPool"))
+, d_pushElementsPool_sp(bsl::allocate_shared<bdlma::ConcurrentPool>(
+      d_allocators.get("PushElementsPool"),
+      sizeof(mqbblp::PushStream::Element),
+      d_allocators.get("PushElementsPool")))
+// ConcurrentPool doesn't have allocator class trait, have to pass
+// allocator twice.
 , d_allocatorsStatContext_p(allocatorsStatContext)
 , d_pluginManager_mp()
 , d_statController_mp()
@@ -272,7 +276,7 @@ int Application::start(bsl::ostream& errorDescription)
     mqbi::ClusterResources resources(d_scheduler_p,
                                      &d_bufferFactory,
                                      &d_blobSpPool,
-                                     &d_pushElementsPool);
+                                     d_pushElementsPool_sp);
 
     // Start the StatController
     d_statController_mp.load(

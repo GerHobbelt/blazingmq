@@ -42,7 +42,11 @@
 // BDE
 #include <bdlbb_blob.h>
 #include <bsl_cstring.h>
+#include <bsl_memory.h>
+#include <bsl_ostream.h>
 #include <bsl_string.h>
+#include <bsl_unordered_map.h>
+#include <bsl_utility.h>
 #include <bslma_allocator.h>
 #include <bslma_managedptr.h>
 #include <bslma_usesbslmaallocator.h>
@@ -270,7 +274,7 @@ class QueueState {
     bdlbb::BlobBufferFactory*                    blobBufferFactory() const;
     bdlmt::EventScheduler*                       scheduler() const;
     mqbi::ClusterResources::BlobSpPool*          blobSpPool() const;
-    const bsl::optional<bdlma::ConcurrentPool*>& pushElementsPool() const;
+    const bsl::shared_ptr<bdlma::ConcurrentPool>& pushElementsPool() const;
     bdlmt::FixedThreadPool*                      miscWorkThreadPool() const;
     const bsl::string&                           description() const;
     const mqbi::DispatcherClientData&            dispatcherClientData() const;
@@ -501,7 +505,7 @@ inline mqbi::ClusterResources::BlobSpPool* QueueState::blobSpPool() const
     return d_resources.blobSpPool();
 }
 
-inline const bsl::optional<bdlma::ConcurrentPool*>&
+inline const bsl::shared_ptr<bdlma::ConcurrentPool>&
 QueueState::pushElementsPool() const
 {
     return d_resources.pushElementsPool();

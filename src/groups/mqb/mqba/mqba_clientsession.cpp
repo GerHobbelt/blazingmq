@@ -191,6 +191,7 @@
 #include <bdlf_placeholder.h>
 #include <bdlma_localsequentialallocator.h>
 #include <bdlt_timeunitratio.h>
+#include <bsl_ios.h>
 #include <bsl_iostream.h>
 #include <bsl_limits.h>
 #include <bsl_memory.h>
@@ -425,11 +426,15 @@ void ClientSession::sendErrorResponse(
 void ClientSession::sendPacket(const bsl::shared_ptr<bdlbb::Blob>& blob,
                                bool flushBuilders)
 {
+    // executed by *ANY* thread
+
     dispatcher()->execute(
-        bdlf::BindUtil::bind(&ClientSession::sendPacketDispatched,
-                             this,
-                             blob,
-                             flushBuilders),
+        bdlf::BindUtil::bindS(d_state.d_allocator_p,
+                              bmqu::WeakMemFnUtil::weakMemFn(
+                                  &ClientSession::sendPacketDispatched,
+                                  d_self.acquireWeak()),
+                              blob,
+                              flushBuilders),
         this);
 }
 
@@ -952,7 +957,10 @@ void ClientSession::initiateShutdownDispatched(
         ShutdownContextSp context;
         context.createInplace(
             d_state.d_allocator_p,
-            bdlf::BindUtil::bind(&ClientSession::closeChannel, this),
+            bdlf::BindUtil::bindS(
+                d_state.d_allocator_p,
+                bmqu::WeakMemFnUtil::weakMemFn(&ClientSession::closeChannel,
+                                               d_self.acquireWeak())),
             timeout);
 
         deconfigureAndWait(context);
@@ -2962,7 +2970,8 @@ void ClientSession::initiateShutdown(const ShutdownCb&         callback,
     }
     else {
         dispatcher()->execute(
-            bdlf::BindUtil::bind(
+            bdlf::BindUtil::bindS(
+                d_state.d_allocator_p,
                 bdlf::MemFnUtil::memFn(
                     &ClientSession::initiateShutdownDispatched,
                     d_self.acquire()),
@@ -3185,10 +3194,12 @@ void ClientSession::processClusterMessage(
         ShutdownContextSp context;
         context.createInplace(
             d_state.d_allocator_p,
-            bdlf::BindUtil::bind(&ClientSession::sendPacket,
-                                 this,
-                                 d_state.d_schemaEventBuilder.blob(),
-                                 false));
+            bdlf::BindUtil::bindS(
+                d_state.d_allocator_p,
+                bmqu::WeakMemFnUtil::weakMemFn(&ClientSession::sendPacket,
+                                               d_self.acquireWeak()),
+                d_state.d_schemaEventBuilder.blob(),
+                false));
 
         processStopRequest(context);
     }

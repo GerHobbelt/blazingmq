@@ -52,6 +52,7 @@
 #include <ball_log.h>
 #include <bdlbb_blob.h>
 #include <bsl_cstddef.h>
+#include <bsl_list.h>
 #include <bsl_map.h>
 #include <bsl_memory.h>
 #include <bsl_ostream.h>
@@ -209,9 +210,6 @@ class FileBackedStorage BSLS_KEYWORD_FINAL : public ReplicatedStorage {
 
     AutoConfirms d_autoConfirms;
     // Auto CONFIRMs waiting for 'put' or 'processMessageRecord'
-
-    bsl::shared_ptr<mqbstat::QueueStatsDomain> d_queueStats_sp;
-    // Statistics of the queue associated to this storage.
 
   private:
     // NOT IMPLEMENTED

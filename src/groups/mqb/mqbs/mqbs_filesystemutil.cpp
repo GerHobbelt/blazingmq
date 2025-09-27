@@ -173,10 +173,12 @@
 #include <sys/mount.h>
 #include <sys/param.h>  // for statfs
 #endif
+#include <bsl_cstring.h>
+#include <bsl_ios.h>
 
 // GCC on Solaris 10 cannot find madvise declaration. Providing one explicitly.
 #if defined(BSLS_PLATFORM_OS_SOLARIS) && defined(BSLS_PLATFORM_CMP_GNU)
-extern "C" int madvise(caddr_t, size_t, int);
+extern "C" int madvise(void*, size_t, int);
 #endif
 
 namespace BloombergLP {

@@ -49,12 +49,15 @@
 #include <bdlf_bind.h>
 #include <bdlf_placeholder.h>
 #include <bdlma_localsequentialallocator.h>
+#include <bsl_cstddef.h>
 #include <bsl_functional.h>
+#include <bsl_ios.h>
 #include <bsl_iostream.h>
 #include <bsl_limits.h>
 #include <bsl_sstream.h>
 #include <bsl_string.h>
 #include <bsl_utility.h>
+#include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bsls_assert.h>
 #include <bsls_performancehint.h>
@@ -680,8 +683,7 @@ void RelayQueueEngine::processAppRedelivery(unsigned int upstreamSubQueueId,
 
     if (app->isReadyForDelivery()) {
         // can continue delivering
-        const bmqt::MessageGUID dummy;
-        afterNewMessage(dummy, 0);
+        afterNewMessage();
     }
 }
 
@@ -1387,9 +1389,7 @@ void RelayQueueEngine::onHandleUsable(mqbi::QueueHandle* handle,
     }
 }
 
-void RelayQueueEngine::afterNewMessage(
-    BSLA_UNUSED const bmqt::MessageGUID& msgGUID,
-    BSLA_UNUSED mqbi::QueueHandle* source)
+void RelayQueueEngine::afterNewMessage()
 {
     // executed by the *QUEUE DISPATCHER* thread
 

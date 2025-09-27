@@ -62,7 +62,9 @@
 #include <ball_log.h>
 #include <bdlmt_throttle.h>
 #include <bsl_list.h>
+#include <bsl_memory.h>
 #include <bsl_unordered_map.h>
+#include <bsl_utility.h>
 #include <bslma_allocator.h>
 
 namespace BloombergLP {
@@ -73,7 +75,11 @@ namespace mqbblp {
 struct RelayQueueEngine_AppState;
 
 /// The ordered sequence of GUIDs for one-time delivery.
-struct PushStream {
+class PushStream {
+  public:
+    // TRAITS
+    BSLMF_NESTED_TRAIT_DECLARATION(PushStream, bslma::UsesBslmaAllocator)
+
     // forward declaration
     struct Element;
 
@@ -109,7 +115,7 @@ struct PushStream {
         void remove(Element* element, ElementList where);
 
         /// Return the first Element in the list
-        Element*     front() const;
+        Element* front() const;
 
         /// Return the last Element in the list
         Element* back() const;
@@ -143,7 +149,7 @@ struct PushStream {
     typedef bmqc::OrderedHashMap<bmqt::MessageGUID,
                                  Elements,
                                  bslh::Hash<bmqt::MessageGUIDHashAlgo> >
-                                                  Stream;
+        Stream;
 
     typedef Stream::iterator                      iterator;
     typedef bsl::unordered_map<unsigned int, App> Apps;
@@ -191,14 +197,22 @@ struct PushStream {
         Element* nextInApp() const;
     };
 
+    // PUBLIC DATA
     Stream d_stream;
 
     Apps d_apps;
 
     bsl::shared_ptr<bdlma::ConcurrentPool> d_pushElementsPool_sp;
 
-    PushStream(const bsl::optional<bdlma::ConcurrentPool*>& pushElementsPool,
-               bslma::Allocator*                            allocator);
+    // CREATORS
+    /// @brief Construct this object.
+    /// @param pushElementsPool_sp The shared push element pool used to supply
+    ///        objects to this PushStream.  If the provided pointer is null,
+    ///        create its own object pool.
+    /// @param allocator The allocator to use.
+    explicit PushStream(
+        const bsl::shared_ptr<bdlma::ConcurrentPool>& pushElementsPool_sp,
+        bslma::Allocator*                             allocator);
 
     /// Introduce the specified `guid` to the Push Stream if it is not present.
     /// Return an iterator pointing to the `guid`.

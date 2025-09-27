@@ -43,6 +43,7 @@
 #include <ball_severity.h>
 #include <bdlb_string.h>
 #include <bdlt_timeunitratio.h>
+#include <bsl_limits.h>
 #include <bsl_memory.h>
 #include <bsl_set.h>
 
@@ -173,16 +174,16 @@ struct MockStorageIterator : public mqbi::StorageIterator {
 
 struct Test : bmqtst::Test {
     // PUBLIC DATA
-    bslma::Allocator*              d_allocator_p;
-    bsl::string                    d_id;
-    mqbmock::Dispatcher            d_dispatcher;
-    mqbmock::Cluster               d_cluster;
-    mqbmock::Domain                d_domain;
-    mqbmock::Queue                 d_queue;
-    QueueState                     d_queueState;
-    QueueConsumptionMonitorTest    d_monitor;
-    mqbs::InMemoryStorage          d_storage;
-    bsl::set<bsl::string>          d_haveUndelivered;
+    bslma::Allocator*           d_allocator_p;
+    bsl::string                 d_id;
+    mqbmock::Dispatcher         d_dispatcher;
+    mqbmock::Cluster            d_cluster;
+    mqbmock::Domain             d_domain;
+    mqbmock::Queue              d_queue;
+    QueueState                  d_queueState;
+    QueueConsumptionMonitorTest d_monitor;
+    mqbs::InMemoryStorage       d_storage;
+    bsl::set<bsl::string>       d_haveUndelivered;
 
     // CREATORS
     Test();
@@ -231,6 +232,7 @@ Test::Test()
             d_allocator_p)
 , d_storage(d_queue.uri(),
             mqbu::StorageKey::k_NULL_KEY,
+            &d_domain,
             mqbs::DataStore::k_INVALID_PARTITION_ID,
             getDomainConfig(),
             d_domain.capacityMeter(),
@@ -245,7 +247,7 @@ Test::Test()
     bslma::ManagedPtr<mqbi::Queue> queueMp(&d_queue,
                                            0,
                                            bslma::ManagedPtrUtil::noOpDeleter);
-    d_domain.registerQueue(errorDescription, queueMp);
+    d_domain.registerQueue(queueMp);
 
     mqbconfm::Storage config;
     mqbconfm::Limits  limits;

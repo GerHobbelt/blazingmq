@@ -32,6 +32,10 @@
 // BDE
 #include <bdls_filesystemutil.h>
 #include <bdls_pathutil.h>
+#include <bsl_memory.h>
+#include <bsl_ostream.h>
+#include <bsl_stdexcept.h>
+#include <bsl_vector.h>
 #include <bsla_annotations.h>
 
 namespace BloombergLP {
@@ -200,8 +204,6 @@ FileManagerImpl::CslFileHandler::CslFileHandler(const bsl::string& path,
 , d_cslFromBegin(cslFromBegin)
 , d_allocator(allocator)
 {
-    // Required for ledger operations
-    bmqp::Crc32c::initialize();
 }
 
 FileManagerImpl::CslFileHandler::~CslFileHandler()

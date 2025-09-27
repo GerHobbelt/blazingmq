@@ -46,7 +46,10 @@
 #include <bdlbb_blobutil.h>
 #include <bdlf_bind.h>
 #include <bdlf_placeholder.h>
+#include <bsl_limits.h>
+#include <bsl_memory.h>
 #include <bsl_utility.h>
+#include <bsl_vector.h>
 #include <bslmt_once.h>
 #include <bsls_types.h>
 #include <bslstl_stringref.h>
@@ -467,7 +470,13 @@ void QueueEngineTester::init(const mqbconfm::Domain& domainConfig,
 
     // Register queue in domain
     bslma::ManagedPtr<mqbi::Queue> queueMp(d_mockQueue_sp.managedPtr());
-    rc = d_mockDomain_mp->registerQueue(errorDescription, queueMp);
+
+    rc = queueMp->configure(errorDescription,
+                            false,  // isReconfigure
+                            true);  // wait
+    BSLS_ASSERT_OPT(rc == 0);
+
+    rc = d_mockDomain_mp->registerQueue(queueMp);
     BSLS_ASSERT_OPT(rc == 0);
 
     // VALIDATION
@@ -525,6 +534,7 @@ void QueueEngineTester::init(const mqbconfm::Domain& domainConfig,
     mqbi::Storage* storage_p = new (*d_allocator_p)
         mqbs::InMemoryStorage(d_mockQueue_sp->uri(),
                               k_NULL_QUEUE_KEY,
+                              d_mockDomain_mp.get(),
                               k_PARTITION_ID,
                               domainConfig,
                               d_mockDomain_mp->capacityMeter(),
@@ -1003,13 +1013,7 @@ void QueueEngineTester::afterNewMessage(const int numMessages)
         const bmqt::MessageGUID& msgGUID = it->second;
         BSLS_ASSERT_OPT(!msgGUID.isUnset());
 
-        // NOTE: At the time of this writing, only the 'RelayQueueEngine' uses
-        //       the 'bmqt::MessageGUID msgGUID' parameter.
-        //
-        // NOTE: At the time of this writing, none of the Queue Engines use the
-        //       'mqbi::QueueHandle source' parameter, but if that changes then
-        //       we will need to keep track of that.
-        d_queueEngine_mp->afterNewMessage(msgGUID, 0);
+        d_queueEngine_mp->afterNewMessage();
 
         // Advance and delete from 'd_newMessages'
         it = d_newMessages.erase(it);

@@ -27,6 +27,7 @@
 #include <bsl_fstream.h>
 #include <bsl_iostream.h>
 #include <bsl_string.h>
+#include <bsl_vector.h>
 #include <bsla_annotations.h>
 
 namespace BloombergLP {
@@ -268,7 +269,8 @@ void InputUtil::verifyProperties(
 }
 
 bool InputUtil::populateSubscriptions(bmqt::QueueOptions*              out,
-                                      const bsl::vector<Subscription>& in)
+                                      const bsl::vector<Subscription>& in,
+                                      bslma::Allocator* allocator)
 {
     BSLS_ASSERT_SAFE(out);
 
@@ -309,7 +311,41 @@ bool InputUtil::populateSubscriptions(bmqt::QueueOptions*              out,
             to.setConsumerPriority(out->consumerPriority());
         }
 
-        bsl::string error;
+        bsl::string error(allocator);
+        if (!out->addOrUpdateSubscription(&error, handle, to)) {
+            // It is possible to make early return here, but we want to log
+            // all the failed expressions, not only the first failure.
+            BALL_LOG_ERROR << "#INVALID_SUBSCRIPTION " << error;
+            failed = true;
+        }
+    }
+    return !failed;
+}
+
+bool InputUtil::populateSubscriptions(bmqt::QueueOptions* out,
+                                      int                 autoPubSubModulo,
+                                      const char*       autoPubSubPropertyName,
+                                      bslma::Allocator* allocator)
+{
+    BSLS_ASSERT_SAFE(out);
+
+    bool failed = false;
+    for (int i = 0; i < autoPubSubModulo; ++i) {
+        bmqt::Subscription       to;
+        bmqt::CorrelationId      correlationId(i);
+        bmqt::SubscriptionHandle handle(correlationId);
+
+        bsl::string equality(autoPubSubPropertyName, allocator);
+        equality += "==";
+        equality += bsl::to_string(i);
+
+        bmqt::SubscriptionExpression expression(
+            equality,
+            bmqt::SubscriptionExpression::e_VERSION_1);
+
+        to.setExpression(expression);
+
+        bsl::string error(allocator);
         if (!out->addOrUpdateSubscription(&error, handle, to)) {
             // It is possible to make early return here, but we want to log all
             // the failed expressions, not only the first failure.
@@ -410,7 +446,8 @@ bool InputUtil::loadMessageFromFile(bsl::ostream*      payload,
     if (line == "Message Properties:") {
         fileStream.read(tmpBuffer, 1);  // skip empty line
 
-        // Read human readable properties lines to check surrounding markers [
+        // Read human readable properties lines to check surrounding
+        // markers [
         // ]
         bsl::getline(fileStream, line);
         if (line.front() != '[') {
@@ -418,7 +455,8 @@ bool InputUtil::loadMessageFromFile(bsl::ostream*      payload,
             return false;  // RETURN
         }
         if (line.back() != ']') {
-            // Binary properties are multiline, read lines until close marker
+            // Binary properties are multiline, read lines until close
+            // marker
             // ']'
             while (!fileStream.eof()) {
                 bsl::getline(fileStream, line);

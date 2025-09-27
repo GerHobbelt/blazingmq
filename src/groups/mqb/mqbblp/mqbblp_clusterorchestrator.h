@@ -51,6 +51,8 @@
 #include <bdld_manageddatum.h>
 #include <bdlmt_eventscheduler.h>
 #include <bsl_iostream.h>
+#include <bsl_memory.h>
+#include <bsl_vector.h>
 #include <bslma_managedptr.h>
 #include <bslma_usesbslmaallocator.h>
 #include <bslmf_nestedtraitdeclaration.h>
@@ -339,11 +341,6 @@ class ClusterOrchestrator {
     void
     processClusterStateEvent(const mqbi::DispatcherClusterStateEvent& event);
 
-    /// Process any queue assignment and un-assignment advisory messages
-    /// which were received while self node was starting.  Behavior is
-    /// undefined unless self node has transitioned to AVAILABLE.
-    void processBufferedQueueAdvisories();
-
     /// Process the queue assignment in the specified `request`, received
     /// from the specified `requester`.
     ///
@@ -352,24 +349,6 @@ class ClusterOrchestrator {
     void
     processQueueAssignmentRequest(const bmqp_ctrlmsg::ControlMessage& request,
                                   mqbnet::ClusterNode* requester);
-
-    /// Process the queue unAssigned advisory in the specified `msg`
-    /// received from the specified `source`.
-    ///
-    /// THREAD: This method is invoked in the associated cluster's
-    ///         dispatcher thread.
-    void
-    processQueueUnassignedAdvisory(const bmqp_ctrlmsg::ControlMessage& msg,
-                                   mqbnet::ClusterNode*                source);
-
-    /// Process the queue unAssignment advisory in the specified `msg`
-    /// received from the specified `source`.
-    ///
-    /// THREAD: This method is invoked in the associated cluster's
-    ///         dispatcher thread.
-    void
-    processQueueUnAssignmentAdvisory(const bmqp_ctrlmsg::ControlMessage& msg,
-                                     mqbnet::ClusterNode* source);
 
     /// Process the specified storage sync request `message` from the
     /// specified `source`.
@@ -463,9 +442,9 @@ class ClusterOrchestrator {
     void validateClusterStateLedger();
 
     /// Unregister the specified 'removed' and register the specified `added`
-    /// for the specified  `domainName`.
+    /// for the specified  `domainName`.  Return `0` on success.
     /// Invoked by @bbref{mqbblp::Cluster}.
-    void updateAppIds(
+    mqbi::ClusterErrorCode::Enum updateAppIds(
         const bsl::shared_ptr<const bsl::vector<bsl::string> >& added,
         const bsl::shared_ptr<const bsl::vector<bsl::string> >& removed,
         const bsl::string&                                      domainName);

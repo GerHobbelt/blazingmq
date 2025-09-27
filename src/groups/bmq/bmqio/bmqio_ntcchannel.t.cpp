@@ -31,6 +31,7 @@
 #include <bsls_types.h>
 
 #include <bmqtst_testhelper.h>
+#include <bsl_vector.h>
 
 // CONVENIENCE
 using namespace BloombergLP;
@@ -145,6 +146,7 @@ class Tester {
 
   public:
     // TRAITS
+    BSLA_MAYBE_UNUSED
     BSLMF_NESTED_TRAIT_DECLARATION(Tester, bslma::UsesBslmaAllocator)
 
     // CREATORS

@@ -84,6 +84,7 @@
 #include <bsls_timeinterval.h>
 
 // SYS
+#include <bsl_ios.h>
 #include <unistd.h>
 
 namespace BloombergLP {
@@ -5265,6 +5266,7 @@ void FileStore::createStorage(bsl::shared_ptr<ReplicatedStorage>* storageSp,
         storageSp->reset(new (*storageAlloc)
                              InMemoryStorage(queueUri,
                                              queueKey,
+                                             domain,
                                              config().partitionId(),
                                              domain->config(),
                                              domain->capacityMeter(),
@@ -7241,7 +7243,7 @@ void FileStore::setReplicationFactor(int value)
              affectedQueues.begin();
          qit != affectedQueues.end();
          ++qit) {
-        (*qit)->queueEngine()->afterNewMessage(bmqt::MessageGUID(), 0);
+        (*qit)->queueEngine()->afterNewMessage();
     }
 }
 

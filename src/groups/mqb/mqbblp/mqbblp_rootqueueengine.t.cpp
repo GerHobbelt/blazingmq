@@ -52,6 +52,11 @@
 
 // TEST DRIVER
 #include <bmqtst_testhelper.h>
+#include <bsl_algorithm.h>
+#include <bsl_functional.h>
+#include <bsl_ios.h>
+#include <bsl_limits.h>
+#include <bsl_map.h>
 
 // CONVENIENCE
 using namespace BloombergLP;
@@ -4452,8 +4457,7 @@ static void test38_unauthorizedAppIds()
 //  4. Verify that no message remains in queue after C1 confirms messages.
 //
 // Testing:
-//  virtual void afterNewMessage(const bmqt::MessageGUID&  msgGUID,
-//                               mqbi::QueueHandle        *source)
+//  virtual void afterNewMessage()
 // ------------------------------------------------------------------------
 {
     bmqtst::TestHelperUtil::ignoreCheckDefAlloc() = true;

@@ -28,7 +28,11 @@
 #include <bmqu_memoutstream.h>
 
 // BDE
+#include <bsl_algorithm.h>
 #include <bsl_cmath.h>
+#include <bsl_cstddef.h>
+#include <bsl_memory.h>
+#include <bsl_utility.h>
 
 namespace BloombergLP {
 namespace m_bmqstoragetool {
@@ -547,8 +551,8 @@ bool SearchDetailResult::processDeletionRecord(
 
 bool SearchDetailResult::processQueueOpRecord(
     const mqbs::QueueOpRecord& record,
-    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
+    bsls::Types::Uint64        recordIndex,
+    bsls::Types::Uint64        recordOffset)
 {
     bsl::optional<bmqp_ctrlmsg::QueueInfo> queueInfo =
         d_queueMap.findInfoByKey(record.queueKey());
@@ -576,8 +580,8 @@ bool SearchDetailResult::processQueueOpRecord(
 
 bool SearchDetailResult::processJournalOpRecord(
     const mqbs::JournalOpRecord& record,
-    BSLA_UNUSED bsls::Types::Uint64 recordIndex,
-    BSLA_UNUSED bsls::Types::Uint64 recordOffset)
+    bsls::Types::Uint64          recordIndex,
+    bsls::Types::Uint64          recordOffset)
 {
     RecordDetails<mqbs::JournalOpRecord> details(record,
                                                  recordIndex,
@@ -672,6 +676,181 @@ bool SearchDetailResult::hasCache() const
 const bsl::shared_ptr<Printer>& SearchDetailResult::printer() const
 {
     return d_printer;
+}
+
+// ============================
+// class SearchExactMatchResult
+// ============================
+
+SearchExactMatchResult::SearchExactMatchResult(
+    const bsl::shared_ptr<Printer>&       printer,
+    const Parameters::ProcessRecordTypes& processRecordTypes,
+    bool                                  isDetail,
+    const QueueMap&                       queueMap,
+    bslma::ManagedPtr<PayloadDumper>&     payloadDumper,
+    bslma::Allocator*                     allocator)
+: d_printer(printer)
+, d_processRecordTypes(processRecordTypes)
+, d_isDetail(isDetail)
+, d_queueMap(queueMap)
+, d_payloadDumper(payloadDumper)
+, d_printedMessagesCount(0)
+, d_printedConfirmCount(0)
+, d_printedDeletionCount(0)
+, d_printedQueueOpCount(0)
+, d_printedJournalOpCount(0)
+, d_allocator_p(allocator)
+{
+    // NOTHING
+}
+
+bool SearchExactMatchResult::processMessageRecord(
+    const mqbs::MessageRecord& record,
+    bsls::Types::Uint64        recordIndex,
+    bsls::Types::Uint64        recordOffset)
+{
+    if (d_isDetail) {
+        bsl::optional<bmqp_ctrlmsg::QueueInfo> queueInfo =
+            d_queueMap.findInfoByKey(record.queueKey());
+        MessageDetails details(record,
+                               recordIndex,
+                               recordOffset,
+                               queueInfo,
+                               d_allocator_p);
+        d_printer->printMessage(details);
+    }
+    else {
+        d_printer->printGuid(record.messageGUID());
+    }
+
+    if (d_payloadDumper) {
+        d_payloadDumper->outputPayload(record.messageOffsetDwords());
+    }
+
+    d_printedMessagesCount++;
+
+    return false;
+}
+
+bool SearchExactMatchResult::processConfirmRecord(
+    const mqbs::ConfirmRecord& record,
+    bsls::Types::Uint64        recordIndex,
+    bsls::Types::Uint64        recordOffset)
+{
+    if (d_isDetail) {
+        RecordDetails<mqbs::ConfirmRecord> details(record,
+                                                   recordIndex,
+                                                   recordOffset,
+                                                   d_allocator_p);
+
+        addQueueInfo(details, record.queueKey(), record.appKey());
+
+        d_printer->printConfirmRecord(details);
+    }
+    else {
+        d_printer->printGuid(record.messageGUID());
+    }
+
+    d_printedConfirmCount++;
+
+    return false;
+}
+
+bool SearchExactMatchResult::processDeletionRecord(
+    const mqbs::DeletionRecord& record,
+    bsls::Types::Uint64         recordIndex,
+    bsls::Types::Uint64         recordOffset)
+{
+    if (d_isDetail) {
+        RecordDetails<mqbs::DeletionRecord> details(record,
+                                                    recordIndex,
+                                                    recordOffset,
+                                                    d_allocator_p);
+
+        addQueueInfo(details, record.queueKey(), mqbu::StorageKey());
+
+        d_printer->printDeletionRecord(details);
+    }
+    else {
+        d_printer->printGuid(record.messageGUID());
+    }
+
+    d_printedDeletionCount++;
+
+    return false;
+}
+
+bool SearchExactMatchResult::processQueueOpRecord(
+    const mqbs::QueueOpRecord& record,
+    bsls::Types::Uint64        recordIndex,
+    bsls::Types::Uint64        recordOffset)
+{
+    RecordDetails<mqbs::QueueOpRecord> details(record,
+                                               recordIndex,
+                                               recordOffset,
+                                               d_allocator_p);
+
+    addQueueInfo(details, record.queueKey(), record.appKey());
+
+    d_printer->printQueueOpRecord(details);
+
+    d_printedQueueOpCount++;
+
+    return false;
+}
+
+bool SearchExactMatchResult::processJournalOpRecord(
+    const mqbs::JournalOpRecord& record,
+    bsls::Types::Uint64          recordIndex,
+    bsls::Types::Uint64          recordOffset)
+{
+    RecordDetails<mqbs::JournalOpRecord> details(record,
+                                                 recordIndex,
+                                                 recordOffset,
+                                                 d_allocator_p);
+    printer()->printJournalOpRecord(details);
+
+    d_printedJournalOpCount++;
+
+    return false;
+}
+
+void SearchExactMatchResult::outputResult()
+{
+    d_printer->printExactMatchFooter(d_printedMessagesCount,
+                                     d_printedConfirmCount,
+                                     d_printedDeletionCount,
+                                     d_printedQueueOpCount,
+                                     d_printedJournalOpCount,
+                                     d_processRecordTypes);
+}
+
+void SearchExactMatchResult::outputResult(
+    BSLA_UNUSED const GuidsList& guidFilter)
+{
+    BSLS_ASSERT_SAFE(false && "NOT SUPPORTED!");
+}
+
+const bsl::shared_ptr<Printer>& SearchExactMatchResult::printer() const
+{
+    return d_printer;
+}
+
+template <typename RECORD_TYPE>
+void SearchExactMatchResult::addQueueInfo(RECORD_TYPE&            record,
+                                          const mqbu::StorageKey& queueKey,
+                                          const mqbu::StorageKey& appKey) const
+{
+    bsl::optional<bmqp_ctrlmsg::QueueInfo> queueInfo =
+        d_queueMap.findInfoByKey(queueKey);
+    if (queueInfo.has_value()) {
+        record.d_queueUri = queueInfo->uri();
+        if (!appKey.isNull() && !findQueueAppIdByAppKey(&record.d_appId,
+                                                        queueInfo->appIds(),
+                                                        appKey)) {
+            record.d_appId = "** NULL **";
+        }
+    }
 }
 
 // ========================
@@ -936,9 +1115,29 @@ bool SearchOffsetDecorator::processMessageRecord(
         d_offsets.erase(it);
     }
 
-    // return true (stop search) if no detail is needed and d_offsets is
-    // empty.
-    return (!d_withDetails && d_offsets.empty());
+    // return true (stop search) when search is done
+    // (d_offsets is empty).
+    return (d_offsets.empty());
+}
+
+bool SearchOffsetDecorator::processConfirmRecord(
+    const mqbs::ConfirmRecord& record,
+    bsls::Types::Uint64        recordIndex,
+    bsls::Types::Uint64        recordOffset)
+{
+    bsl::vector<bsls::Types::Int64>::const_iterator it =
+        bsl::find(d_offsets.cbegin(), d_offsets.cend(), recordOffset);
+    if (it != d_offsets.cend()) {
+        SearchResultDecorator::processConfirmRecord(record,
+                                                    recordIndex,
+                                                    recordOffset);
+        // Remove processed offset.
+        d_offsets.erase(it);
+    }
+
+    // return true (stop search) when search is done
+    // (d_offsets is empty).
+    return (d_offsets.empty());
 }
 
 bool SearchOffsetDecorator::processDeletionRecord(
@@ -946,12 +1145,19 @@ bool SearchOffsetDecorator::processDeletionRecord(
     bsls::Types::Uint64         recordIndex,
     bsls::Types::Uint64         recordOffset)
 {
-    SearchResultDecorator::processDeletionRecord(record,
-                                                 recordIndex,
-                                                 recordOffset);
-    // return true (stop search) when details needed and search is done
+    bsl::vector<bsls::Types::Int64>::const_iterator it =
+        bsl::find(d_offsets.cbegin(), d_offsets.cend(), recordOffset);
+    if (it != d_offsets.cend()) {
+        SearchResultDecorator::processDeletionRecord(record,
+                                                     recordIndex,
+                                                     recordOffset);
+        // Remove processed offset.
+        d_offsets.erase(it);
+    }
+
+    // return true (stop search) when search is done
     // (d_offsets is empty).
-    return (d_withDetails && d_offsets.empty());
+    return (d_offsets.empty());
 }
 
 bool SearchOffsetDecorator::processQueueOpRecord(
@@ -1033,9 +1239,31 @@ bool SearchSequenceNumberDecorator::processMessageRecord(
         d_seqNums.erase(it);
     }
 
-    // return true (stop search) if no detail is needed and d_seqNums is
-    // empty.
-    return (!d_withDetails && d_seqNums.empty());
+    // return true (stop search) when search is done
+    // (d_seqNums is empty).
+    return d_seqNums.empty();
+}
+
+bool SearchSequenceNumberDecorator::processConfirmRecord(
+    const mqbs::ConfirmRecord& record,
+    bsls::Types::Uint64        recordIndex,
+    bsls::Types::Uint64        recordOffset)
+{
+    CompositeSequenceNumber seqNum(record.header().primaryLeaseId(),
+                                   record.header().sequenceNumber());
+    bsl::vector<CompositeSequenceNumber>::const_iterator it =
+        bsl::find(d_seqNums.cbegin(), d_seqNums.cend(), seqNum);
+    if (it != d_seqNums.cend()) {
+        SearchResultDecorator::processConfirmRecord(record,
+                                                    recordIndex,
+                                                    recordOffset);
+        // Remove processed sequence number.
+        d_seqNums.erase(it);
+    }
+
+    // return true (stop search) when search is done
+    // (d_seqNums is empty).
+    return (d_seqNums.empty());
 }
 
 bool SearchSequenceNumberDecorator::processDeletionRecord(
@@ -1043,12 +1271,21 @@ bool SearchSequenceNumberDecorator::processDeletionRecord(
     bsls::Types::Uint64         recordIndex,
     bsls::Types::Uint64         recordOffset)
 {
-    SearchResultDecorator::processDeletionRecord(record,
-                                                 recordIndex,
-                                                 recordOffset);
+    CompositeSequenceNumber seqNum(record.header().primaryLeaseId(),
+                                   record.header().sequenceNumber());
+    bsl::vector<CompositeSequenceNumber>::const_iterator it =
+        bsl::find(d_seqNums.cbegin(), d_seqNums.cend(), seqNum);
+    if (it != d_seqNums.cend()) {
+        SearchResultDecorator::processDeletionRecord(record,
+                                                     recordIndex,
+                                                     recordOffset);
+        // Remove processed sequence number.
+        d_seqNums.erase(it);
+    }
+
     // return true (stop search) when details needed and search is done
     // (d_seqNums is empty).
-    return (d_withDetails && d_seqNums.empty());
+    return (d_seqNums.empty());
 }
 
 bool SearchSequenceNumberDecorator::processQueueOpRecord(

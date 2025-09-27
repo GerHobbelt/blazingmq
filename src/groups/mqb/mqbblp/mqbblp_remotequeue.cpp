@@ -57,6 +57,8 @@
 #include <bsl_iostream.h>
 #include <bsl_limits.h>
 #include <bsl_string.h>
+#include <bsl_utility.h>
+#include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bsls_assert.h>
 #include <bsls_performancehint.h>
@@ -114,6 +116,7 @@ int RemoteQueue::configureAsProxy(bsl::ostream& errorDescription,
     storageSp.load(new (*d_allocator_p) mqbs::InMemoryStorage(
                        d_state_p->uri(),
                        d_state_p->key(),
+                       d_state_p->domain(),
                        mqbs::DataStore::k_INVALID_PARTITION_ID,
                        domainCfg,
                        d_state_p->domain()->capacityMeter(),
@@ -872,8 +875,7 @@ void RemoteQueue::flush()
         d_state_p->storage()->gcHistory(now);
     }
     if (d_queueEngine_mp) {
-        const bmqt::MessageGUID dummy;
-        d_queueEngine_mp->afterNewMessage(dummy, 0);
+        d_queueEngine_mp->afterNewMessage();
     }
 }
 

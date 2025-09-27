@@ -36,6 +36,7 @@
 #include <bdlf_placeholder.h>
 #include <bdlma_localsequentialallocator.h>
 #include <bsl_iostream.h>
+#include <bsl_memory.h>
 #include <bsl_string.h>
 #include <bsla_annotations.h>
 #include <bslma_allocator.h>
@@ -578,7 +579,7 @@ EventQueue::timedPopFront(const bsls::TimeInterval& timeout,
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
 
         bmqt::SessionEventType::Enum type;
-        bsl::string                  errorDescription;
+        bslstl::StringRef            errorDescription;
         if (BSLS_PERFORMANCEHINT_PREDICT_LIKELY(rc == -1)) {
             // We timed out.. create a timeout event
             type             = bmqt::SessionEventType::e_TIMEOUT;

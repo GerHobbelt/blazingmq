@@ -27,6 +27,8 @@
 #include <m_bmqstoragetool_cslrecordprinter.h>
 
 // BMQ
+#include <bsl_memory.h>
+#include <bsl_vector.h>
 #include <mqbc_clusterstateledgerprotocol.h>
 #include <mqbsi_ledger.h>
 
@@ -80,7 +82,7 @@ class CslPrinter {
         const Parameters::ProcessCslRecordTypes& processCslRecordTypes,
         unsigned int                             queuesLimit) const = 0;
 
-    /// Print footer of thr result
+    /// Print footer of the result
     virtual void printFooter(const CslRecordCount& recordCount,
                              const Parameters::ProcessCslRecordTypes&
                                  processCslRecordTypes) const = 0;

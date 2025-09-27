@@ -47,6 +47,7 @@
 // BDE
 #include <ball_log.h>
 #include <bdlbb_blob.h>
+#include <bsl_list.h>
 #include <bsl_map.h>
 #include <bsl_memory.h>
 #include <bsl_ostream.h>
@@ -245,6 +246,7 @@ class InMemoryStorage BSLS_KEYWORD_FINAL : public ReplicatedStorage {
     /// `allocator`.
     InMemoryStorage(const bmqt::Uri&               uri,
                     const mqbu::StorageKey&        queueKey,
+                    mqbi::Domain*                  domain,
                     int                            partitionId,
                     const mqbconfm::Domain&        config,
                     mqbu::CapacityMeter*           parentCapacityMeter,

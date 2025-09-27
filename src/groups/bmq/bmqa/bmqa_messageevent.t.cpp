@@ -35,6 +35,8 @@
 
 // TEST DRIVER
 #include <bmqtst_testhelper.h>
+#include <bsl_limits.h>
+#include <bsl_vector.h>
 
 // CONVENIENCE
 using namespace BloombergLP;
@@ -223,9 +225,6 @@ static void test3_putMessageIteratorTest()
     // allocate memory for an automatically generated CorrelationId.
 
     bmqtst::TestHelper::printTestName("PUT MESAGE ITERATOR TEST");
-
-    // Initialize Crc32c
-    bmqp::Crc32c::initialize();
 
     PV("Creating an event with a few messages");
 

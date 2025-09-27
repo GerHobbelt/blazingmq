@@ -32,6 +32,7 @@
 #include <bsl_cstring.h>  // for bsl::memcpy, etc
 #include <bsl_ostream.h>
 
+#include <bsl_type_traits.h>
 #include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bslh_hash.h>
@@ -77,9 +78,6 @@ class StorageKey {
 
   private:
     // PRIVATE CONSTANTS
-
-    // This binary buffer can be used to construct an empty storage key.
-    static const char* k_NULL_KEY_BUFFER;
 
   private:
     // DATA
@@ -278,7 +276,7 @@ class StorageKeyHashAlgo {
 // CREATORS
 inline StorageKey::StorageKey()
 {
-    bsl::memcpy(d_buffer, k_NULL_KEY_BUFFER, StorageKey::e_KEY_LENGTH_BINARY);
+    bsl::memset(d_buffer, '\0', StorageKey::e_KEY_LENGTH_BINARY);
 }
 
 inline StorageKey::StorageKey(const BinaryRepresentation&, const void* data)

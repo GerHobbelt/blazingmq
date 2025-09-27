@@ -42,6 +42,7 @@
 #include <bsl_iosfwd.h>
 #include <bsl_optional.h>
 #include <bsl_string.h>
+#include <bsl_vector.h>
 #include <bslma_allocator.h>
 #include <bsls_types.h>
 
@@ -62,6 +63,7 @@ class CommandLineArguments {
     static const char* k_MESSAGE_TYPE;
     static const char* k_QUEUEOP_TYPE;
     static const char* k_JOURNALOP_TYPE;
+    static const char* k_CSL_ALL_TYPE;
     static const char* k_CSL_SNAPSHOT_TYPE;
     static const char* k_CSL_UPDATE_TYPE;
     static const char* k_CSL_COMMIT_TYPE;
@@ -224,6 +226,10 @@ struct Parameters {
         // CREATORS
         explicit ProcessRecordTypes();
 
+        // MANIPULATORS
+        /// Set all record types to process
+        void setAll();
+
         bool operator==(ProcessRecordTypes const& other) const;
     };
 
@@ -242,6 +248,10 @@ struct Parameters {
 
         // CREATORS
         explicit ProcessCslRecordTypes();
+
+        // MANIPULATORS
+        /// Set all CSL record types to process
+        void setAll();
 
         bool operator==(ProcessCslRecordTypes const& other) const;
     };
