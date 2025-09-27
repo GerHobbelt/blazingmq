@@ -312,18 +312,19 @@ class Channel {
         ~Item();
 
         const bsl::shared_ptr<bdlbb::Blob>& data();
-
-        bool isSecondary();
     };
 
     enum Mode {
-        e_BLOCK,     // call 'popFront' on the primary buffer
-        e_PRIMARY,   // call 'tryPopFront' on the primary buffer, if it is
-                     // empty, then transition to the next state
-        e_IDLE,      // flush all builders, and transition to the next state
-        e_SECONDARY  // call 'tryPopFront' on the secondary buffer until it
-                     // gets empty, then transition 'to e_BLOCK' state
+        /// Call 'popFront' on the buffer.
+        /// This puts internal thread into sleep until there are any events.
+        e_BLOCK,
 
+        /// Call 'tryPopFront' on the buffer until this buffer is exhausted,
+        /// and transition to the next state.
+        e_FLUSH_BUFFER,
+
+        /// Flush all builders to IO, and circle back to `e_BLOCK` state.
+        e_IDLE
     };
 
     struct Stats {
@@ -387,7 +388,6 @@ class Channel {
     // Pool of 'Item' objects.
 
     ItemQueue d_buffer;
-    ItemQueue d_secondaryBuffer;
 
     bslmt::ThreadUtil::Handle d_threadHandle;
 
@@ -596,8 +596,9 @@ class Channel {
               bmqp::EventType::Enum                     type,
               const bsl::shared_ptr<bmqu::AtomicState>& state = 0);
 
-    /// Write everything unless there is a thread actively writing already.
-    void flush();
+    /// Wake up the internal thread if it's waiting for a new item to write.
+    /// This leads to flushing of the inner message builders.
+    void wakeUp();
 
     /// Notify the channel when a watermark of the specified `type` is being
     /// reached.
@@ -972,11 +973,6 @@ inline Channel::Item::~Item()
 inline const bsl::shared_ptr<bdlbb::Blob>& Channel::Item::data()
 {
     return d_data_sp;
-}
-
-inline bool Channel::Item::isSecondary()
-{
-    return d_type == bmqp::EventType::e_ACK;
 }
 
 // --------------------

@@ -4280,6 +4280,21 @@ int FileStore::writeQueueCreationRecord(
         return 10 * rc + rc_WRITE_QUEUE_CREATION_RECORD_ERROR;  // RETURN
     }
 
+    if (!d_isFSMWorkflow) {
+        // TODO: Temporarily. Remove after all versions wait for CSL commits
+        // before calling onQueueAssigned/onQueueUpdated.
+
+        BSLS_ASSERT_SAFE(d_config.queueCreationCb());
+        d_config.queueCreationCb()(d_config.partitionId(),
+                                   quri,
+                                   queueKey,
+                                   appIdKeyPairs,
+                                   QueueOpType::e_CREATION == queueOpType);
+        // Ignore the result.  In the case of storage creation failure, the
+        // lookup below will fail.
+        // Virtual storage creation currently fails on double creation only.
+    }
+
     StorageMapIter sit = d_storages.find(queueKey);
     if (sit == d_storages.end()) {
         if (d_isCSLModeEnabled) {
@@ -4294,12 +4309,13 @@ int FileStore::writeQueueCreationRecord(
     BSLS_ASSERT_SAFE(rstorage);
 
     // Create in-memory record.
-    DataStoreRecord       record(RecordType::e_QUEUE_OP,
-                           recordOffset,
-                           queueRecLength);
-    DataStoreRecordKey    key(recHeader.sequenceNumber(),
-                           recHeader.primaryLeaseId());
     DataStoreRecordHandle handle;
+    DataStoreRecord       record(RecordType::e_QUEUE_OP,
+                                 recordOffset,
+                                 queueRecLength);
+    DataStoreRecordKey    key(recHeader.sequenceNumber(),
+                              recHeader.primaryLeaseId());
+
     insertDataStoreRecord(&handle, key, record);
 
     rstorage->addQueueOpRecordHandle(handle);
@@ -6806,8 +6822,9 @@ void FileStore::clearPrimary()
     FileSet* fs = d_fileSets[0].get();
     BSLS_ASSERT_SAFE(fs);
 
-    if (fs->d_journalFilePosition >
-        (sizeof(FileHeader) + sizeof(JournalFileHeader))) {
+    if (!d_isFSMWorkflow &&
+        fs->d_journalFilePosition >
+            (sizeof(FileHeader) + sizeof(JournalFileHeader))) {
         // There is at least one record in the JOURNAL.  Read the last JOURNAL
         // record.
 
@@ -7549,7 +7566,8 @@ bsl::ostream& FileStoreIterator::print(bsl::ostream& stream,
         printer.printAttribute("queueOpRecord", record);
     } break;
     case mqbs::RecordType::e_JOURNAL_OP:
-    case mqbs::RecordType::e_UNDEFINED: {
+    case mqbs::RecordType::e_UNDEFINED:
+    default: {
         // we should never be here
         BSLS_ASSERT_SAFE(false && "Invalid file store record");
     }
