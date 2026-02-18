@@ -384,12 +384,12 @@ void Cluster::stopDispatched()
     d_clusterData.membership().netCluster()->closeChannels();
 }
 
-void Cluster::sendAck(bmqt::AckResult::Enum     status,
-                      int                       correlationId,
-                      const bmqt::MessageGUID&  messageGUID,
-                      int                       queueId,
-                      const bslstl::StringRef&  source,
-                      mqbc::ClusterNodeSession* nodeSession)
+void Cluster::sendAck(bmqt::AckResult::Enum           status,
+                      int                             correlationId,
+                      const bmqt::MessageGUID&        messageGUID,
+                      int                             queueId,
+                      const bslstl::StringRef&        source,
+                      const mqbc::ClusterNodeSession* nodeSession)
 {
     // executed by the *DISPATCHER* thread
 
@@ -763,7 +763,8 @@ void Cluster::onPutEvent(const mqbi::DispatcherPutEvent& event)
     while ((rc = putIt.next()) == 1) {
         const bmqp::QueueId queueId(putIt.header().queueId(),
                                     bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID);
-        QueueHandleMapIter  queueIt = ns->queueHandles().find(queueId.id());
+        QueueHandleMapConstIter queueIt = ns->queueHandles().find(
+            queueId.id());
 
         // Check if queueId represents a valid queue
         if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(queueIt ==
@@ -1043,7 +1044,9 @@ void Cluster::onConfirmEvent(const mqbi::DispatcherConfirmEvent& event)
                            << "', queueId: " << queueId
                            << ", GUID: " << confIt.message().messageGUID()
                            << "] from node " << source->nodeDescription();
-            queueHandle->confirmMessage(confIt.message().messageGUID(),
+
+            queueHandle->confirmMessage(getEventSource().get(),
+                                        confIt.message().messageGUID(),
                                         queueId.subId());
         }
         else {
@@ -1173,10 +1176,10 @@ void Cluster::onRejectEvent(const mqbi::DispatcherRejectEvent& event)
 }
 
 Cluster::ValidationResult::Enum
-Cluster::validateMessage(mqbi::QueueHandle**       queueHandle,
-                         const bmqp::QueueId&      queueId,
-                         mqbc::ClusterNodeSession* ns,
-                         bmqp::EventType::Enum     eventType)
+Cluster::validateMessage(mqbi::QueueHandle**             queueHandle,
+                         const bmqp::QueueId&            queueId,
+                         const mqbc::ClusterNodeSession* ns,
+                         bmqp::EventType::Enum           eventType)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE((eventType == bmqp::EventType::e_CONFIRM ||
@@ -1184,8 +1187,8 @@ Cluster::validateMessage(mqbi::QueueHandle**       queueHandle,
                      "Unsupported eventType");
     BSLS_ASSERT_SAFE(queueHandle);
 
-    QueueHandleMap&    queueHandles = ns->queueHandles();
-    QueueHandleMapIter queueIt      = queueHandles.find(queueId.id());
+    const QueueHandleMap&   queueHandles = ns->queueHandles();
+    QueueHandleMapConstIter queueIt      = queueHandles.find(queueId.id());
 
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(queueIt == queueHandles.end())) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
@@ -1282,7 +1285,7 @@ Cluster::sendConfirmInline(int                         partitionId,
         return mqbi::InlineResult::e_INVALID_PARTITION;  // RETURN
     }
 
-    mqbc::GateKeeper::Status primaryStatus(d_state.gatePrimary(partitionId));
+    bmqu::GateKeeper::Status primaryStatus(d_state.gatePrimary(partitionId));
 
     if (!primaryStatus.isOpen()) {
         return mqbi::InlineResult::e_INVALID_PRIMARY;  // RETURN
@@ -1294,7 +1297,7 @@ Cluster::sendConfirmInline(int                         partitionId,
     mqbc::ClusterNodeSession*        ns    = pinfo.primaryNodeSession();
     BSLS_ASSERT_SAFE(ns);
 
-    mqbc::GateKeeper::Status nodeStatus(ns->gateConfirm());
+    bmqu::GateKeeper::Status nodeStatus(ns->gateConfirm());
 
     if (!nodeStatus.isOpen()) {
         return mqbi::InlineResult::e_UNAVAILABLE;  // RETURN
@@ -1346,7 +1349,7 @@ Cluster::sendPutInline(int                                 partitionId,
         return mqbi::InlineResult::e_INVALID_PARTITION;  // RETURN
     }
 
-    mqbc::GateKeeper::Status primaryStatus(d_state.gatePrimary(partitionId));
+    bmqu::GateKeeper::Status primaryStatus(d_state.gatePrimary(partitionId));
 
     if (!primaryStatus.isOpen()) {
         return mqbi::InlineResult::e_INVALID_PRIMARY;  // RETURN
@@ -1370,7 +1373,7 @@ Cluster::sendPutInline(int                                 partitionId,
 
     BSLS_ASSERT_SAFE(primaryNodeSession);
 
-    mqbc::GateKeeper::Status nodeStatus(primaryNodeSession->gatePut());
+    bmqu::GateKeeper::Status nodeStatus(primaryNodeSession->gatePut());
 
     if (!nodeStatus.isOpen()) {
         // This checks both self status and the destination status
@@ -2102,6 +2105,18 @@ Cluster::Cluster(const bslstl::StringRef&           name,
         this,
         mqbi::DispatcherClientType::e_CLUSTER);
 
+    // We don't call mqbi::Dispatcher::registerClient for node sessions,
+    // have to pass the parameters the dispatcher set for this Cluster
+    for (mqbc::ClusterMembership::ClusterNodeSessionMap::iterator iter =
+             nodeSessionMap.begin();
+         iter != nodeSessionMap.end();
+         iter++) {
+        mqbc::ClusterMembership::ClusterNodeSessionSp& nodeSessionSp =
+            iter->second;
+        nodeSessionSp->setThreadId(this->getThreadId());
+        nodeSessionSp->setEventSource(this->getEventSource());
+    }
+
     d_clusterData.requestManager().setExecutor(dispatcher->executor(this));
 
     BALL_LOG_INFO << "Created Cluster: "
@@ -2653,10 +2668,11 @@ void Cluster::processEvent(const bmqp::Event&   event,
 
     // Helper macro to dispatch event of the specified type 'T' with isRelay
     // set to the value specified in 'R'.
+    // TODO(678098): revisit, use per-IO thread event source
 #define DISPATCH_EVENT(T, R)                                                  \
     {                                                                         \
-        mqbi::Dispatcher::DispatcherEventSp _evt = dispatcher()->getEvent(    \
-            this);                                                            \
+        mqbi::Dispatcher::DispatcherEventSp _evt =                            \
+            dispatcher()->getDefaultEventSource()->getEvent();                \
         bsl::shared_ptr<bdlbb::Blob> _blobSp =                                \
             d_clusterData.blobSpPool().getObject();                           \
         *_blobSp = *(event.blob());                                           \
@@ -2782,6 +2798,11 @@ void Cluster::processEvent(const bmqp::Event&   event,
     case bmqp::EventType::e_REPLICATION_RECEIPT: {
         // Receipt event arrives from replication nodes to primary.
         d_storageManager_mp->processReceiptEvent(event, source);
+    } break;  // BREAK
+    case bmqp::EventType::e_AUTHENTICATION: {
+        // TODO
+        BALL_LOG_ERROR << "Received Authentication Event but reauthentication "
+                          "logic is not implemented yet.";
     } break;  // BREAK
     case bmqp::EventType::e_UNDEFINED:
     default: {

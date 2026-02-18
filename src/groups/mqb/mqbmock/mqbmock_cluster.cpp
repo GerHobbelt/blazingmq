@@ -33,6 +33,7 @@
 // BDE
 #include <bdlbb_pooledblobbufferfactory.h>
 #include <bsl_iostream.h>
+#include <bsl_memory.h>
 #include <bsl_utility.h>
 #include <bsla_annotations.h>
 #include <bslmt_semaphore.h>
@@ -193,6 +194,9 @@ void Cluster::_initializeNodeSessions()
                                     statContextSp,
                                     d_allocator_p);
 
+        // We don't call mqbi::Dispatcher::registerClient for node sessions
+        nodeSessionSp->setEventSource(d_dispatcher.createEventSource());
+
         nodeSessionSp->setNodeStatus(bmqp_ctrlmsg::NodeStatus::E_AVAILABLE,
                                      bmqp_ctrlmsg::NodeStatus::E_AVAILABLE);
 
@@ -218,23 +222,28 @@ Cluster::Cluster(bslma::Allocator*        allocator,
                  const bslstl::StringRef& location,
                  const bslstl::StringRef& archive)
 : d_allocator_p(allocator)
+, d_name(name, allocator)
 , d_bufferFactory(1024, allocator)
 , d_blobSpPool(bdlf::BindUtil::bind(&createBlob,
                                     &d_bufferFactory,
                                     bdlf::PlaceHolders::_1,   // arena
                                     bdlf::PlaceHolders::_2),  // allocator
                k_BLOB_POOL_GROWTH_STRATEGY,
-               d_allocator_p)
+               allocator)
 , d_dispatcher(allocator)
 , d_scheduler(bsls::SystemClockType::e_MONOTONIC, allocator)
 , d_timeSource(&d_scheduler)
 , d_isStarted(false)
 , d_clusterDefinition(allocator)
+, d_domain(this, allocator)
+, d_domainFactory(d_domain, allocator)
 , d_channels(allocator)
-, d_initialConnectionHandler_mp()
+, d_authenticator_mp()
+, d_negotiator_mp()
 , d_transportManager(&d_scheduler,
                      &d_bufferFactory,
-                     d_initialConnectionHandler_mp,
+                     d_authenticator_mp,
+                     d_negotiator_mp,
                      0,  // mqbstat::StatController*
                      allocator)
 , d_netCluster_mp(0)
@@ -261,7 +270,7 @@ Cluster::Cluster(bslma::Allocator*        allocator,
         BSLS_ASSERT_OPT(!isLeader);
     }
 
-    _initializeClusterDefinition(name,
+    _initializeClusterDefinition(d_name,
                                  location,
                                  archive,
                                  clusterNodeDefs,
@@ -280,18 +289,25 @@ Cluster::Cluster(bslma::Allocator*        allocator,
     setThreadId(bslmt::ThreadUtil::selfId());
 
     d_clusterData_mp.load(new (*d_allocator_p) mqbc::ClusterData(
-                              d_clusterDefinition.name(),
+                              d_name,
                               d_resources,
                               d_clusterDefinition,
                               mqbcfg::ClusterProxyDefinition(d_allocator_p),
                               d_netCluster_mp,
                               this,
-                              0,  // domainFactory
+                              &d_domainFactory,
                               &d_transportManager,
                               d_statContext_sp.get(),
                               d_statContexts,
                               d_allocator_p),
                           d_allocator_p);
+
+    mqbconfm::Domain domainConfig(d_allocator_p);
+    domainConfig.name() = "mock-domain";
+    domainConfig.mode().makePriority();
+    domainConfig.storage().config().makeFileBacked();
+    bmqu::MemOutStream errorDescription;
+    d_domain.configure(errorDescription, domainConfig);
 
     // Set cluster state's dispatcher
     d_clusterData_mp->dispatcherClientData() = d_dispatcherClientData;
@@ -560,7 +576,7 @@ const bsl::string& Cluster::description() const
 //   (virtual: mqbi::Cluster)
 const bsl::string& Cluster::name() const
 {
-    return d_clusterData_mp->identity().name();
+    return d_name;
 }
 
 const mqbnet::Cluster& Cluster::netCluster() const

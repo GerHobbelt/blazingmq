@@ -200,7 +200,8 @@ mqbi::InlineResult::Enum ClusterNodeSession::sendPush(
     const bsl::shared_ptr<bdlbb::Blob>&       message,
     const mqbi::StorageMessageAttributes&     attributes,
     const bmqp::MessagePropertiesInfo&        mps,
-    const bmqp::Protocol::SubQueueInfosArray& subQueueInfos)
+    const bmqp::Protocol::SubQueueInfosArray& subQueueInfos,
+    bool                                      isOutOfOrder)
 {
     // executed by the *QUEUE DISPATCHER* thread
     // This PUSH message is enqueued by mqbblp::Queue/QueueHandle on this node,
@@ -209,7 +210,7 @@ mqbi::InlineResult::Enum ClusterNodeSession::sendPush(
     // payload, and so, primary (this node) sends only the guid and, if
     // applicable, the associated subQueueIds.
 
-    GateKeeper::Status status(d_gatePush);
+    bmqu::GateKeeper::Status status(d_gatePush);
 
     if (!status.isOpen()) {
         // Target node (or self) is not AVAILABLE, so we don't send this PUSH
@@ -223,6 +224,13 @@ mqbi::InlineResult::Enum ClusterNodeSession::sendPush(
     // TBD: groupId: also pass options to the 'PushEventBuilder::packMessage'
     // routine below.
 
+    int flags = 0;
+
+    if (isOutOfOrder) {
+        bmqp::PushHeaderFlagUtil::setFlag(
+            &flags,
+            bmqp::PushHeaderFlags::e_OUT_OF_ORDER);
+    }
     if (message) {
         // If it's at most once, then we explicitly send the payload since it's
         // in-mem mode and there's been no replication (i.e. no preceding
@@ -231,7 +239,7 @@ mqbi::InlineResult::Enum ClusterNodeSession::sendPush(
             message,
             queueId,
             msgGUID,
-            0,
+            flags,
             attributes.compressionAlgorithmType(),
             mps,
             subQueueInfos);
@@ -240,7 +248,7 @@ mqbi::InlineResult::Enum ClusterNodeSession::sendPush(
         rc = clusterNode()->channel().writePush(
             queueId,
             msgGUID,
-            0,
+            flags,
             attributes.compressionAlgorithmType(),
             mps,
             subQueueInfos);
@@ -259,7 +267,7 @@ ClusterNodeSession::sendAck(int queueId, const bmqp::AckMessage& ackMessage)
     // This ACK message is enqueued by mqbblp::Queue on this node, and needs to
     // be forwarded to 'clusterNode()' (the replica node).
 
-    GateKeeper::Status status(d_gateAck);
+    bmqu::GateKeeper::Status status(d_gateAck);
 
     if (!status.isOpen()) {
         // Drop the ACK because downstream node (or self) is either starting,
