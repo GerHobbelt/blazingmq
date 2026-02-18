@@ -665,7 +665,7 @@ void StorageManager::processPartitionSyncEvent(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     mqbnet::ClusterNode* source = event.clusterNode();
     bmqp::Event          rawEvent(event.blob().get(), d_allocator_p);
@@ -1010,7 +1010,7 @@ void StorageManager::registerQueue(const bmqt::Uri&        uri,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(uri.isValid());
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
@@ -1031,14 +1031,14 @@ void StorageManager::unregisterQueue(const bmqt::Uri& uri, int partitionId)
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     // Dispatch the un-registration to appropriate thread.
 
     mqbs::FileStore* fs = d_fileStores[partitionId].get();
 
-    mqbi::DispatcherEvent* queueEvent = fs->dispatcher()->getEvent(
-        mqbi::DispatcherClientType::e_QUEUE);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent =
+        fs->dispatcher()->getEvent(mqbi::DispatcherClientType::e_QUEUE);
 
     (*queueEvent)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -1053,7 +1053,7 @@ void StorageManager::unregisterQueue(const bmqt::Uri& uri, int partitionId)
                                  bsl::cref(d_partitionInfoVec[partitionId]),
                                  uri));
 
-    fs->dispatchEvent(queueEvent);
+    fs->dispatchEvent(bslmf::MovableRefUtil::move(queueEvent));
 }
 
 int StorageManager::updateQueuePrimary(const bmqt::Uri& uri,
@@ -1086,15 +1086,15 @@ void StorageManager::registerQueueReplica(int                     partitionId,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     // This routine is executed at follower nodes upon commit callback of Queue
     // Assignment Advisory from the leader.
 
     mqbs::FileStore* fs = d_fileStores[partitionId].get();
 
-    mqbi::DispatcherEvent* queueEvent = fs->dispatcher()->getEvent(
-        mqbi::DispatcherClientType::e_QUEUE);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent =
+        fs->dispatcher()->getEvent(mqbi::DispatcherClientType::e_QUEUE);
 
     (*queueEvent)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -1110,7 +1110,8 @@ void StorageManager::registerQueueReplica(int                     partitionId,
             appIdKeyPairs,
             domain));
 
-    d_fileStores[partitionId]->dispatchEvent(queueEvent);
+    d_fileStores[partitionId]->dispatchEvent(
+        bslmf::MovableRefUtil::move(queueEvent));
 }
 
 void StorageManager::unregisterQueueReplica(int              partitionId,
@@ -1121,15 +1122,15 @@ void StorageManager::unregisterQueueReplica(int              partitionId,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     // This routine is executed at follower nodes upon commit callback of Queue
     // Unassigned Advisory or Queue Update Advisory from the leader.
 
     mqbs::FileStore* fs = d_fileStores[partitionId].get();
 
-    mqbi::DispatcherEvent* queueEvent = fs->dispatcher()->getEvent(
-        mqbi::DispatcherClientType::e_QUEUE);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent =
+        fs->dispatcher()->getEvent(mqbi::DispatcherClientType::e_QUEUE);
 
     (*queueEvent)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -1143,7 +1144,7 @@ void StorageManager::unregisterQueueReplica(int              partitionId,
             queueKey,
             appKey));
 
-    fs->dispatchEvent(queueEvent);
+    fs->dispatchEvent(bslmf::MovableRefUtil::move(queueEvent));
 }
 
 void StorageManager::updateQueueReplica(int                     partitionId,
@@ -1155,15 +1156,15 @@ void StorageManager::updateQueueReplica(int                     partitionId,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     // This routine is executed at follower nodes upon commit callback of Queue
     // Queue Update Advisory from the leader.
 
     mqbs::FileStore* fs = d_fileStores[partitionId].get();
 
-    mqbi::DispatcherEvent* queueEvent = fs->dispatcher()->getEvent(
-        mqbi::DispatcherClientType::e_QUEUE);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent =
+        fs->dispatcher()->getEvent(mqbi::DispatcherClientType::e_QUEUE);
 
     (*queueEvent)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -1179,7 +1180,7 @@ void StorageManager::updateQueueReplica(int                     partitionId,
             appIdKeyPairs,
             domain));
 
-    fs->dispatchEvent(queueEvent);
+    fs->dispatchEvent(bslmf::MovableRefUtil::move(queueEvent));
 }
 
 void StorageManager::resetQueue(const bmqt::Uri& uri,
@@ -1189,15 +1190,15 @@ void StorageManager::resetQueue(const bmqt::Uri& uri,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(uri.isValid());
 
     // Note that 'queue' can be null, which is a valid scenario.
 
     mqbs::FileStore* fs = d_fileStores[partitionId].get();
 
-    mqbi::DispatcherEvent* queueEvent = fs->dispatcher()->getEvent(
-        mqbi::DispatcherClientType::e_QUEUE);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent =
+        fs->dispatcher()->getEvent(mqbi::DispatcherClientType::e_QUEUE);
 
     (*queueEvent)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -1209,7 +1210,7 @@ void StorageManager::resetQueue(const bmqt::Uri& uri,
                                   uri,
                                   queue_sp));
 
-    fs->dispatchEvent(queueEvent);
+    fs->dispatchEvent(bslmf::MovableRefUtil::move(queueEvent));
 }
 
 int StorageManager::start(bsl::ostream& errorDescription)
@@ -1217,7 +1218,7 @@ int StorageManager::start(bsl::ostream& errorDescription)
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     enum RcEnum {
         // Value for the various RC error categories
@@ -1398,7 +1399,7 @@ void StorageManager::stop()
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITION
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     if (!d_isStarted) {
         return;  // RETURN
@@ -1427,7 +1428,7 @@ void StorageManager::initializeQueueKeyInfoMap(
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITION
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     BSLS_ASSERT_OPT(false && "Only the FSM version of this method from "
                              "mqbc::StorageManager should be invoked.");
@@ -1439,8 +1440,7 @@ void StorageManager::setPrimaryForPartition(int                  partitionId,
 {
     // executed by cluster *DISPATCHER* thread
 
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(0 <= partitionId);
     BSLS_ASSERT_SAFE(primaryNode);
 
@@ -1489,8 +1489,7 @@ void StorageManager::clearPrimaryForPartition(int                  partitionId,
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITION
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(0 <= partitionId);
 
     unsigned int pid = static_cast<unsigned int>(partitionId);
@@ -1513,8 +1512,7 @@ void StorageManager::setPrimaryStatusForPartition(
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITION
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     BSLS_ASSERT_OPT(false && "This method should only be invoked in CSL mode");
 }
@@ -1572,7 +1570,7 @@ void StorageManager::processStorageEvent(
     // executed by *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(event.isRelay() == false);
 
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(!d_isStarted)) {
@@ -1688,8 +1686,7 @@ void StorageManager::processPartitionSyncStateRequest(
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(source);
     BSLS_ASSERT_SAFE(bmqp_ctrlmsg::NodeStatus::E_AVAILABLE ==
                      d_clusterData_p->membership().selfNodeStatus());
@@ -1732,8 +1729,7 @@ void StorageManager::processPartitionSyncDataRequest(
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(source);
     BSLS_ASSERT_SAFE(bmqp_ctrlmsg::NodeStatus::E_AVAILABLE ==
                      d_clusterData_p->membership().selfNodeStatus());
@@ -1819,7 +1815,7 @@ void StorageManager::processRecoveryEvent(
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(event.blob());
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(event.isRelay() == false);
 
     mqbnet::ClusterNode* source = event.clusterNode();
@@ -2008,8 +2004,7 @@ int StorageManager::processCommand(mqbcmd::StorageResult*        result,
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     if (!d_isStarted) {
         result->makeError();
@@ -2035,8 +2030,7 @@ void StorageManager::gcUnrecognizedDomainQueues()
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     mqbc::StorageUtil::gcUnrecognizedDomainQueues(&d_fileStores,
                                                   &d_unrecognizedDomainsLock,
@@ -2049,8 +2043,7 @@ int StorageManager::purgeQueueOnDomain(mqbcmd::StorageResult* result,
     // executed by cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_dispatcher_p->inDispatcherThread(&d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     mqbc::StorageUtil::purgeQueueOnDomain(result,
                                           domainName,
@@ -2068,7 +2061,7 @@ bool StorageManager::isStorageEmpty(const bmqt::Uri& uri,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
 

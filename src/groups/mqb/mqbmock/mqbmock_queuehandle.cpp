@@ -127,9 +127,10 @@ mqbi::DispatcherClient* QueueHandle::client()
     return d_client_p;
 }
 
-void QueueHandle::registerSubStream(const bmqp_ctrlmsg::SubQueueIdInfo& stream,
-                                    unsigned int upstreamSubQueueId,
-                                    const mqbi::QueueCounts& counts)
+mqbi::QueueHandle::SubStreams::const_iterator
+QueueHandle::registerSubStream(const bmqp_ctrlmsg::SubQueueIdInfo& stream,
+                               unsigned int             upstreamSubQueueId,
+                               const mqbi::QueueCounts& counts)
 {
     assertConsistentSubStreamInfo(stream.appId(), stream.subId());
 
@@ -138,15 +139,19 @@ void QueueHandle::registerSubStream(const bmqp_ctrlmsg::SubQueueIdInfo& stream,
     if (it == d_subStreamInfos.end()) {
         d_downstreams.emplace(stream.subId(),
                               Downstream(upstreamSubQueueId, d_allocator_p));
-        d_subStreamInfos.insert(bsl::make_pair(stream.appId(),
-                                               StreamInfo(counts,
-                                                          stream.subId(),
-                                                          upstreamSubQueueId,
-                                                          d_allocator_p)));
-        return;  // RETURN
+        it = d_subStreamInfos
+                 .insert(bsl::make_pair(stream.appId(),
+                                        StreamInfo(counts,
+                                                   stream.subId(),
+                                                   upstreamSubQueueId,
+                                                   d_allocator_p)))
+                 .first;
+    }
+    else {
+        it->second.d_counts += counts;
     }
 
-    it->second.d_counts += counts;
+    return it;
 }
 
 void QueueHandle::registerSubscription(unsigned int downstreamSubId,
@@ -287,10 +292,9 @@ void QueueHandle::onAckMessage(BSLA_UNUSED const bmqp::AckMessage& ackMessage)
 }
 
 void QueueHandle::deliverMessage(
-    const mqbi::StorageIterator& message,
-    BSLA_UNUSED const bmqp::Protocol::MsgGroupId& msgGroupId,
-    const bmqp::Protocol::SubQueueInfosArray&     subscriptions,
-    BSLA_MAYBE_UNUSED bool                        isOutOfOrder)
+    const mqbi::StorageIterator&              message,
+    const bmqp::Protocol::SubQueueInfosArray& subscriptions,
+    BSLA_MAYBE_UNUSED bool                    isOutOfOrder)
 {
     // PRECONDITIONS
     BSLS_ASSERT_OPT(
@@ -320,11 +324,10 @@ void QueueHandle::deliverMessage(
 
 void QueueHandle::deliverMessageNoTrack(
     const mqbi::StorageIterator&              message,
-    const bmqp::Protocol::MsgGroupId&         msgGroupId,
     const bmqp::Protocol::SubQueueInfosArray& subscriptions)
 {
     // Delegate, from a simplified mock perspective.
-    deliverMessage(message, msgGroupId, subscriptions, false);
+    deliverMessage(message, subscriptions, false);
 }
 
 void QueueHandle::configure(
@@ -530,6 +533,12 @@ const mqbi::QueueHandle::SubStreams& QueueHandle::subStreamInfos() const
 bool QueueHandle::isClientClusterMember() const
 {
     return false;
+}
+
+inline const mqbi::QueueHandleRequesterContext*
+QueueHandle::clientContext() const
+{
+    return 0;
 }
 
 bool QueueHandle::canDeliver(unsigned int downstreamSubscriptionId) const

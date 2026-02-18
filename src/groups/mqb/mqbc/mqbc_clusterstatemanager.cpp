@@ -64,7 +64,6 @@ ClusterStateManager::ClusterStateManager(
 , d_state_p(clusterState)
 , d_clusterFSM(*this)
 , d_nodeToLedgerLSNMap(allocator)
-, d_lsnQuorum((clusterConfig.nodes().size() / 2) + 1)
 // TODO Add cluster config to determine Eventual vs Strong
 , d_clusterStateLedger_mp(clusterStateLedger)
 , d_storageManager_p(0)
@@ -97,7 +96,7 @@ void ClusterStateManager::do_startWatchDog(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     d_clusterData_p->scheduler().scheduleEvent(
         &d_watchDogEventHandle,
@@ -111,7 +110,7 @@ void ClusterStateManager::do_stopWatchDog(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     if (d_clusterData_p->scheduler().cancelEvent(d_watchDogEventHandle) != 0) {
         BALL_LOG_ERROR << d_clusterData_p->identity().description()
@@ -125,7 +124,7 @@ void ClusterStateManager::do_triggerWatchDog(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     if (d_clusterData_p->scheduler().rescheduleEvent(
             d_watchDogEventHandle,
@@ -140,7 +139,7 @@ void ClusterStateManager::do_applyCSLSelf(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
 
@@ -151,6 +150,7 @@ void ClusterStateManager::do_applyCSLSelf(const ClusterFSMArgsSp& args)
     ClusterState                 tempState(
         d_cluster_p,
         d_cluster_p->clusterConfig()->partitionConfig().numPartitions(),
+        true,  // isTemporary
         d_allocator_p);
 
     const bool selfHighestLSN =
@@ -224,8 +224,7 @@ void ClusterStateManager::do_applyCSLSelf(const ClusterFSMArgsSp& args)
         ClusterUtil::assignPartitions(&clusterStateSnapshot.partitions(),
                                       &tempState,
                                       d_clusterConfig.masterAssignment(),
-                                      *d_clusterData_p,
-                                      true);  // isCSLMode
+                                      *d_clusterData_p);
     }
 
     // Apply the new leader's first advisory
@@ -244,7 +243,7 @@ void ClusterStateManager::do_initializeQueueKeyInfoMap(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterFSM.isSelfHealed());
 
     d_storageManager_p->initializeQueueKeyInfoMap(*d_state_p);
@@ -256,7 +255,7 @@ void ClusterStateManager::do_sendFollowerLSNRequests(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
 
@@ -295,7 +294,7 @@ void ClusterStateManager::do_sendFollowerLSNResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfFollower());
@@ -330,7 +329,7 @@ void ClusterStateManager::do_sendFailureFollowerLSNResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
 
     const ClusterFSMEventMetadata& metadata = args->front().second;
@@ -360,7 +359,7 @@ void ClusterStateManager::do_findHighestLSN(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
 
@@ -393,7 +392,7 @@ void ClusterStateManager::do_sendFollowerClusterStateRequest(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
@@ -441,7 +440,7 @@ void ClusterStateManager::do_sendFollowerClusterStateResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfFollower());
@@ -487,7 +486,7 @@ void ClusterStateManager::do_sendFailureFollowerClusterStateResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
 
     const ClusterFSMEventMetadata& metadata = args->front().second;
@@ -516,7 +515,7 @@ void ClusterStateManager::do_storeSelfLSN(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
 
@@ -539,7 +538,7 @@ void ClusterStateManager::do_storeFollowerLSNs(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
@@ -563,7 +562,7 @@ void ClusterStateManager::do_removeFollowerLSN(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
@@ -592,11 +591,11 @@ void ClusterStateManager::do_checkLSNQuorum(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
 
-    if (d_nodeToLedgerLSNMap.size() >= d_lsnQuorum) {
+    if (d_nodeToLedgerLSNMap.size() >= getLsnQuorum()) {
         // If we have a quorum of LSNs (including self LSN)
 
         BALL_LOG_INFO << d_clusterData_p->identity().description()
@@ -624,7 +623,7 @@ void ClusterStateManager::do_sendRegistrationRequest(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfFollower());
@@ -672,7 +671,7 @@ void ClusterStateManager::do_sendRegistrationResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
@@ -705,7 +704,7 @@ void ClusterStateManager::do_sendFailureRegistrationResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
 
     const ClusterFSMEventMetadata& metadata = args->front().second;
@@ -735,7 +734,7 @@ void ClusterStateManager::do_logStaleFollowerLSNResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader() &&
                      !d_clusterFSM.isSelfLeader());
@@ -761,7 +760,7 @@ void ClusterStateManager::do_logStaleFollowerClusterStateResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterFSM.state() !=
                      ClusterFSM::State::e_LDR_HEALING_STG2);
@@ -784,7 +783,7 @@ void ClusterStateManager::do_logErrorLeaderNotHealed(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader());
     BSLS_ASSERT_SAFE(d_clusterFSM.state() == ClusterFSM::State::e_FOL_HEALING);
@@ -808,7 +807,7 @@ void ClusterStateManager::do_logFailFollowerLSNResponses(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
@@ -831,7 +830,7 @@ void ClusterStateManager::do_logFailFollowerClusterStateResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
@@ -865,7 +864,7 @@ void ClusterStateManager::do_logFailRegistrationResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfFollower());
@@ -898,7 +897,7 @@ void ClusterStateManager::do_reapplyEvent(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!args->empty());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
@@ -913,7 +912,7 @@ void ClusterStateManager::do_reapplySelectLeader(const ClusterFSMArgsSp& args)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader());
     BSLS_ASSERT_SAFE(d_clusterFSM.state() == ClusterFSM::State::e_UNKNOWN);
 
@@ -933,7 +932,7 @@ void ClusterStateManager::do_reapplySelectFollower(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader());
     BSLS_ASSERT_SAFE(d_clusterFSM.state() == ClusterFSM::State::e_UNKNOWN);
 
@@ -953,7 +952,7 @@ void ClusterStateManager::do_cleanupLSNs(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     d_nodeToLedgerLSNMap.clear();
 }
@@ -964,7 +963,7 @@ void ClusterStateManager::do_cancelRequests(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     bmqp_ctrlmsg::ControlMessage response;
     bmqp_ctrlmsg::Status&        failure = response.choice().makeStatus();
@@ -988,8 +987,7 @@ void ClusterStateManager::onPartitionPrimaryAssignment(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_cluster_p->dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_cluster_p->isRemote());
 
     // This method will notify the storage about (potentially same) mapping.
@@ -1016,7 +1014,7 @@ void ClusterStateManager::onCommit(
 {
     // executed by the cluster *DISPATCHER* thread
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(advisory.choice().isClusterMessageValue());
 
     if (status != mqbc::ClusterStateLedgerCommitStatus::e_SUCCESS) {
@@ -1049,7 +1047,7 @@ void ClusterStateManager::applyFSMEvent(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     ClusterFSMArgsSp eventsQueueSp(new (*d_allocator_p)
                                        ClusterFSMArgs(d_allocator_p),
@@ -1063,7 +1061,7 @@ int ClusterStateManager::loadClusterStateSnapshot(ClusterState* out)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(out);
 
     bslma::ManagedPtr<mqbc::ClusterStateLedgerIterator> cslIter =
@@ -1081,12 +1079,13 @@ int ClusterStateManager::loadClusterStateSnapshot(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(out);
 
     ClusterState tempState(
         d_cluster_p,
         d_cluster_p->clusterConfig()->partitionConfig().numPartitions(),
+        true,  // isTemporary
         d_allocator_p);
 
     BALL_LOG_INFO << "#TEMP_STATE "
@@ -1119,7 +1118,7 @@ void ClusterStateManager::onWatchDogDispatched()
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     if (d_clusterFSM.isSelfHealed()) {
         return;  // RETURN
@@ -1139,7 +1138,7 @@ void ClusterStateManager::onFollowerLSNResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterFSM.isSelfLeader() ||
                      (d_clusterFSM.state() == ClusterFSM::State::e_STOPPED) ||
@@ -1223,7 +1222,7 @@ void ClusterStateManager::onRegistrationResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader());
     BSLS_ASSERT_SAFE(d_clusterFSM.isSelfFollower() ||
@@ -1290,7 +1289,7 @@ void ClusterStateManager::onFollowerClusterStateResponse(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->cluster().isLocal());
     BSLS_ASSERT_SAFE(d_clusterFSM.isSelfLeader() ||
                      (d_clusterFSM.state() == ClusterFSM::State::e_STOPPED) ||
@@ -1362,7 +1361,7 @@ int ClusterStateManager::start(bsl::ostream& errorDescription)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     d_clusterData_p->electorInfo().registerObserver(this);
     d_clusterFSM.registerObserver(&d_clusterData_p->electorInfo());
@@ -1386,7 +1385,7 @@ void ClusterStateManager::stop()
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     d_clusterData_p->electorInfo().unregisterObserver(this);
     d_clusterFSM.unregisterObserver(&d_clusterData_p->electorInfo());
@@ -1410,13 +1409,18 @@ void ClusterStateManager::setPrimary(int                  partitionId,
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(0 <= partitionId);
     BSLS_ASSERT_SAFE(static_cast<size_t>(partitionId) <
                      d_state_p->partitions().size());
     BSLS_ASSERT_SAFE(primary);
 
-    d_state_p->setPartitionPrimary(partitionId, leaseId, primary);
+    ClusterNodeSession* ns =
+        d_clusterData_p->membership().getClusterNodeSession(primary);
+
+    BSLS_ASSERT_SAFE(ns);
+
+    d_state_p->setPartitionPrimary(partitionId, leaseId, ns);
 }
 
 void ClusterStateManager::setPrimaryStatus(
@@ -1426,7 +1430,7 @@ void ClusterStateManager::setPrimaryStatus(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(0 <= partitionId);
     BSLS_ASSERT_SAFE(static_cast<size_t>(partitionId) <
                      d_state_p->partitions().size());
@@ -1441,7 +1445,7 @@ void ClusterStateManager::markOrphan(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(primary);
 
     for (int i = static_cast<int>(partitions.size()) - 1; 0 <= i; --i) {
@@ -1459,7 +1463,7 @@ void ClusterStateManager::assignPartitions(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterFSM.isSelfLeader());
     BSLS_ASSERT_SAFE(!d_cluster_p->isRemote());
     BSLS_ASSERT_SAFE(partitions && partitions->empty());
@@ -1467,8 +1471,7 @@ void ClusterStateManager::assignPartitions(
     ClusterUtil::assignPartitions(partitions,
                                   d_state_p,
                                   d_clusterConfig.masterAssignment(),
-                                  *d_clusterData_p,
-                                  true);  // isCSLMode
+                                  *d_clusterData_p);
 }
 
 bool ClusterStateManager::assignQueue(const bmqt::Uri&      uri,
@@ -1476,7 +1479,7 @@ bool ClusterStateManager::assignQueue(const bmqt::Uri&      uri,
 {
     // executed by the cluster *DISPATCHER* thread
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     return mqbc::ClusterUtil::assignQueue(d_state_p,
                                           d_clusterData_p,
@@ -1494,7 +1497,7 @@ void ClusterStateManager::registerQueueInfo(
     // executed by the *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     mqbc::ClusterUtil::registerQueueInfo(d_state_p,
                                          d_cluster_p,
@@ -1508,7 +1511,7 @@ void ClusterStateManager::unassignQueue(
     // executed by the *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfActiveLeader());
     BSLS_ASSERT_SAFE(!d_cluster_p->isRemote());
 
@@ -1533,7 +1536,7 @@ void ClusterStateManager::sendClusterState(
     // executed by the *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader() &&
                      d_clusterFSM.isSelfLeader());
 
@@ -1542,6 +1545,8 @@ void ClusterStateManager::sendClusterState(
                                         *d_state_p,
                                         sendPartitionPrimaryInfo,
                                         sendQueuesInfo,
+                                        true,  // trustCSL
+                                        d_allocator_p,
                                         node,
                                         partitions);
 }
@@ -1555,7 +1560,7 @@ ClusterStateManager::updateAppIds(const bsl::vector<bsl::string>& added,
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_cluster_p->isRemote());
     BSLS_ASSERT_SAFE(!domainName.empty());
 
@@ -1601,7 +1606,7 @@ void ClusterStateManager::processFollowerLSNRequest(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
     BSLS_ASSERT_SAFE(message.choice()
                          .clusterMessage()
@@ -1632,7 +1637,7 @@ void ClusterStateManager::processFollowerClusterStateRequest(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
     BSLS_ASSERT_SAFE(message.choice()
                          .clusterMessage()
@@ -1663,7 +1668,7 @@ void ClusterStateManager::processRegistrationRequest(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
     BSLS_ASSERT_SAFE(message.choice()
                          .clusterMessage()
@@ -1706,7 +1711,7 @@ void ClusterStateManager::processClusterStateEvent(
     // executed by *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     mqbnet::ClusterNode* source = event.clusterNode();
     bmqp::Event          rawEvent(event.blob().get(), d_allocator_p);
@@ -1726,7 +1731,7 @@ void ClusterStateManager::processQueueAssignmentRequest(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     mqbc::ClusterUtil::processQueueAssignmentRequest(
         d_state_p,
@@ -1770,7 +1775,7 @@ void ClusterStateManager::onClusterLeader(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(
         (node && (ElectorInfoLeaderStatus::e_UNDEFINED != status)) ||
         (!node && (ElectorInfoLeaderStatus::e_UNDEFINED == status)));
@@ -1821,9 +1826,7 @@ void ClusterStateManager::validateClusterStateLedger() const
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_clusterData_p->dispatcherClientData()
-                         .dispatcher()
-                         ->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     mqbc::ClusterUtil::validateClusterStateLedger(d_cluster_p,
                                                   *d_clusterStateLedger_mp,

@@ -65,16 +65,11 @@ class Dispatcher : public mqbi::Dispatcher {
   private:
     // TYPES
     typedef bsl::unordered_map<const mqbi::DispatcherClient*,
-                               mqbi::DispatcherEvent*>
+                               mqbi::Dispatcher::DispatcherEventSp>
         EventMap;
     // A map from clients to events.
   private:
     // DATA
-    bool d_inDispatcherThread;
-    // A flag indicating whether the
-    // current thread is in the dispatcher
-    // thread with respect to any client
-
     EventMap d_eventsForClients;
     // Maps clients to currently processed
     // events;
@@ -142,30 +137,30 @@ class Dispatcher : public mqbi::Dispatcher {
     /// Retrieve an event from the event pool to send to the specified
     /// `client`.  Once populated, the returned event *must* be enqueued for
     /// processing by calling `dispatchEvent` otherwise it will be leaked.
-    mqbi::DispatcherEvent*
+    mqbi::Dispatcher::DispatcherEventSp
     getEvent(const mqbi::DispatcherClient* client) BSLS_KEYWORD_OVERRIDE;
 
     /// Retrieve an event from the event pool to send to a client of the
     /// specified `type`.  Once populated, the returned event *must* be
     /// enqueued for processing by calling `dispatchEvent` otherwise it will
     /// be leaked.
-    mqbi::DispatcherEvent*
+    mqbi::Dispatcher::DispatcherEventSp
     getEvent(mqbi::DispatcherClientType::Enum type) BSLS_KEYWORD_OVERRIDE;
 
     /// Dispatch the specified `event` to the specified `destination`.  The
     /// behavior is undefined unless `event` was obtained by a call to
     /// `getEvent` with a type matching the one of `destination`.
     void
-    dispatchEvent(mqbi::DispatcherEvent*  event,
+    dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
                   mqbi::DispatcherClient* destination) BSLS_KEYWORD_OVERRIDE;
 
     /// Dispatch the specified `event` to the processor in charge of clients
     /// of the specified `type` and associated with the specified `handle`.
     /// The behavior is undefined unless `event` was obtained by a call to
     /// `getEvent` with a matching `type`..
-    void dispatchEvent(mqbi::DispatcherEvent*            event,
-                       mqbi::DispatcherClientType::Enum  type,
-                       mqbi::Dispatcher::ProcessorHandle handle)
+    void dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
+                       mqbi::DispatcherClientType::Enum       type,
+                       mqbi::Dispatcher::ProcessorHandle      handle)
         BSLS_KEYWORD_OVERRIDE;
 
     /// Execute the specified `functor`, using the optionally specified
@@ -186,9 +181,9 @@ class Dispatcher : public mqbi::Dispatcher {
     /// clients of the specified `type`, and invoke the specified
     /// `doneCallback` (if any) when all the relevant processors are done
     /// executing the `functor`.
-    void execute(const mqbi::Dispatcher::VoidFunctor& functor,
-                 mqbi::DispatcherClientType::Enum     type,
-                 const mqbi::Dispatcher::VoidFunctor& doneCallback)
+    void executeOnAllQueues(const mqbi::Dispatcher::VoidFunctor& functor,
+                            mqbi::DispatcherClientType::Enum     type,
+                            const mqbi::Dispatcher::VoidFunctor& doneCallback)
         BSLS_KEYWORD_OVERRIDE;
 
     void synchronize(mqbi::DispatcherClient* client) BSLS_KEYWORD_OVERRIDE;
@@ -204,14 +199,6 @@ class Dispatcher : public mqbi::Dispatcher {
                      mqbi::Dispatcher::ProcessorHandle handle)
         BSLS_KEYWORD_OVERRIDE;
 
-    // MANIPULATORS
-    //   (specific to mqbmock::Dispatcher)
-
-    /// Set the value returned by this dispatcher when calling
-    /// `inDispatcherThread()` and return a reference offering modifiable
-    /// access to this object.
-    Dispatcher& _setInDispatcherThread(bool value);
-
     // ACCESSORS
     //   (virtual: mqbi::Dispatcher)
 
@@ -220,25 +207,9 @@ class Dispatcher : public mqbi::Dispatcher {
     int numProcessors(mqbi::DispatcherClientType::Enum type) const
         BSLS_KEYWORD_OVERRIDE;
 
-    /// Return whether the current thread is the dispatcher thread
-    /// associated to the specified `client`.  This is useful for
-    /// preconditions assert validation.
-    bool inDispatcherThread(const mqbi::DispatcherClient* client) const
-        BSLS_KEYWORD_OVERRIDE;
-
-    /// Return whether the current thread is the dispatcher thread
-    /// associated to the specified dispatcher client `data`.  This is
-    /// useful for preconditions assert validation.
-    bool inDispatcherThread(const mqbi::DispatcherClientData* data) const
-        BSLS_KEYWORD_OVERRIDE;
-
     /// Not implemented.
     bmqex::Executor
     executor(const mqbi::DispatcherClient* client) const BSLS_KEYWORD_OVERRIDE;
-
-    /// Not implemented.
-    bmqex::Executor clientExecutor(const mqbi::DispatcherClient* client) const
-        BSLS_KEYWORD_OVERRIDE;
 
     class InnerEventGuard;
     friend class InnerEventGuard;
@@ -250,8 +221,8 @@ class Dispatcher : public mqbi::Dispatcher {
 
     /// Associates a specified `event` with a specified `client` while the
     /// returned `EventGuard` doesn't go out of scope.
-    EventGuard _withEvent(const mqbi::DispatcherClient* client,
-                          mqbi::DispatcherEvent*        event);
+    EventGuard _withEvent(const mqbi::DispatcherClient*       client,
+                          mqbi::Dispatcher::DispatcherEventSp event);
 
     bslmt::Mutex& mutex();
 

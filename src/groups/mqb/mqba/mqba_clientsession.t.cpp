@@ -427,13 +427,6 @@ bmqp_ctrlmsg::NegotiationMessage client(const ClientType clientType)
     return negotiationMessage;
 }
 
-mqbmock::Dispatcher* setInDispatcherThread(mqbmock::Dispatcher* mockDispatcher)
-// Utility method.  Sets 'MockDispatcher' attribute.
-{
-    mockDispatcher->_setInDispatcherThread(true);
-    return mockDispatcher;
-}
-
 /// Overrides default `MockQueueHandle` behavior with extra functionality.
 class MyMockQueueHandle : public mqbmock::QueueHandle {
   public:
@@ -585,7 +578,7 @@ class MyMockDomain : public mqbmock::Domain {
     /// calls the specified `callback` with a new queue handle created
     /// using the specified `handleParameters`.  The specified `uri` and
     /// `clientContext` are ignored.
-    void openQueue(BSLA_UNUSED const bmqt::Uri& uri,
+    void openQueue(const bmqt::Uri& uri,
                    const bsl::shared_ptr<mqbi::QueueHandleRequesterContext>&
                                                               clientContext,
                    const bmqp_ctrlmsg::QueueHandleParameters& handleParameters,
@@ -605,8 +598,15 @@ class MyMockDomain : public mqbmock::Domain {
                                     handleParameters,
                                     d_allocator_p);
 
-        OpenQueueConfirmationCookie confirmationCookie;
-        confirmationCookie.createInplace(d_allocator_p, d_queueHandle.get());
+        mqbi::OpenQueueConfirmationCookieSp confirmationCookie;
+        confirmationCookie.createInplace(d_allocator_p);
+        confirmationCookie->d_handle = d_queueHandle.get();
+
+        confirmationCookie->d_stats_sp.createInplace(d_allocator_p);
+        confirmationCookie->d_stats_sp->initialize(
+            uri,
+            clientContext->statContext().get(),
+            d_allocator_p);
 
         bmqp_ctrlmsg::Status status(d_allocator_p);
         status.category() = bmqp_ctrlmsg::StatusCategory::E_SUCCESS;
@@ -648,18 +648,18 @@ class TestBench {
 
   public:
     // DATA
-    bdlbb::PooledBlobBufferFactory        d_bufferFactory;
-    BlobSpPool                            d_blobSpPool;
+    bdlbb::PooledBlobBufferFactory            d_bufferFactory;
+    BlobSpPool                                d_blobSpPool;
     bsl::shared_ptr<bmqio::TestChannel>   d_channel;
-    mqbmock::Cluster                      d_cluster;
-    mqbmock::Dispatcher                   d_mockDispatcher;
-    MyMockDomain                          d_domain;
-    mqbmock::DomainFactory                d_mockDomainFactory;
-    bslma::ManagedPtr<bmqst::StatContext> d_clientStatContext_mp;
-    bdlmt::EventScheduler                 d_scheduler;
-    TestClock                             d_testClock;
-    mqba::ClientSession                   d_cs;
-    bslma::Allocator*                     d_allocator_p;
+    mqbmock::Cluster                          d_cluster;
+    mqbmock::Dispatcher                       d_mockDispatcher;
+    MyMockDomain                              d_domain;
+    mqbmock::DomainFactory                    d_mockDomainFactory;
+    const bsl::shared_ptr<bmqst::StatContext> d_clientStatContext_sp;
+    bdlmt::EventScheduler                     d_scheduler;
+    TestClock                                 d_testClock;
+    mqba::ClientSession                       d_cs;
+    bslma::Allocator*                         d_allocator_p;
 
     static const int k_PAYLOAD_LENGTH = 36;
 
@@ -682,18 +682,17 @@ class TestBench {
     , d_mockDispatcher(allocator)
     , d_domain(&d_mockDispatcher, &d_cluster, atMostOnce, allocator)
     , d_mockDomainFactory(d_domain, allocator)
-    , d_clientStatContext_mp(
-          mqbstat::QueueStatsUtil::initializeStatContextClients(10, allocator)
-              .managedPtr())
+    , d_clientStatContext_sp(
+          mqbstat::QueueStatsUtil::initializeStatContextClients(10, allocator))
     , d_scheduler(bsls::SystemClockType::e_MONOTONIC, allocator)
     , d_testClock(d_scheduler)
     , d_cs(d_channel,
            negotiationMessage,
            "sessionDescription",
-           setInDispatcherThread(&d_mockDispatcher),
+           &d_mockDispatcher,
            0,  // ClusterCatalog
            &d_mockDomainFactory,
-           d_clientStatContext_mp,
+           d_clientStatContext_sp,
            &d_blobSpPool,
            &d_bufferFactory,
            &d_scheduler,
@@ -735,7 +734,7 @@ class TestBench {
 
         // Typically done during 'Dispatcher::registerClient()'.
         d_cs.dispatcherClientData().setDispatcher(&d_mockDispatcher);
-        d_mockDispatcher._setInDispatcherThread(true);
+        d_cs.setThreadId(bslmt::ThreadUtil::selfId());
 
         // Setup test time source
         bmqsys::Time::shutdown();
@@ -826,8 +825,10 @@ class TestBench {
             guid,
             queueId);
 
-        mqbi::DispatcherEvent event(d_allocator_p);
-        event.setType(mqbi::DispatcherEventType::e_ACK)
+        mqbi::Dispatcher::DispatcherEventSp event =
+            bsl::allocate_shared<mqbi::DispatcherEvent>(d_allocator_p);
+        (*event)
+            .setType(mqbi::DispatcherEventType::e_ACK)
             .setAckMessage(ackMessage);
 
         dispatch(event);
@@ -870,12 +871,13 @@ class TestBench {
                                       &d_bufferFactory,
                                       cat);
 
-        mqbi::DispatcherEvent event(d_allocator_p);
-        event.setType(mqbi::DispatcherEventType::e_PUT)
+        mqbi::Dispatcher::DispatcherEventSp event =
+            bsl::allocate_shared<mqbi::DispatcherEvent>(d_allocator_p);
+        (*event)
+            .setType(mqbi::DispatcherEventType::e_PUT)
             .setIsRelay(true)  // Relay message
             .setSource(&d_cs)  // DispatcherClient *value
             .setPutHeader(putHeader)
-            .setPartitionId(1)   // d_state_p->partitionId()) // int value
             .setBlob(eventBlob)  // const bsl::shared_ptr<bdlbb::Blob>& value
             .setCompressionAlgorithmType(cat);
 
@@ -911,9 +913,11 @@ class TestBench {
     {
         PVV("Sending PUSH with queueId=" << queueId << ", guid=" << msgGUID);
 
-        mqbi::DispatcherEvent event(d_allocator_p);
+        mqbi::Dispatcher::DispatcherEventSp event =
+            bsl::allocate_shared<mqbi::DispatcherEvent>(d_allocator_p);
 
-        event.setType(mqbi::DispatcherEventType::e_PUSH)
+        (*event)
+            .setType(mqbi::DispatcherEventType::e_PUSH)
             .setSource(&d_cs)  // DispatcherClient *value
             .setQueueId(queueId)
             .setBlob(blob)
@@ -1007,11 +1011,11 @@ class TestBench {
 
     /// A method that prepares and calls ClientSession's `dispatch()`
     /// using the specified `event`.
-    void dispatch(mqbi::DispatcherEvent& event)
+    void dispatch(mqbi::Dispatcher::DispatcherEventSp event)
     {
-        EventGuard guard(d_mockDispatcher._withEvent(&d_cs, &event));
+        EventGuard guard(d_mockDispatcher._withEvent(&d_cs, event));
 
-        d_cs.onDispatcherEvent(event);
+        d_cs.onDispatcherEvent(*event);
     }
 
     void verifyPush(bmqp::MessageProperties* properties,
@@ -1934,7 +1938,9 @@ static void test9_newStylePush()
 
     BMQTST_ASSERT_EQ(bmqt::EventBuilderResult::e_SUCCESS, rc);
 
-    mqbi::DispatcherEvent putEvent(bmqtst::TestHelperUtil::allocator());
+    mqbi::Dispatcher::DispatcherEventSp putEvent =
+        bsl::allocate_shared<mqbi::DispatcherEvent>(
+            bmqtst::TestHelperUtil::allocator());
     bmqp::Event           rawEvent(peb.blob().get(),
                          bmqtst::TestHelperUtil::allocator());
 
@@ -1946,7 +1952,8 @@ static void test9_newStylePush()
     rawEvent.loadPutMessageIterator(&putIt, false);
     BSLS_ASSERT(putIt.next());
 
-    putEvent.setType(mqbi::DispatcherEventType::e_PUT)
+    (*putEvent)
+        .setType(mqbi::DispatcherEventType::e_PUT)
         .setIsRelay(true)     // Relay message
         .setSource(&tb.d_cs)  // DispatcherClient *value
         .setPutHeader(putIt.header())
@@ -2046,7 +2053,9 @@ static void test10_newStyleCompressedPush()
 
     BMQTST_ASSERT_EQ(bmqt::EventBuilderResult::e_SUCCESS, rc);
 
-    mqbi::DispatcherEvent putEvent(bmqtst::TestHelperUtil::allocator());
+    mqbi::Dispatcher::DispatcherEventSp putEvent =
+        bsl::allocate_shared<mqbi::DispatcherEvent>(
+            bmqtst::TestHelperUtil::allocator());
     bmqp::Event           rawEvent(peb.blob().get(),
                          bmqtst::TestHelperUtil::allocator());
 
@@ -2058,7 +2067,8 @@ static void test10_newStyleCompressedPush()
     rawEvent.loadPutMessageIterator(&putIt, false);
     BSLS_ASSERT(putIt.next());
 
-    putEvent.setType(mqbi::DispatcherEventType::e_PUT)
+    (*putEvent)
+        .setType(mqbi::DispatcherEventType::e_PUT)
         .setIsRelay(true)     // Relay message
         .setSource(&tb.d_cs)  // DispatcherClient *value
         .setPutHeader(putIt.header())
@@ -2485,8 +2495,6 @@ int main(int argc, char* argv[])
 {
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
 
-    bmqt::UriParser::initialize(bmqtst::TestHelperUtil::allocator());
-
     {
         bmqp::ProtocolUtil::initialize(bmqtst::TestHelperUtil::allocator());
         bmqsys::Time::initialize(bmqtst::TestHelperUtil::allocator());
@@ -2529,8 +2537,6 @@ int main(int argc, char* argv[])
         bmqsys::Time::shutdown();
         bmqp::ProtocolUtil::shutdown();
     }
-
-    bmqt::UriParser::shutdown();
 
     TEST_EPILOG(bmqtst::TestHelper::e_DEFAULT);
     // Do not check for default/global allocator usage.

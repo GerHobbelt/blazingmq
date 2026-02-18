@@ -114,13 +114,13 @@ void onHandleDeconfigured(const bmqp_ctrlmsg::Status&,
 
 // CREATORS
 QueueHandle::Subscription::Subscription(
-    unsigned int                       subId,
+    unsigned int                       downstreamSubQueueId,
     const bsl::shared_ptr<Downstream>& downstream,
     unsigned int                       upstreamId)
 
 : d_unconfirmedMonitor(0, 0, 0, 0, 0, 0)  // Set later
 , d_downstream(downstream)
-, d_downstreamSubQueueId(subId)
+, d_downstreamSubQueueId(downstreamSubQueueId)
 , d_upstreamId(upstreamId)
 {
     // NOTHING
@@ -129,6 +129,11 @@ QueueHandle::Subscription::Subscription(
 const bsl::string& QueueHandle::Subscription::appId() const
 {
     return d_downstream->d_appId;
+}
+
+const QueueHandle::StatsSp& QueueHandle::Subscription::stats() const
+{
+    return d_downstream->d_stats_sp;
 }
 
 // ----------------------------------
@@ -150,8 +155,7 @@ void QueueHandle::confirmMessageDispatched(const bmqt::MessageGUID& msgGUID,
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(
             !bmqt::QueueFlagsUtil::isReader(handleParameters().flags()))) {
@@ -202,6 +206,11 @@ void QueueHandle::confirmMessageDispatched(const bmqt::MessageGUID& msgGUID,
         downstreamSubQueueId);
     unsigned int upstreamSubQueueId = subStream->d_upstreamSubQueueId;
 
+    // Update client stats
+    subStream->d_stats_sp->onEvent(
+        mqbstat::QueueStatsClient::EventType::e_CONFIRM,
+        1);
+
     // If we previously hit the maxUnconfirmed and are now back to below the
     // lowWatermark for BOTH messages and bytes, then we will schedule a
     // delivery by indicating to the associated queue engine that this handle
@@ -224,8 +233,7 @@ void QueueHandle::rejectMessageDispatched(const bmqt::MessageGUID& msgGUID,
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(
             !bmqt::QueueFlagsUtil::isReader(handleParameters().flags()))) {
@@ -302,8 +310,7 @@ QueueHandle::updateMonitor(const bsl::shared_ptr<Downstream>& subStream,
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     // TYPES
 
@@ -476,8 +483,7 @@ void QueueHandle::clearClientDispatched(bool hasLostClient)
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     d_clientContext_sp.reset();
 
@@ -530,44 +536,93 @@ void QueueHandle::deliverMessageImpl(
     const bsl::shared_ptr<bdlbb::Blob>&       message,
     const bmqt::MessageGUID&                  msgGUID,
     const mqbi::StorageMessageAttributes&     attributes,
-    const bmqp::Protocol::MsgGroupId&         msgGroupId,
-    const bmqp::Protocol::SubQueueInfosArray& subQueueInfos,
+    const bmqp::Protocol::SubQueueInfosArray& subscriptions,
     bool                                      isOutOfOrder)
 {
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(
         bmqt::QueueFlagsUtil::isReader(handleParameters().flags()));
-    BSLS_ASSERT_SAFE(subQueueInfos.size() >= 1 &&
-                     subQueueInfos.size() <= d_subscriptions.size());
+    BSLS_ASSERT_SAFE(subscriptions.size() >= 1 &&
+                     subscriptions.size() <= d_subscriptions.size());
 
     d_domainStats_p->onEvent<mqbstat::QueueStatsDomain::EventType::e_PUSH>(
         attributes.appDataLen());
 
-    // Create an event to dispatch delivery of the message to the client
-    mqbi::DispatcherClient* client = d_clientContext_sp->client();
-    mqbi::DispatcherEvent*  event  = client->dispatcher()->getEvent(client);
-    (*event)
-        .setType(mqbi::DispatcherEventType::e_PUSH)
-        .setSource(d_queue_sp.get())
-        .setGuid(msgGUID)
-        .setQueueId(id())
-        .setMessagePropertiesInfo(d_queue_sp->schemaLearner().demultiplex(
-            d_schemaLearnerPushContext,
-            attributes.messagePropertiesInfo()))
-        .setSubQueueInfos(subQueueInfos)
-        .setMsgGroupId(msgGroupId)
-        .setCompressionAlgorithmType(attributes.compressionAlgorithmType())
-        .setOutOfOrderPush(isOutOfOrder);
+    if (d_clientContext_sp->inlineClient() == 0) {
+        // Create an event to dispatch delivery of the message to the client
+        mqbi::DispatcherClient* client = d_clientContext_sp->client();
+        mqbi::Dispatcher::DispatcherEventSp event =
+            client->dispatcher()->getEvent(client);
 
-    if (message) {
-        event->setBlob(message);
+        (*event)
+            .setType(mqbi::DispatcherEventType::e_PUSH)
+            .setSource(d_queue_sp.get())
+            .setGuid(msgGUID)
+            .setQueueId(id())
+            .setMessagePropertiesInfo(d_queue_sp->schemaLearner().demultiplex(
+                d_schemaLearnerPushContext,
+                attributes.messagePropertiesInfo()))
+            .setSubQueueInfos(subscriptions)
+            .setCompressionAlgorithmType(attributes.compressionAlgorithmType())
+            .setOutOfOrderPush(isOutOfOrder);
+
+        if (message) {
+            event->setBlob(message);
+        }
+
+        client->dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event),
+                                            client);
+        return;  // RETURN
     }
 
-    client->dispatcher()->dispatchEvent(event, client);
+    mqbi::InlineResult::Enum result =
+        d_clientContext_sp->inlineClient()->sendPush(
+            msgGUID,
+            id(),
+            message,
+            attributes,
+            d_queue_sp->schemaLearner().demultiplex(
+                d_schemaLearnerPushContext,
+                attributes.messagePropertiesInfo()),
+            subscriptions);
+
+    if (result == mqbi::InlineResult::e_SUCCESS) {
+        for (bmqp::Protocol::SubQueueInfosArray::size_type i = 0;
+             i < subscriptions.size();
+             ++i) {
+            Subscriptions::iterator itSubscription = d_subscriptions.find(
+                subscriptions[i].id());
+
+            // Broadcast PUSH carry 'bmqp::Protocol::k_DEFAULT_SUBSCRIPTION_ID'
+            // (0) as SubscriptionId until last hop before SDK.
+            // And downstream broker sends non-zero upstream as subscriptionId.
+            // Meaning, in the 'registerSubscription' call 'downstreamId' is
+            // never '0' in this case.
+            // So, the below condition is always 'false' when the downstream is
+            // a broker and the queue is broadcast.
+
+            if (itSubscription != d_subscriptions.end()) {
+                const bsl::shared_ptr<Subscription>& subscription =
+                    itSubscription->second;
+
+                BSLS_ASSERT_SAFE(subscription);
+
+                if (subscription->stats()) {
+                    subscription->stats()->onEvent(
+                        mqbstat::QueueStatsClient::EventType::e_PUSH,
+                        message ? message->length() : 0);
+                }
+            }
+        }
+    }
+    else if (d_throttledDroppedPutMessages.requestPermission()) {
+        BALL_LOG_WARN << "Queue '" << d_queue_sp->description()
+                      << "' failed to PUSH " << msgGUID
+                      << " with error: " << result;
+    }
 }
 
 QueueHandle::QueueHandle(
@@ -589,6 +644,7 @@ QueueHandle::QueueHandle(
       d_queue_sp ? d_queue_sp->schemaLearner().createContext() : 0)
 , d_schemaLearnerPushContext(
       d_queue_sp ? d_queue_sp->schemaLearner().createContext() : 0)
+, d_producerStats()
 , d_allocator_p(allocator)
 {
     // PRECONDITIONS
@@ -624,15 +680,15 @@ QueueHandle::~QueueHandle()
     // QueueHandle.
 }
 
-void QueueHandle::registerSubStream(const bmqp_ctrlmsg::SubQueueIdInfo& stream,
-                                    unsigned int upstreamSubQueueId,
-                                    const mqbi::QueueCounts& counts)
+mqbi::QueueHandle::SubStreams::const_iterator
+QueueHandle::registerSubStream(const bmqp_ctrlmsg::SubQueueIdInfo& stream,
+                               unsigned int             upstreamSubQueueId,
+                               const mqbi::QueueCounts& counts)
 {
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(counts.d_readCount > 0 || counts.d_writeCount > 0);
 
     SubStreams::iterator infoIter = d_subStreamInfos.find(stream.appId());
@@ -647,21 +703,44 @@ void QueueHandle::registerSubStream(const bmqp_ctrlmsg::SubQueueIdInfo& stream,
         // Update the 'upstreamSubQueueId'.  The previously registered stream
         // could be a producer and the new one - consumer with a new id.
         downstream(stream.subId())->d_upstreamSubQueueId = upstreamSubQueueId;
-        return;  // RETURN
     }
-    // Allocate spot
+    else {
+        BSLS_ASSERT_SAFE(!validateDownstreamId(stream.subId()));
 
-    BSLS_ASSERT_SAFE(!validateDownstreamId(stream.subId()));
+        StatsSp stats;
 
-    makeSubStream(stream.appId(), stream.subId(), upstreamSubQueueId);
+        if (d_clientContext_sp->statContext()) {
+            stats.createInplace(d_allocator_p);
 
-    BALL_LOG_INFO << "QueueHandle [" << this << "] registering subQueue ["
-                  << stream << "] with upstreamSubQueueId ["
-                  << upstreamSubQueueId << "]";
+            stats->initialize(queue()->uri(),
+                              d_clientContext_sp->statContext().get(),
+                              d_allocator_p);
 
-    d_subStreamInfos.emplace(
-        stream.appId(),
-        StreamInfo(counts, stream.subId(), upstreamSubQueueId, d_allocator_p));
+            if (upstreamSubQueueId == bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID) {
+                // cache producer stats to avoid lookup
+                d_producerStats = stats;
+            }
+        }
+        makeSubStream(stream.appId(),
+                      stream.subId(),
+                      upstreamSubQueueId,
+                      stats);
+
+        BALL_LOG_INFO << "QueueHandle [" << this << "] registering subQueue ["
+                      << stream << "] with upstreamSubQueueId ["
+                      << upstreamSubQueueId << "]";
+
+        infoIter = d_subStreamInfos
+                       .emplace(stream.appId(),
+                                StreamInfo(counts,
+                                           stream.subId(),
+                                           upstreamSubQueueId,
+                                           d_allocator_p))
+                       .first;
+        infoIter->second.d_clientStats_sp = stats;
+    }
+
+    return infoIter;
 }
 
 void QueueHandle::registerSubscription(unsigned int downstreamSubId,
@@ -748,8 +827,7 @@ bool QueueHandle::unregisterSubStream(
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     SubStreams::iterator infoIter = d_subStreamInfos.find(
         subStreamInfo.appId());
@@ -786,6 +864,11 @@ bool QueueHandle::unregisterSubStream(
         }
         d_downstreams[downstreamSubQueueId].reset();
         d_subStreamInfos.erase(infoIter);
+
+        if (subStreamInfo.subId() == bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID) {
+            d_producerStats.reset();
+        }
+
         return true;  // RETURN
     }
     return false;
@@ -808,8 +891,9 @@ void QueueHandle::confirmMessage(const bmqt::MessageGUID& msgGUID,
     // A more generic approach would be to maintain a queue of CONFIRMs per
     // queue (outside of the dispatcher) and process it separately (on idle?).
 
-    mqbi::DispatcherEvent* queueEvent = d_queue_sp->dispatcher()->getEvent(
-        mqbi::DispatcherClientType::e_QUEUE);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent =
+        d_queue_sp->dispatcher()->getEvent(
+            mqbi::DispatcherClientType::e_QUEUE);
 
     (*queueEvent).setType(mqbi::DispatcherEventType::e_CALLBACK);
 
@@ -818,7 +902,9 @@ void QueueHandle::confirmMessage(const bmqt::MessageGUID& msgGUID,
         msgGUID,
         downstreamSubQueueId);
 
-    d_queue_sp->dispatcher()->dispatchEvent(queueEvent, d_queue_sp.get());
+    d_queue_sp->dispatcher()->dispatchEvent(
+        bslmf::MovableRefUtil::move(queueEvent),
+        d_queue_sp.get());
 }
 
 void QueueHandle::rejectMessage(const bmqt::MessageGUID& msgGUID,
@@ -837,33 +923,29 @@ void QueueHandle::rejectMessage(const bmqt::MessageGUID& msgGUID,
 
 void QueueHandle::deliverMessageNoTrack(
     const mqbi::StorageIterator&              iter,
-    const bmqp::Protocol::MsgGroupId&         msgGroupId,
     const bmqp::Protocol::SubQueueInfosArray& subQueueInfos)
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(
         bmqt::QueueFlagsUtil::isReader(handleParameters().flags()));
+
     deliverMessageImpl(iter.appData(),
                        iter.guid(),
                        iter.attributes(),
-                       msgGroupId,
                        subQueueInfos,
                        false);
 }
 
 void QueueHandle::deliverMessage(
     const mqbi::StorageIterator&              iter,
-    const bmqp::Protocol::MsgGroupId&         msgGroupId,
     const bmqp::Protocol::SubQueueInfosArray& subscriptions,
     bool                                      isOutOfOrder)
 {
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(
         bmqt::QueueFlagsUtil::isReader(handleParameters().flags()));
 
@@ -968,7 +1050,6 @@ void QueueHandle::deliverMessage(
                                                : iter.appData(),
                        iter.guid(),
                        iter.attributes(),
-                       msgGroupId,
                        targetSubscriptions,
                        isOutOfOrder);
 }
@@ -980,14 +1061,12 @@ void QueueHandle::postMessage(const bmqp::PutHeader&              putHeader,
     // executed by the *CLUSTER_DISPATCHER* or *CLIENT_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clientContext_sp->client()->dispatcher()->inDispatcherThread(
-            d_clientContext_sp->client()));
+    BSLS_ASSERT_SAFE(d_clientContext_sp->client()->inDispatcherThread());
 
     // cannot check 'd_subscriptions' unless in the QUEUE dispatcher thread
 
-    mqbi::DispatcherEvent* event = d_queue_sp->dispatcher()->getEvent(
-        d_queue_sp.get());
+    mqbi::Dispatcher::DispatcherEventSp event =
+        d_queue_sp->dispatcher()->getEvent(d_queue_sp.get());
 
     (*event)
         .setType(mqbi::DispatcherEventType::e_PUT)
@@ -997,7 +1076,8 @@ void QueueHandle::postMessage(const bmqp::PutHeader&              putHeader,
         .setPutHeader(putHeader)
         .setQueueHandle(this);
 
-    d_queue_sp->dispatcher()->dispatchEvent(event, d_queue_sp.get());
+    d_queue_sp->dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event),
+                                            d_queue_sp.get());
 }
 
 void QueueHandle::configure(
@@ -1021,8 +1101,7 @@ void QueueHandle::configureDispatched(
     // executed by *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clientContext_sp);
 
     BALL_LOG_INFO << "Client [" << d_clientContext_sp->client()->description()
@@ -1056,8 +1135,7 @@ void QueueHandle::deconfigureDispatched(
     // executed by *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clientContext_sp);
 
     bsl::shared_ptr<DeconfigureContext> context(
@@ -1157,8 +1235,7 @@ mqbi::QueueHandle* QueueHandle::setHandleParameters(
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
     BSLS_ASSERT_SAFE(handleParameters.uri() ==
                      bmqt::Uri(handleParameters.uri()).canonical());
     // Should only set handleParameters having a canonical URI because it
@@ -1175,8 +1252,7 @@ mqbi::QueueHandle* QueueHandle::setStreamParameters(
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     // Merge all Subscriptions into 'd_subscriptions'.
     // Ignore all priorities but the highest.
@@ -1196,8 +1272,9 @@ void QueueHandle::onAckMessage(const bmqp::AckMessage& ackMessage)
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
+    bmqt::AckResult::Enum status = bmqp::ProtocolUtil::ackResultFromCode(
+        ackMessage.status());
 
     // NOTE: ACK comes from upstream, and client may have gone away, so we
     //       check for it here.
@@ -1224,29 +1301,83 @@ void QueueHandle::onAckMessage(const bmqp::AckMessage& ackMessage)
     // was requested or queue failed to post the message or both.  Also note
     // that we need to reset the queueId in ack message to the one which is
     // known downstream.
-    mqbi::DispatcherClient* client = d_clientContext_sp->client();
-    mqbi::DispatcherEvent*  event  = client->dispatcher()->getEvent(client);
-    (*event)
-        .setType(mqbi::DispatcherEventType::e_ACK)
-        .setSource(d_queue_sp.get())
-        .setAckMessage(ackMessage);
-
-    // Override with correct downstream queueId
-    const mqbi::DispatcherAckEvent* ackEvent = event->asAckEvent();
-
-    bmqp::AckMessage& ackMsg = const_cast<bmqp::AckMessage&>(
-        ackEvent->ackMessage());
-    ackMsg.setQueueId(id());
-
-    client->dispatcher()->dispatchEvent(event, client);
     d_domainStats_p->onEvent<mqbstat::QueueStatsDomain::EventType::e_ACK>(1);
+
+    mqbi::InlineClient* inlineClient = d_clientContext_sp->inlineClient();
+
+    if (inlineClient == 0) {
+        mqbi::DispatcherClient* client = d_clientContext_sp->client();
+        mqbi::Dispatcher::DispatcherEventSp event =
+            client->dispatcher()->getEvent(client);
+        (*event)
+            .setType(mqbi::DispatcherEventType::e_ACK)
+            .setSource(d_queue_sp.get())
+            .setAckMessage(ackMessage);
+
+        // Override with correct downstream queueId
+        const mqbi::DispatcherAckEvent* ackEvent = event->asAckEvent();
+
+        bmqp::AckMessage& ackMsg = const_cast<bmqp::AckMessage&>(
+            ackEvent->ackMessage());
+        ackMsg.setQueueId(id());
+
+        client->dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event),
+                                            client);
+        return;  // RETURN
+    }
+
+    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(status !=
+                                              bmqt::AckResult::e_SUCCESS)) {
+        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
+
+        // Throttle error log if this is a 'failed Ack': note that we log at
+        // INFO level in order not to overwhelm the dashboard, if a queue is
+        // full, every post will nack, which could be a lot.
+        if (d_throttledFailedAckMessages.requestPermission()) {
+            BALL_LOG_INFO << "Queue '" << d_queue_sp->description()
+                          << "' NACK [status: " << status
+                          << ", GUID: " << ackMessage.messageGUID()
+                          << ", node '" << d_clientContext_sp->description()
+                          << "']";
+        }
+    }
+
+    // Always print at trace level
+    BALL_LOG_TRACE << "Queue '" << d_queue_sp->description()
+                   << "' sending ACK [status: " << status
+                   << ", GUID: " << ackMessage.messageGUID() << ", node '"
+                   << d_clientContext_sp->description() << "']";
+
+    mqbi::InlineResult::Enum result = inlineClient->sendAck(id(), ackMessage);
+    // Override with correct downstream queueId
+
+    if (result == mqbi::InlineResult::e_SUCCESS) {
+        // Update stats for the queue (or subStream of the queue)
+        // TBD: We should collect all invalid stats (i.e. stats for queues that
+        // were not found).  We could collect these under a new 'invalid queue'
+        // stat context.
+        if (d_producerStats) {
+            d_producerStats->onEvent(
+                mqbstat::QueueStatsClient::EventType::e_ACK,
+                1);
+        }
+        // In the case of Strong Consistency, a Receipt can arrive and trigger
+        // an ACK after Producer closes subStream.
+    }
+    else {
+        // Drop ACK
+        if (d_throttledFailedAckMessages.requestPermission()) {
+            BALL_LOG_INFO << "Queue '" << d_queue_sp->description()
+                          << "' dropping ACK " << ackMessage.messageGUID()
+                          << " with error: " << result;
+        }
+    }
 }
 
 bool QueueHandle::canDeliver(unsigned int downstreamSubscriptionId) const
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     Subscriptions::const_iterator cit = d_subscriptions.find(
         downstreamSubscriptionId);
@@ -1283,8 +1414,7 @@ bsls::Types::Int64 QueueHandle::countUnconfirmed() const
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     bsls::Types::Int64 result = 0;
 
@@ -1306,8 +1436,7 @@ void QueueHandle::loadInternals(mqbcmd::QueueHandle* out) const
     // executed by the *QUEUE_DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_queue_sp->dispatcher()->inDispatcherThread(d_queue_sp.get()));
+    BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
 
     bmqu::MemOutStream os;
     os << d_handleParameters;

@@ -59,9 +59,7 @@ Dispatcher_Executor::Dispatcher_Executor(const Dispatcher* dispacher,
     BSLS_ASSERT(client);
     BSLS_ASSERT(client->dispatcher() == dispacher);
     BSLS_ASSERT(client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_UNDEFINED &&
-                client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_ALL);
+                mqbi::DispatcherClientType::e_UNDEFINED);
     BSLS_ASSERT(client->dispatcherClientData().processorHandle() !=
                 mqbi::Dispatcher::k_INVALID_PROCESSOR_HANDLE);
 
@@ -87,16 +85,18 @@ void Dispatcher_Executor::post(const bsl::function<void()>& f) const
     BSLS_ASSERT(d_processorPool_p->isStarted());
 
     // create an event containing the function to be invoked on the processor
-    bmqc::MultiQueueThreadPool<mqbi::DispatcherEvent>::Event* event =
-        d_processorPool_p->getUnmanagedEvent();
+    bsl::shared_ptr<mqbi::DispatcherEvent> event =
+        d_processorPool_p->getEvent();
 
-    event->object()
+    (*event)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
         .callback()
         .set(f);
 
     // submit the event
-    int rc = d_processorPool_p->enqueueEvent(event, d_processorHandle);
+    int rc = d_processorPool_p->enqueueEvent(
+        bslmf::MovableRefUtil::move(event),
+        d_processorHandle);
     BSLS_ASSERT_OPT(rc == 0);
 
     // TODO: We should call 'releaseUnmanagedEvent' on the
@@ -111,102 +111,8 @@ void Dispatcher_Executor::dispatch(const bsl::function<void()>& f) const
     BSLS_ASSERT(f);
     BSLS_ASSERT(d_processorPool_p->isStarted());
 
-    if (d_processorPool_p->queueThreadHandle(d_processorHandle) ==
-        bslmt::ThreadUtil::self()) {
-        // This function is called from the processor's thread. Invoke the
-        // submitted function object in-place.
-        f();
-    }
-    else {
-        // This function is called outside of the processor's thread. Fallback
-        // to 'post'.
-        post(f);
-    }
-}
-
-// -------------------------------
-// class Dispatcher_ClientExecutor
-// -------------------------------
-
-// PRIVATE ACCESSORS
-bmqc::MultiQueueThreadPool<mqbi::DispatcherEvent>*
-Dispatcher_ClientExecutor::processorPool() const BSLS_CPP11_NOEXCEPT
-{
-    const mqba::Dispatcher* dispatcher = static_cast<const mqba::Dispatcher*>(
-        d_client_p->dispatcher());
-
-    return dispatcher->d_contexts
-        .at(d_client_p->dispatcherClientData().clientType())
-        ->d_processorPool_mp.get();
-}
-
-mqbi::Dispatcher::ProcessorHandle
-Dispatcher_ClientExecutor::processorHandle() const BSLS_CPP11_NOEXCEPT
-{
-    // PRECONFITIONS
-    BSLS_ASSERT(d_client_p->dispatcherClientData().processorHandle() !=
-                mqbi::Dispatcher::k_INVALID_PROCESSOR_HANDLE);
-
-    return d_client_p->dispatcherClientData().processorHandle();
-}
-
-// CREATORS
-Dispatcher_ClientExecutor::Dispatcher_ClientExecutor(
-    BSLA_MAYBE_UNUSED const Dispatcher* dispacher,
-    const mqbi::DispatcherClient*       client) BSLS_CPP11_NOEXCEPT
-: d_client_p(client)
-{
-    // PRECONDITIONS
-    BSLS_ASSERT(dispacher);
-    BSLS_ASSERT(client);
-    BSLS_ASSERT(client->dispatcher() == dispacher);
-    BSLS_ASSERT(client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_UNDEFINED &&
-                client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_ALL);
-}
-
-// ACCESSORS
-bool Dispatcher_ClientExecutor::operator==(
-    const Dispatcher_ClientExecutor& rhs) const BSLS_CPP11_NOEXCEPT
-{
-    return d_client_p == rhs.d_client_p;
-}
-
-void Dispatcher_ClientExecutor::post(const bsl::function<void()>& f) const
-{
-    // PRECONDITIONS
-    BSLS_ASSERT(f);
-    BSLS_ASSERT(processorPool()->isStarted());
-
-    // create an event containing the function to be invoked on the processor
-    bmqc::MultiQueueThreadPool<mqbi::DispatcherEvent>::Event* event =
-        processorPool()->getUnmanagedEvent();
-
-    event->object()
-        .setType(mqbi::DispatcherEventType::e_CALLBACK)
-        .setDestination(const_cast<mqbi::DispatcherClient*>(d_client_p))
-        .callback()
-        .set(f);
-
-    // submit the event
-    int rc = processorPool()->enqueueEvent(event, processorHandle());
-    BSLS_ASSERT_OPT(rc == 0);
-
-    // TODO: We should call 'releaseUnmanagedEvent' on the
-    //      'bmqc::MultiQueueThreadPool' in case of exception to prevent the
-    //      event from leaking. But somehow this method is declared but not
-    //      implemented.
-}
-
-void Dispatcher_ClientExecutor::dispatch(const bsl::function<void()>& f) const
-{
-    // PRECONDITIONS
-    BSLS_ASSERT(f);
-    BSLS_ASSERT(processorPool()->isStarted());
-
-    if (processorPool()->queueThreadHandle(processorHandle()) ==
-        bslmt::ThreadUtil::self()) {
+    if (d_processorPool_p->queueThreadId(d_processorHandle) ==
+        bslmt::ThreadUtil::selfId()) {
         // This function is called from the processor's thread. Invoke the
         // submitted function object in-place.
         f();
@@ -330,7 +236,6 @@ int Dispatcher::startContext(bsl::ostream&                    errorDescription,
 
     processorPoolConfig.setName(mqbi::DispatcherClientType::toAscii(type))
         .setEventScheduler(d_scheduler_p)
-        .setFinalizeEvents(ProcessorPool::Config::BMQC_FINALIZE_MULTI_QUEUE)
         .setMonitorAlarm("ALARM [DISPATCHER_QUEUE_STUCK] ",
                          bsls::TimeInterval(k_QUEUE_STUCK_INTERVAL));
     // TBD: .statContext(...) / .createSubcontext(true)
@@ -389,16 +294,14 @@ Dispatcher::queueCreator(mqbi::DispatcherClientType::Enum             type,
 void Dispatcher::queueEventCb(mqbi::DispatcherClientType::Enum type,
                               int                              processorId,
                               BSLA_UNUSED void*                context,
-                              const ProcessorPool::Event*      event)
+                              const ProcessorPool::EventSp&    event)
 {
-    switch (event->type()) {
-    case ProcessorPool::Event::BMQC_USER: {
+    if (event) {
         BALL_LOG_TRACE << "Dispatching Event to queue " << processorId
-                       << " of " << type << " dispatcher: " << event->object();
-        if (event->object().type() ==
-            mqbi::DispatcherEventType::e_DISPATCHER) {
+                       << " of " << type << " dispatcher: " << *event;
+        if (event->type() == mqbi::DispatcherEventType::e_DISPATCHER) {
             const mqbi::DispatcherDispatcherEvent* realEvent =
-                event->object().asDispatcherEvent();
+                event->asDispatcherEvent();
 
             // We must flush now (and irrespective of a callback actually being
             // set on the event) to ensure the flushList is empty before
@@ -416,39 +319,21 @@ void Dispatcher::queueEventCb(mqbi::DispatcherClientType::Enum type,
         }
         else {
             DispatcherContext& dispatcherContext = *(d_contexts[type]);
-            event->object().destination()->onDispatcherEvent(event->object());
-            if (!event->object()
-                     .destination()
+            event->destination()->onDispatcherEvent(*event.get());
+            if (!event->destination()
                      ->dispatcherClientData()
                      .addedToFlushList()) {
                 dispatcherContext.d_flushList[processorId].emplace_back(
-                    event->object().destination());
-                event->object()
-                    .destination()
+                    event->destination());
+                event->destination()
                     ->dispatcherClientData()
                     .setAddedToFlushList(true);
             }
         }
-    } break;
-    case ProcessorPool::Event::BMQC_QUEUE_EMPTY: {
+    }
+    else {
+        // Empty `event` means queue is empty
         flushClients(type, processorId);
-    } break;
-    case ProcessorPool::Event::BMQC_FINALIZE_EVENT: {
-        // We only set finalizeCallback on e_DISPATCHER events
-        if (event->object().type() ==
-            mqbi::DispatcherEventType::e_DISPATCHER) {
-            const mqbi::DispatcherDispatcherEvent* realEvent =
-                event->object().asDispatcherEvent();
-
-            if (!realEvent->finalizeCallback().empty()) {
-                BALL_LOG_TRACE << "Calling finalizeCallback on queue "
-                               << processorId << " of " << type
-                               << " dispatcher: " << event->object();
-                realEvent->finalizeCallback()();
-            }
-        }
-    } break;
-    default: BSLA_UNREACHABLE;
     }
 }
 
@@ -524,15 +409,18 @@ int Dispatcher::start(bsl::ostream& errorDescription)
         return rc;  // RETURN
     }
 
-    execute(bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
-                                 "bmqDispSession"),
-            mqbi::DispatcherClientType::e_SESSION);
-    execute(bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
-                                 "bmqDispQueue"),
-            mqbi::DispatcherClientType::e_QUEUE);
-    execute(bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
-                                 "bmqDispCluster"),
-            mqbi::DispatcherClientType::e_CLUSTER);
+    executeOnAllQueues(
+        bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
+                             "bmqDispSession"),
+        mqbi::DispatcherClientType::e_SESSION);
+    executeOnAllQueues(
+        bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
+                             "bmqDispQueue"),
+        mqbi::DispatcherClientType::e_QUEUE);
+    executeOnAllQueues(
+        bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
+                             "bmqDispCluster"),
+        mqbi::DispatcherClientType::e_CLUSTER);
 
     d_isStarted = true;
 
@@ -598,6 +486,8 @@ Dispatcher::registerClient(mqbi::DispatcherClient*           client,
             .setDispatcher(this)
             .setClientType(type)
             .setProcessorHandle(processor);
+        client->setThreadId(
+            context.d_processorPool_mp->queueThreadId(processor));
 
         BALL_LOG_DEBUG << "Registered a new client to the dispatcher "
                        << "[Client: " << client->description()
@@ -609,8 +499,8 @@ Dispatcher::registerClient(mqbi::DispatcherClient*           client,
         // thread, because the vector is not thread safe; and this must be done
         // before any event is being dispatched to this client (since that
         // would cause it to be added to the flush list).
-        mqbi::DispatcherEvent* event =
-            &context.d_processorPool_mp->getUnmanagedEvent()->object();
+        bsl::shared_ptr<mqbi::DispatcherEvent> event =
+            context.d_processorPool_mp->getEvent();
         (*event)
             .setType(mqbi::DispatcherEventType::e_DISPATCHER)
             .setDestination(client);  // TODO: not needed?
@@ -621,11 +511,12 @@ Dispatcher::registerClient(mqbi::DispatcherClient*           client,
                                                             type,
                                                             processor);
 
-        context.d_processorPool_mp->enqueueEvent(event, processor);
+        context.d_processorPool_mp->enqueueEvent(
+            bslmf::MovableRefUtil::move(event),
+            processor);
         return processor;  // RETURN
     }  // break;
     case mqbi::DispatcherClientType::e_UNDEFINED:
-    case mqbi::DispatcherClientType::e_ALL:
     default: {
         BALL_LOG_ERROR << "#DISPATCHER_INVALID_CLIENT "
                        << "Registering client of invalid type [type: "
@@ -649,7 +540,6 @@ void Dispatcher::unregisterClient(mqbi::DispatcherClient* client)
         d_contexts[type]->d_loadBalancer.removeClient(client);
     } break;
     case mqbi::DispatcherClientType::e_UNDEFINED:
-    case mqbi::DispatcherClientType::e_ALL:
     default: {
         BALL_LOG_ERROR << "#DISPATCHER_INVALID_CLIENT "
                        << "UnRegistering client of invalid type [type: "
@@ -670,53 +560,28 @@ void Dispatcher::unregisterClient(mqbi::DispatcherClient* client)
         mqbi::Dispatcher::k_INVALID_PROCESSOR_HANDLE);
 }
 
-void Dispatcher::execute(const mqbi::Dispatcher::VoidFunctor& functor,
-                         mqbi::DispatcherClientType::Enum     type,
-                         const mqbi::Dispatcher::VoidFunctor& doneCallback)
+void Dispatcher::executeOnAllQueues(
+    const mqbi::Dispatcher::VoidFunctor& functor,
+    mqbi::DispatcherClientType::Enum     type,
+    const mqbi::Dispatcher::VoidFunctor& doneCallback)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(type != mqbi::DispatcherClientType::e_UNDEFINED);
 
     // Pointers to the pool to enqueue the event to.
-    ProcessorPool* processorPool[mqbi::DispatcherClientType::k_COUNT];
-
-    for (size_t i = 0; i < mqbi::DispatcherClientType::k_COUNT; ++i) {
-        processorPool[i] = 0;
-    }
-
-    if (type == mqbi::DispatcherClientType::e_SESSION ||
-        type == mqbi::DispatcherClientType::e_ALL) {
-        processorPool[mqbi::DispatcherClientType::e_SESSION] =
-            d_contexts[mqbi::DispatcherClientType::e_SESSION]
-                ->d_processorPool_mp.get();
-    }
-    if (type == mqbi::DispatcherClientType::e_QUEUE ||
-        type == mqbi::DispatcherClientType::e_ALL) {
-        processorPool[mqbi::DispatcherClientType::e_QUEUE] =
-            d_contexts[mqbi::DispatcherClientType::e_QUEUE]
-                ->d_processorPool_mp.get();
-    }
-    if (type == mqbi::DispatcherClientType::e_CLUSTER ||
-        type == mqbi::DispatcherClientType::e_ALL) {
-        processorPool[mqbi::DispatcherClientType::e_CLUSTER] =
-            d_contexts[mqbi::DispatcherClientType::e_CLUSTER]
-                ->d_processorPool_mp.get();
-    }
+    ProcessorPool* processorPool = d_contexts[type]->d_processorPool_mp.get();
+    BSLS_ASSERT_SAFE(processorPool);
 
     BALL_LOG_TRACE << "Enqueuing Event to ALL '" << type << "' dispatcher "
-                   << "queues [hasAFinalizeCallback: "
+                   << "queues [hasFinalizeCallback: "
                    << (doneCallback ? "yes" : "no") << "]";
 
-    for (size_t i = 0; i < mqbi::DispatcherClientType::k_COUNT; ++i) {
-        if (processorPool[i] != 0) {
-            mqbi::DispatcherEvent* qEvent =
-                &processorPool[i]->getUnmanagedEvent()->object();
-            qEvent->setType(mqbi::DispatcherEventType::e_DISPATCHER);
-            qEvent->callback().set(functor);
-            qEvent->finalizeCallback().set(doneCallback);
-            processorPool[i]->enqueueEventOnAllQueues(qEvent);
-        }
-    }
+    bsl::shared_ptr<mqbi::DispatcherEvent> qEvent = processorPool->getEvent();
+    qEvent->setType(mqbi::DispatcherEventType::e_DISPATCHER);
+    qEvent->callback().set(functor);
+    qEvent->finalizeCallback().set(doneCallback);
+    processorPool->enqueueEventOnAllQueues(
+        bslmf::MovableRefUtil::move(qEvent));
 }
 
 void Dispatcher::synchronize(mqbi::DispatcherClient* client)
@@ -730,19 +595,19 @@ void Dispatcher::synchronize(mqbi::DispatcherClientType::Enum  type,
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(
-        d_contexts[type]->d_processorPool_mp->queueThreadHandle(handle) !=
-        bslmt::ThreadUtil::self());  // Deadlock detection
+        d_contexts[type]->d_processorPool_mp->queueThreadId(handle) !=
+        bslmt::ThreadUtil::selfId());  // Deadlock detection
 
     typedef void (bslmt::Semaphore::*PostFn)();
 
     bslmt::Semaphore       semaphore;
-    mqbi::DispatcherEvent* event = getEvent(type);
+    bsl::shared_ptr<mqbi::DispatcherEvent> event = getEvent(type);
     (*event)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
         .setCallback(
             bdlf::BindUtil::bind(static_cast<PostFn>(&bslmt::Semaphore::post),
                                  &semaphore));
-    dispatchEvent(event, type, handle);
+    dispatchEvent(bslmf::MovableRefUtil::move(event), type, handle);
     semaphore.wait();
 }
 
@@ -753,25 +618,9 @@ Dispatcher::executor(const mqbi::DispatcherClient* client) const
     BSLS_ASSERT(client);
     BSLS_ASSERT(client->dispatcher() == this);
     BSLS_ASSERT(client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_UNDEFINED &&
-                client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_ALL);
+                mqbi::DispatcherClientType::e_UNDEFINED);
 
     return Dispatcher_Executor(this, client);
-}
-
-bmqex::Executor
-Dispatcher::clientExecutor(const mqbi::DispatcherClient* client) const
-{
-    // PRECONDITIONS
-    BSLS_ASSERT(client);
-    BSLS_ASSERT(client->dispatcher() == this);
-    BSLS_ASSERT(client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_UNDEFINED &&
-                client->dispatcherClientData().clientType() !=
-                    mqbi::DispatcherClientType::e_ALL);
-
-    return Dispatcher_ClientExecutor(this, client);
 }
 
 }  // close package namespace

@@ -1193,7 +1193,7 @@ int StorageUtil::assignPartitionDispatcherThreads(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher->inDispatcherThread(&cluster));
+    BSLS_ASSERT_SAFE(cluster.inDispatcherThread());
 
     enum RcEnum {
         // Value for the various RC error categories
@@ -1242,20 +1242,20 @@ int StorageUtil::assignPartitionDispatcherThreads(
             bsl::string("Partition") + bsl::to_string(i));
 
         bsl::shared_ptr<mqbs::FileStore> fsSp(
-            new (*fileStoreAllocator)
-                mqbs::FileStore(dsCfg,
-                                processorId,
-                                dispatcher,
-                                clusterData->membership().netCluster(),
-                                &clusterData->stats(),
-                                blobSpPool,
-                                &clusterData->stateSpPool(),
-                                threadPool,
-                                cluster.isCSLModeEnabled(),
-                                cluster.isFSMWorkflow(),
-                                cluster.doesFSMwriteQLIST(),
-                                replicationFactor,
-                                fileStoreAllocator),
+            new (*fileStoreAllocator) mqbs::FileStore(
+                dsCfg,
+                processorId,
+                dispatcher,
+                clusterData->membership().netCluster(),
+                clusterData->stats().getPartitionStats(dsCfg.partitionId()),
+                blobSpPool,
+                &clusterData->stateSpPool(),
+                threadPool,
+                cluster.isCSLModeEnabled(),
+                cluster.isFSMWorkflow(),
+                cluster.doesFSMwriteQLIST(),
+                replicationFactor,
+                fileStoreAllocator),
             fileStoreAllocator);
 
         (*fileStores)[i] = fsSp;
@@ -2312,7 +2312,7 @@ void StorageUtil::registerQueueAsPrimary(const mqbi::Cluster*    cluster,
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(cluster);
-    BSLS_ASSERT_SAFE(cluster->dispatcher()->inDispatcherThread(cluster));
+    BSLS_ASSERT_SAFE(cluster->inDispatcherThread());
     BSLS_ASSERT_SAFE(storageMap);
     BSLS_ASSERT_SAFE(fs);
     BSLS_ASSERT_SAFE(uri.isValid());
@@ -2402,7 +2402,8 @@ void StorageUtil::registerQueueAsPrimary(const mqbi::Cluster*    cluster,
             // 'updateQueuePrimaryDispatched' in the right thread to carry out
             // the addition/removal of those pairs.
 
-            mqbi::DispatcherEvent* queueEvent = dispatcher->getEvent(fs);
+            mqbi::Dispatcher::DispatcherEventSp queueEvent =
+                dispatcher->getEvent(fs);
 
             (*queueEvent)
                 .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -2414,7 +2415,8 @@ void StorageUtil::registerQueueAsPrimary(const mqbi::Cluster*    cluster,
                     appIdKeyPairs,
                     domain->config().mode().isFanoutValue()));
 
-            dispatcher->dispatchEvent(queueEvent, fs);
+            dispatcher->dispatchEvent(bslmf::MovableRefUtil::move(queueEvent),
+                                      fs);
 
             // Wait for 'updateQueuePrimaryDispatched' operation to complete.
             // We need to wait because 'updateQueuePrimaryDispatched' creates
@@ -2438,7 +2440,7 @@ void StorageUtil::registerQueueAsPrimary(const mqbi::Cluster*    cluster,
     // Dispatch the registration of storage with the partition in appropriate
     // thread.
 
-    mqbi::DispatcherEvent* queueEvent = dispatcher->getEvent(fs);
+    mqbi::Dispatcher::DispatcherEventSp queueEvent = dispatcher->getEvent(fs);
 
     (*queueEvent)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
@@ -2451,7 +2453,7 @@ void StorageUtil::registerQueueAsPrimary(const mqbi::Cluster*    cluster,
                                           appIdKeyPairs,
                                           domain));
 
-    fs->dispatchEvent(queueEvent);
+    fs->dispatchEvent(bslmf::MovableRefUtil::move(queueEvent));
 
     // Not checking the result.  If not successful, storage is not in the
     // 'storageMap'.  Subsequent queue configure will then fail.

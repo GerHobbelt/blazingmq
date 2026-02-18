@@ -203,9 +203,11 @@ struct TestHelper {
                              unsigned int          leaseId,
                              mqbnet::ClusterNode*  node)
     {
-        d_cluster_mp->_state()->setPartitionPrimary(partitionId,
-                                                    leaseId,
-                                                    node);
+        d_cluster_mp->_state()->setPartitionPrimary(
+            partitionId,
+            leaseId,
+            d_cluster_mp->_clusterData()->membership().getClusterNodeSession(
+                node));
         storageManager->setPrimaryForPartition(partitionId, node, leaseId);
     }
 
@@ -895,19 +897,21 @@ struct TestHelper {
                                           bmqtst::TestHelperUtil::allocator());
         threadPool.start();
 
-        mqbs::FileStore fs(dsCfg,
-                           1,
-                           d_cluster_mp->dispatcher(),
-                           &d_cluster_mp->netCluster(),
-                           &d_cluster_mp->_clusterData()->stats(),
-                           &d_cluster_mp->_clusterData()->blobSpPool(),
-                           &d_cluster_mp->_clusterData()->stateSpPool(),
-                           &threadPool,
-                           d_cluster_mp->isCSLModeEnabled(),
-                           d_cluster_mp->isFSMWorkflow(),
-                           d_cluster_mp->doesFSMwriteQLIST(),
-                           1,  // replicationFactor
-                           bmqtst::TestHelperUtil::allocator());
+        mqbs::FileStore fs(
+            dsCfg,
+            1,
+            d_cluster_mp->dispatcher(),
+            &d_cluster_mp->netCluster(),
+            d_cluster_mp->_clusterData()->stats().getPartitionStats(
+                k_PARTITION_ID),
+            &d_cluster_mp->_clusterData()->blobSpPool(),
+            &d_cluster_mp->_clusterData()->stateSpPool(),
+            &threadPool,
+            d_cluster_mp->isCSLModeEnabled(),
+            d_cluster_mp->isFSMWorkflow(),
+            d_cluster_mp->doesFSMwriteQLIST(),
+            1,  // replicationFactor
+            bmqtst::TestHelperUtil::allocator());
 
         dynamic_cast<mqbnet::MockCluster&>(d_cluster_mp->netCluster())
             ._setDisableBroadcast(true);
@@ -3034,7 +3038,6 @@ int main(int argc, char* argv[])
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
 
     bmqp::ProtocolUtil::initialize(bmqtst::TestHelperUtil::allocator());
-    bmqt::UriParser::initialize(bmqtst::TestHelperUtil::allocator());
 
     switch (_testCase) {
     case 0:
@@ -3076,7 +3079,6 @@ int main(int argc, char* argv[])
     }
 
     bmqp::ProtocolUtil::shutdown();
-    bmqt::UriParser::shutdown();
 
     TEST_EPILOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
     // Can't ensure no default memory is allocated because

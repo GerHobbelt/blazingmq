@@ -277,7 +277,11 @@ struct Tester {
         for (mqbnet::Cluster::NodesList::iterator iter = nodes.begin();
              iter != nodes.end();
              ++iter) {
-            d_cluster_mp->_state()->setPartitionPrimary(pid, 1, *iter);
+            mqbc::ClusterNodeSession* ns = d_cluster_mp->_clusterData()
+                                               ->membership()
+                                               .getClusterNodeSession(*iter);
+            BSLS_ASSERT_OPT(ns);
+            d_cluster_mp->_state()->setPartitionPrimary(pid, 1, ns);
             ++pid;
         }
 
@@ -285,7 +289,6 @@ struct Tester {
             new (*bmqtst::TestHelperUtil::allocator())
                 mqbc::IncoreClusterStateLedger(
                     d_cluster_mp->_clusterDefinition(),
-                    mqbc::ClusterStateLedgerConsistency::e_STRONG,
                     d_cluster_mp->_clusterData(),
                     d_cluster_mp->_state(),
                     d_cluster_mp->_blobSpPool(),
@@ -2023,7 +2026,6 @@ int main(int argc, char* argv[])
 
     bmqsys::Time::initialize(bmqtst::TestHelperUtil::allocator());
     bmqp::ProtocolUtil::initialize(bmqtst::TestHelperUtil::allocator());
-    bmqt::UriParser::initialize(bmqtst::TestHelperUtil::allocator());
 
     switch (_testCase) {
     case 0:
@@ -2048,7 +2050,6 @@ int main(int argc, char* argv[])
     } break;
     }
 
-    bmqt::UriParser::shutdown();
     bmqp::ProtocolUtil::shutdown();
     bmqsys::Time::shutdown();
 

@@ -111,8 +111,7 @@ struct QueueEngineUtil {
     static int
     validateUri(const bmqp_ctrlmsg::QueueHandleParameters& handleParameters,
                 mqbi::QueueHandle*                         handle,
-                const mqbi::QueueHandleRequesterContext&   clientContext =
-                    mqbi::QueueHandleRequesterContext());
+                const mqbi::QueueHandleRequesterContext*   clientContext = 0);
 
     /// Return true is the specified `queue` is of the broadcast type.
     static bool isBroadcastMode(const mqbi::Queue* queue);
@@ -432,7 +431,9 @@ struct QueueEngineUtil_AppState {
     /// undefined unless `appData` is non-null.
     void broadcastOneMessage(const mqbi::StorageIterator* storageIter);
     bool visitBroadcast(const mqbi::StorageIterator* message,
-                        const Routers::Subscription* subscription);
+                        mqbi::QueueHandle*           handle,
+                        Routers::Consumer*           consumer,
+                        unsigned int                 downstreamSubscriptionId);
 
     size_t processDeliveryLists(bsls::TimeInterval*    delay,
                                 mqbi::StorageIterator* reader);
@@ -668,8 +669,12 @@ struct QueueEngineUtil_AppsDeliveryContext {
                     bool                      putAsideReturnValue);
 
     /// Collect and prepare data for the subsequent `deliverMessage` call.
-    bool visit(const Routers::Subscription* subscription);
-    bool visitBroadcast(const Routers::Subscription* subscription);
+    bool visit(mqbi::QueueHandle* handle,
+               Routers::Consumer* consumer,
+               unsigned int       downstreamSubscriptionId);
+    bool visitBroadcast(mqbi::QueueHandle* handle,
+                        Routers::Consumer* consumer,
+                        unsigned int       downstreamSubscriptionId);
 
     /// Deliver message to the previously processed handles.
     void deliverMessage();

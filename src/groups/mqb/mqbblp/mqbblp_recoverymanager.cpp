@@ -77,7 +77,7 @@ namespace {
 
 const char k_LOG_CATEGORY[] = "MQBBLP.RECOVERYMANAGER";
 
-const unsigned int k_STARTUP_WAIT_RETRIES  = 10;
+const unsigned int k_STARTUP_WAIT_RETRIES  = 20;
 const unsigned int k_STARTUP_WAIT_RETRY_MS = 1000;
 
 /// This class provides a custom comparator to compare two (sync-point,
@@ -386,7 +386,7 @@ void RecoveryManager::recoveryStartupWaitDispatched(int partitionId)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(0 <= partitionId);
     BSLS_ASSERT_SAFE(d_partitionsInfo.size() >
                      static_cast<size_t>(partitionId));
@@ -470,8 +470,43 @@ void RecoveryManager::recoveryStartupWaitPartitionDispatched(
         return;  // RETURN
     }
 
-    // No sync point has been received for this partition in the startup wait
-    // duration.
+    BALL_LOG_WARN << d_clusterData_p->identity().description()
+                  << ": Partition [" << partitionId
+                  << "], no sync point has been received during "
+                  << "recovery wait-time.";
+
+    if (d_clusterData_p->electorInfo().isSelfLeader()) {
+        BALL_LOG_WARN
+            << d_clusterData_p->identity().description() << ": Partition ["
+            << partitionId
+            << "], not extending the wait for sync points on the leader.";
+    }
+    else if (recoveryCtx.onStartupWaitRetry() > k_STARTUP_WAIT_RETRIES) {
+        BALL_LOG_WARN
+            << d_clusterData_p->identity().description() << ": Partition ["
+            << partitionId
+            << "], not extending the wait for sync points after retrying "
+            << k_STARTUP_WAIT_RETRIES << " times.";
+    }
+    else {
+        // The sync points always come from the primary, who is more
+        // trustworthy than any other available peer.  Therefore, wait as much
+        // as possible for sync points from the primary.
+        BALL_LOG_WARN << d_clusterData_p->identity().description()
+                      << ": Partition [" << partitionId
+                      << "], extending the wait for sync points.";
+
+        bsls::TimeInterval after(bmqsys::Time::nowMonotonicClock());
+        after.addMilliseconds(k_STARTUP_WAIT_RETRY_MS);
+        d_clusterData_p->scheduler().scheduleEvent(
+            &recoveryCtx.recoveryStartupWaitHandle(),
+            after,
+            bdlf::BindUtil::bind(&RecoveryManager::recoveryStartupWaitCb,
+                                 this,
+                                 partitionId));
+
+        return;  // RETURN
+    }
 
     if (availableNodes.empty()) {
         // No peers are AVAILABLE.  Node will recover from local files only.
@@ -487,38 +522,8 @@ void RecoveryManager::recoveryStartupWaitPartitionDispatched(
 
         BALL_LOG_WARN << d_clusterData_p->identity().description()
                       << ": Partition [" << partitionId
-                      << "], no sync point has been received during "
-                      << "recovery wait-time and no peers are available. ";
+                      << "], no peers are available.";
 
-        if (d_clusterData_p->electorInfo().isSelfLeader()) {
-            BALL_LOG_WARN
-                << d_clusterData_p->identity().description() << ": Partition ["
-                << partitionId
-                << "], not extending the wait for sync points on the leader.";
-        }
-        else if (recoveryCtx.onStartupWaitRetry() > k_STARTUP_WAIT_RETRIES) {
-            BALL_LOG_WARN
-                << d_clusterData_p->identity().description() << ": Partition ["
-                << partitionId
-                << "], not extending the wait for sync points after retrying "
-                << k_STARTUP_WAIT_RETRIES << " times.";
-        }
-        else {
-            BALL_LOG_WARN << d_clusterData_p->identity().description()
-                          << ": Partition [" << partitionId
-                          << "], extending the wait for sync points.";
-
-            bsls::TimeInterval after(bmqsys::Time::nowMonotonicClock());
-            after.addMilliseconds(k_STARTUP_WAIT_RETRY_MS);
-            d_clusterData_p->scheduler().scheduleEvent(
-                &recoveryCtx.recoveryStartupWaitHandle(),
-                after,
-                bdlf::BindUtil::bind(&RecoveryManager::recoveryStartupWaitCb,
-                                     this,
-                                     partitionId));
-
-            return;  // RETURN
-        }
         if (0 != recoveryCtx.oldSyncPointOffset()) {
             BALL_LOG_WARN << d_clusterData_p->identity().description()
                           << ": Partition [" << partitionId
@@ -2932,7 +2937,7 @@ int RecoveryManager::start(bsl::ostream& errorDescription)
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_dispatcher_p->inDispatcherThread(d_cluster_p));
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
     if (isStarted()) {
         errorDescription << "Already started.";

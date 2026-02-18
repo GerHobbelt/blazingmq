@@ -34,8 +34,7 @@ namespace mqbmock {
 
 // CREATORS
 Dispatcher::Dispatcher(bslma::Allocator* allocator)
-: d_inDispatcherThread(false)
-, d_eventsForClients(allocator)
+: d_eventsForClients(allocator)
 , d_mutex()
 , d_queue(allocator)
 , d_allocator_p(allocator)
@@ -57,6 +56,7 @@ Dispatcher::ProcessorHandle Dispatcher::registerClient(
     BSLA_UNUSED mqbi::Dispatcher::ProcessorHandle handle)
 {
     client->dispatcherClientData().setDispatcher(this).setClientType(type);
+    client->setThreadId(bslmt::ThreadUtil::selfId());
 
     return Dispatcher::k_INVALID_PROCESSOR_HANDLE;
 }
@@ -66,7 +66,7 @@ void Dispatcher::unregisterClient(BSLA_UNUSED mqbi::DispatcherClient* client)
     // NOTHING
 }
 
-mqbi::DispatcherEvent*
+mqbi::Dispatcher::DispatcherEventSp
 Dispatcher::getEvent(const mqbi::DispatcherClient* client)
 {
     EventMap::iterator iter = d_eventsForClients.find(client);
@@ -74,20 +74,20 @@ Dispatcher::getEvent(const mqbi::DispatcherClient* client)
     return iter->second;
 }
 
-mqbi::DispatcherEvent*
+mqbi::Dispatcher::DispatcherEventSp
 Dispatcher::getEvent(BSLA_UNUSED mqbi::DispatcherClientType::Enum type)
 {
-    return 0;
+    return mqbi::Dispatcher::DispatcherEventSp();
 }
 
-void Dispatcher::dispatchEvent(mqbi::DispatcherEvent*  event,
+void Dispatcher::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
                                mqbi::DispatcherClient* destination)
 {
-    destination->onDispatcherEvent(*event);
+    destination->onDispatcherEvent(*bslmf::MovableRefUtil::access(event));
 }
 
 void Dispatcher::dispatchEvent(
-    BSLA_UNUSED mqbi::DispatcherEvent* event,
+    BSLA_UNUSED mqbi::Dispatcher::DispatcherEventRvRef event,
     BSLA_UNUSED mqbi::DispatcherClientType::Enum type,
     BSLA_UNUSED mqbi::Dispatcher::ProcessorHandle handle)
 {
@@ -107,9 +107,10 @@ void Dispatcher::execute(const mqbi::Dispatcher::VoidFunctor& functor,
     _execute(functor);
 }
 
-void Dispatcher::execute(const mqbi::Dispatcher::VoidFunctor& functor,
-                         BSLA_UNUSED mqbi::DispatcherClientType::Enum type,
-                         const mqbi::Dispatcher::VoidFunctor& doneCallback)
+void Dispatcher::executeOnAllQueues(
+    const mqbi::Dispatcher::VoidFunctor& functor,
+    BSLA_UNUSED mqbi::DispatcherClientType::Enum type,
+    const mqbi::Dispatcher::VoidFunctor&         doneCallback)
 {
     if (functor) {
         _execute(functor);
@@ -165,14 +166,6 @@ void Dispatcher::synchronize(
     // NOTHING
 }
 
-// MANIPULATORS
-//   (specific to mqbmock::Dispatcher)
-Dispatcher& Dispatcher::_setInDispatcherThread(bool value)
-{
-    d_inDispatcherThread = value;
-    return *this;
-}
-
 // ACCESSORS
 //   (virtual: mqbi::Dispatcher)
 int Dispatcher::numProcessors(
@@ -181,27 +174,8 @@ int Dispatcher::numProcessors(
     return 1;  // placeholder value for number of processors
 }
 
-bool Dispatcher::inDispatcherThread(
-    BSLA_UNUSED const mqbi::DispatcherClient* client) const
-{
-    return d_inDispatcherThread;
-}
-
-bool Dispatcher::inDispatcherThread(
-    BSLA_UNUSED const mqbi::DispatcherClientData* data) const
-{
-    return d_inDispatcherThread;
-}
-
 bmqex::Executor
 Dispatcher::executor(BSLA_UNUSED const mqbi::DispatcherClient* client) const
-{
-    BSLS_ASSERT(false && "Not yet implemented");
-    return bmqex::Executor();
-}
-
-bmqex::Executor Dispatcher::clientExecutor(
-    BSLA_UNUSED const mqbi::DispatcherClient* client) const
 {
     BSLS_ASSERT(false && "Not yet implemented");
     return bmqex::Executor();
@@ -225,9 +199,9 @@ class Dispatcher::InnerEventGuard {
 
     /// Create an `InnerEventGuard` object by using the specified
     /// `dispatcher`, `client` and `event`.
-    InnerEventGuard(Dispatcher*                   dispatcher,
-                    const mqbi::DispatcherClient* client,
-                    mqbi::DispatcherEvent*        event)
+    InnerEventGuard(Dispatcher*                         dispatcher,
+                    const mqbi::DispatcherClient*       client,
+                    mqbi::Dispatcher::DispatcherEventSp event)
     : d_dispatcher(dispatcher)
     , d_client(client)
     {
@@ -239,8 +213,8 @@ class Dispatcher::InnerEventGuard {
 };
 
 Dispatcher::EventGuard
-Dispatcher::_withEvent(const mqbi::DispatcherClient* client,
-                       mqbi::DispatcherEvent*        event)
+Dispatcher::_withEvent(const mqbi::DispatcherClient*       client,
+                       mqbi::Dispatcher::DispatcherEventSp event)
 {
     EventGuard eventGuard;
     eventGuard.createInplace(d_allocator_p, this, client, event);

@@ -187,6 +187,11 @@ struct TestHelper {
                                  d_tempDir.path()),
             bmqtst::TestHelperUtil::allocator());
 
+        // In some UTs, operations with cluster might be executed either
+        // from the main thread or from the scheduler thread.
+        // To pass `inDispatcherThread` checks (allow ANY thread):
+        d_cluster_mp->setThreadId(mqbi::DispatcherClient::k_ANY_THREAD_ID);
+
         bmqsys::Time::initialize(
             bdlf::BindUtil::bind(&mqbmock::Cluster::getTime,
                                  d_cluster_mp.get()),
@@ -240,8 +245,14 @@ struct TestHelper {
         bmqp_ctrlmsg::PrimaryStatus::Value status =
             isActive ? bmqp_ctrlmsg::PrimaryStatus::E_ACTIVE
                      : bmqp_ctrlmsg::PrimaryStatus::E_PASSIVE;
+
+        mqbc::ClusterNodeSession* ns =
+            d_cluster_mp->_clusterData()->membership().getClusterNodeSession(
+                node);
+        BSLS_ASSERT_OPT(ns);
+
         d_cluster_mp->_state()
-            ->setPartitionPrimary(partition, 1, node)
+            ->setPartitionPrimary(partition, 1, ns)
             .setPartitionPrimaryStatus(partition, status);
     }
 
@@ -255,7 +266,7 @@ struct TestHelper {
             ->membership()
             .clusterNodeSessionMap()
             .find(node)
-            ->second->setNodeStatus(status);
+            ->second->setNodeStatus(status, status);
     }
 };
 
@@ -366,6 +377,7 @@ static void test2_checkAlarmsWithResetTest()
     mqbblp::ClusterStateMonitor monitor(helper.d_cluster_mp->_clusterData(),
                                         helper.d_cluster_mp->_state(),
                                         bmqtst::TestHelperUtil::allocator());
+
     monitor.registerObserver(&notifications);
 
     bmqu::MemOutStream dummy;

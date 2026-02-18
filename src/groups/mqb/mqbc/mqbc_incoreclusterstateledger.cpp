@@ -59,10 +59,10 @@
 #include <bdlt_epochutil.h>
 #include <bsl_cstring.h>
 #include <bsl_ctime.h>
+#include <bsl_functional.h>
 #include <bsl_memory.h>
 #include <bsl_unordered_set.h>
 #include <bsl_utility.h>
-#include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bslmf_allocatorargt.h>
 #include <bsls_keyword.h>
@@ -533,12 +533,6 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
                           << "' to all cluster nodes";
         }
 
-        // A follower does not reply Ack under eventual consistency
-        if (!isSelfLeader() &&
-            d_consistencyLevel == ClusterStateLedgerConsistency::e_EVENTUAL) {
-            return rc_SUCCESS;  // RETURN
-        }
-
         bmqp_ctrlmsg::ClusterMessage ackMessage;
         ackMessage.choice().makeLeaderAdvisoryAck().sequenceNumberAcked() =
             sequenceNumber;
@@ -688,7 +682,10 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
         }
 
         iter->second.d_ackCount += 1;
-        if (iter->second.d_ackCount == d_ackQuorum) {
+
+        const unsigned int ackQuorum = getAckQuorum();
+
+        if (iter->second.d_ackCount == ackQuorum) {
             // Consistency level reached. Apply a commit message for the
             // advisory, broadcast it, and invoke the 'CommitCb'.
             bmqp_ctrlmsg::ClusterMessage        commitMessage;
@@ -701,7 +698,7 @@ int IncoreClusterStateLedger::applyRecordInternalImpl(
             BSLS_ASSERT_SAFE(commitAdvisory.sequenceNumber() >
                              commitAdvisory.sequenceNumberCommitted());
 
-            BALL_LOG_INFO << description() << "Quorum of " << d_ackQuorum
+            BALL_LOG_INFO << description() << " Quorum of " << ackQuorum
                           << " acks is achieved for advisory of seqNum "
                           << ack.sequenceNumberAcked()
                           << ", creating and applying commit advisory: "
@@ -816,9 +813,7 @@ int IncoreClusterStateLedger::applyImpl(const bdlbb::Blob&   event,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(source);
     BSLS_ASSERT_SAFE(source->nodeId() !=
                      d_clusterData_p->membership().selfNode()->nodeId());
@@ -1157,12 +1152,11 @@ int IncoreClusterStateLedger::applyImpl(const bdlbb::Blob&   event,
 
 // CREATORS
 IncoreClusterStateLedger::IncoreClusterStateLedger(
-    const mqbcfg::ClusterDefinition&    clusterDefinition,
-    ClusterStateLedgerConsistency::Enum consistencyLevel,
-    ClusterData*                        clusterData,
-    ClusterState*                       clusterState,
-    BlobSpPool*                         blobSpPool_p,
-    bslma::Allocator*                   allocator)
+    const mqbcfg::ClusterDefinition& clusterDefinition,
+    ClusterData*                     clusterData,
+    ClusterState*                    clusterState,
+    BlobSpPool*                      blobSpPool_p,
+    bslma::Allocator*                allocator)
 : d_allocator_p(allocator)
 , d_isOpen(false)
 , d_blobSpPool_p(blobSpPool_p)
@@ -1170,10 +1164,6 @@ IncoreClusterStateLedger::IncoreClusterStateLedger(
 , d_commitCb()
 , d_clusterData_p(clusterData)
 , d_clusterState_p(clusterState)
-, d_consistencyLevel(consistencyLevel)
-, d_ackQuorum(consistencyLevel == ClusterStateLedgerConsistency::e_STRONG
-                  ? (clusterDefinition.nodes().size() / 2) + 1
-                  : 1)
 , d_ledgerConfig(allocator)
 , d_ledger_mp(0)
 , d_uncommittedAdvisories(allocator)
@@ -1235,9 +1225,7 @@ void IncoreClusterStateLedger::onClusterLeader(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     if (status == ElectorInfoLeaderStatus::e_UNDEFINED) {
         cancelUncommittedAdvisories();
@@ -1251,9 +1239,7 @@ int IncoreClusterStateLedger::open()
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     BALL_LOG_INFO << description()
                   << ": Opening IncoreCSL with config: " << d_ledgerConfig;
@@ -1310,9 +1296,7 @@ int IncoreClusterStateLedger::close()
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     enum RcEnum {
         // Value for the various RC error categories
@@ -1345,9 +1329,7 @@ int IncoreClusterStateLedger::apply(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(isSelfLeader());
 
     bmqp_ctrlmsg::ClusterMessage clusterMessage;
@@ -1364,9 +1346,7 @@ int IncoreClusterStateLedger::apply(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(isSelfLeader());
 
     bmqp_ctrlmsg::ClusterMessage clusterMessage;
@@ -1383,9 +1363,7 @@ int IncoreClusterStateLedger::apply(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(isSelfLeader());
 
     bmqp_ctrlmsg::ClusterMessage clusterMessage;
@@ -1402,9 +1380,7 @@ int IncoreClusterStateLedger::apply(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(isSelfLeader());
 
     bmqp_ctrlmsg::ClusterMessage clusterMessage;
@@ -1421,9 +1397,7 @@ int IncoreClusterStateLedger::apply(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(isSelfLeader());
 
     bmqp_ctrlmsg::ClusterMessage clusterMessage;
@@ -1440,9 +1414,7 @@ int IncoreClusterStateLedger::apply(
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
     BSLS_ASSERT_SAFE(isSelfLeader());
 
     const bmqp_ctrlmsg::ClusterMessageChoice& choice = clusterMessage.choice();
@@ -1483,9 +1455,7 @@ int IncoreClusterStateLedger::apply(const bdlbb::Blob&   event,
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     return applyImpl(event, source);
 }
@@ -1498,9 +1468,7 @@ IncoreClusterStateLedger::getIterator() const
     // executed by the *CLUSTER DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        d_clusterData_p->cluster().dispatcher()->inDispatcherThread(
-            &d_clusterData_p->cluster()));
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
 
     bslma::ManagedPtr<ClusterStateLedgerIterator> mp(
         new (*d_allocator_p)
@@ -1508,6 +1476,23 @@ IncoreClusterStateLedger::getIterator() const
         d_allocator_p);
 
     return mp;
+}
+
+void IncoreClusterStateLedger::uncommittedAdvisories(
+    ClusterMessageCRefList* out) const
+{
+    // executed by the *CLUSTER DISPATCHER* thread
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_clusterData_p->cluster().inDispatcherThread());
+    BSLS_ASSERT_SAFE(out);
+
+    for (AdvisoriesMapCIter iter = d_uncommittedAdvisories.begin();
+         iter != d_uncommittedAdvisories.end();
+         ++iter) {
+        const ClusterMessageInfo& info = iter->second;
+        out->push_back(bsl::cref(info.d_clusterMessage));
+    }
 }
 
 }  // close package namespace

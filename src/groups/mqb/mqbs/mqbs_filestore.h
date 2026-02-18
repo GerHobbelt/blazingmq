@@ -95,7 +95,7 @@ namespace mqbi {
 class Domain;
 }
 namespace mqbstat {
-class ClusterStats;
+class PartitionStats;
 }
 
 namespace mqbs {
@@ -285,9 +285,9 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // Dispatcher client data associated
     // with this instance.
 
-    mqbstat::ClusterStats* d_clusterStats_p;
+    bsl::shared_ptr<mqbstat::PartitionStats> d_partitionStats_sp;
     // Stat object associated to the
-    // Cluster this FileStore belongs to,
+    // Partition this FileStore belongs to,
     // used to report partition level
     // metrics.
 
@@ -708,13 +708,13 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// `dispatcher`, `cluster`, `clusterStats`, `blobSpPool`,
     /// `miscWorkThreadPool`, `isCSLModeEnabled`, `isFSMWorkflow` and
     /// `allocator`.
-    FileStore(const DataStoreConfig&  config,
-              int                     processorId,
-              mqbi::Dispatcher*       dispatcher,
-              mqbnet::Cluster*        cluster,
-              mqbstat::ClusterStats*  clusterStats,
-              BlobSpPool*             blobSpPool,
-              StateSpPool*            statePool,
+    FileStore(const DataStoreConfig&                          config,
+              int                                             processorId,
+              mqbi::Dispatcher*                               dispatcher,
+              mqbnet::Cluster*                                cluster,
+              const bsl::shared_ptr<mqbstat::PartitionStats>& partitionStats,
+              BlobSpPool*                                     blobSpPool,
+              StateSpPool*                                    statePool,
               bdlmt::FixedThreadPool* miscWorkThreadPool,
               bool                    isCSLModeEnabled,
               bool                    isFSMWorkflow,
@@ -748,7 +748,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// Return a reference to the dispatcherClientData.
     mqbi::DispatcherClientData& dispatcherClientData() BSLS_KEYWORD_OVERRIDE;
 
-    void dispatchEvent(mqbi::DispatcherEvent* event);
+    void dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event);
 
     /// Execute the specified `functor`, using the `e_CALLBACK` event
     /// type, in the processor associated to this object.
@@ -1037,8 +1037,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// Return the current sequence number for this partition.
     bsls::Types::Uint64 sequenceNumber() const;
 
-    bool inDispatcherThread() const;
-
     /// Return the replication factor for strong consistency.
     int replicationFactor() const;
 
@@ -1203,9 +1201,10 @@ inline bool FileStore::needRollover(const MappedFileDescriptor& file,
     return file.fileSize() < (position + length);
 }
 
-inline void FileStore::dispatchEvent(mqbi::DispatcherEvent* event)
+inline void
+FileStore::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event)
 {
-    dispatcher()->dispatchEvent(event, this);
+    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event), this);
 }
 
 inline void FileStore::execute(const mqbi::Dispatcher::VoidFunctor& functor)
@@ -1213,11 +1212,6 @@ inline void FileStore::execute(const mqbi::Dispatcher::VoidFunctor& functor)
     dispatcher()->execute(functor,
                           this,
                           mqbi::DispatcherEventType::e_CALLBACK);
-}
-
-inline bool FileStore::inDispatcherThread() const
-{
-    return dispatcher()->inDispatcherThread(this);
 }
 
 // MANIPULATORS

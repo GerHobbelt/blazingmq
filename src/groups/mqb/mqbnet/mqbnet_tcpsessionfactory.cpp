@@ -536,7 +536,7 @@ void TCPSessionFactory::negotiationComplete(
                   << session->description() << "', channel: '" << channel.get()
                   << "', maxMissedHeartbeat: "
                   << initialConnectionContext_p->negotiationContext()
-                         ->d_maxMissedHeartbeats
+                         ->maxMissedHeartbeats()
                   << "]";
 
     // Session is established; keep a hold to it.
@@ -584,14 +584,14 @@ void TCPSessionFactory::negotiationComplete(
             return;  // RETURN
         }
 
-        info.createInplace(d_allocator_p,
-                           channel,
-                           monitoredSession,
-                           initialConnectionContext_p->negotiationContext()
-                               ->d_eventProcessor_p,
-                           initialConnectionContext_p->negotiationContext()
-                               ->d_maxMissedHeartbeats,
-                           d_initialMissedHeartbeatCounter);
+        info.createInplace(
+            d_allocator_p,
+            channel,
+            monitoredSession,
+            initialConnectionContext_p->negotiationContext()->eventProcessor(),
+            initialConnectionContext_p->negotiationContext()
+                ->maxMissedHeartbeats(),
+            d_initialMissedHeartbeatCounter);
         // See comments in 'calculateInitialMissedHbCounter'.
 
         bsl::pair<bmqio::Channel*, ChannelInfoSp> toInsert(channel.get(),
@@ -619,7 +619,7 @@ void TCPSessionFactory::negotiationComplete(
         bmqio::ChannelFactoryEvent::e_CHANNEL_UP,
         bmqio::Status(),
         monitoredSession,
-        initialConnectionContext_p->negotiationContext()->d_cluster_p,
+        initialConnectionContext_p->negotiationContext()->cluster(),
         initialConnectionContext_p->resultState(),
         bdlf::BindUtil::bind(&TCPSessionFactory::readCallback,
                              this,
@@ -1400,7 +1400,7 @@ int TCPSessionFactory::listen(const mqbcfg::TcpInterfaceListener& listener,
 
     bdlma::LocalSequentialAllocator<64> localAlloc(d_allocator_p);
     bmqu::MemOutStream                  endpoint(&localAlloc);
-    endpoint << ":" << port;  // Empty hostname, listen from all interfaces
+    endpoint << listener.address() << ":" << listener.port();
     bmqio::ListenOptions listenOptions;
     listenOptions.setEndpoint(endpoint.str());
 
@@ -1535,10 +1535,13 @@ bool TCPSessionFactory::isEndpointLoopback(const bslstl::StringRef& uri) const
 {
     bmqio::TCPEndpoint endpoint(uri);
 
+    if (!bmqio::ChannelUtil::isLocalHost(endpoint.host())) {
+        return false;
+    }
+
     // Use the original port specification method
     if (d_config.listeners().empty()) {
-        return (endpoint.port() == d_config.port()) &&
-               bmqio::ChannelUtil::isLocalHost(endpoint.host());
+        return endpoint.port() == d_config.port();
     }
 
     PortMatcher portMatcher(endpoint.port());

@@ -70,9 +70,9 @@ typedef mqbmock::Cluster::TestChannelMapCIter TestChannelMapCIter;
 typedef mqbc::ClusterStateManager::NodeToLSNMap      NodeToLSNMap;
 typedef mqbc::ClusterStateManager::NodeToLSNMapCIter NodeToLSNMapCIter;
 
-typedef mqbmock::ClusterStateLedger::Advisories Advisories;
-
 typedef mqbc::ClusterStateManager::ClusterStateLedgerMp ClusterStateLedgerMp;
+typedef mqbc::ClusterStateLedger::ClusterMessageCRefList
+    ClusterMessageCRefList;
 
 // CLASSES
 // =============
@@ -178,6 +178,11 @@ struct Tester {
                                           bmqtst::TestHelperUtil::allocator()),
             bmqtst::TestHelperUtil::allocator());
         d_clusterStateManager_mp->setStorageManager(&d_storageManager);
+
+        // In some UTs, operations with cluster might be executed either
+        // from the main thread or from the scheduler thread.
+        // To pass `inDispatcherThread` checks (allow ANY thread):
+        d_cluster_mp->setThreadId(mqbi::DispatcherClient::k_ANY_THREAD_ID);
 
         // Start the cluster and the cluster state manager
         bmqu::MemOutStream errorDescription;
@@ -1207,13 +1212,13 @@ static void test11_leaderHighestLeaderHealed()
                     mqbc::ClusterStateTableState::e_LDR_HEALING_STG2);
 
     // Verify that a cluster state snapshot is applied to the CSL
-    const Advisories& advisories =
-        tester.d_clusterStateLedger_p->_uncommittedAdvisories();
+    ClusterMessageCRefList advisories;
+    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
-    BMQTST_ASSERT(advisories.front().choice().isLeaderAdvisoryValue());
+    BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
     const bmqp_ctrlmsg::LeaderAdvisory& advisory =
-        advisories.front().choice().leaderAdvisory();
+        advisories.front().get().choice().leaderAdvisory();
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().electorTerm(), 2U);
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().sequenceNumber(), 1U);
 
@@ -1332,13 +1337,13 @@ static void test12_followerHighestLeaderHealed()
                      mqbc::ClusterStateTableState::e_LDR_HEALING_STG2);
 
     // Verify that a cluster state snapshot is applied to the CSL
-    const Advisories& advisories =
-        tester.d_clusterStateLedger_p->_uncommittedAdvisories();
+    ClusterMessageCRefList advisories;
+    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
-    BMQTST_ASSERT(advisories.front().choice().isLeaderAdvisoryValue());
+    BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
     const bmqp_ctrlmsg::LeaderAdvisory& advisory =
-        advisories.front().choice().leaderAdvisory();
+        advisories.front().get().choice().leaderAdvisory();
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().electorTerm(), 2U);
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().sequenceNumber(), 1U);
 
@@ -1599,13 +1604,13 @@ static void test16_followerClusterStateRespFailureLeaderNext()
     //    to healed via applying to CSL
     //
     // Verify that a cluster state snapshot is applied to the CSL
-    const Advisories& advisories =
-        tester.d_clusterStateLedger_p->_uncommittedAdvisories();
+    ClusterMessageCRefList advisories;
+    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
-    BMQTST_ASSERT(advisories.front().choice().isLeaderAdvisoryValue());
+    BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
     const bmqp_ctrlmsg::LeaderAdvisory& advisory =
-        advisories.front().choice().leaderAdvisory();
+        advisories.front().get().choice().leaderAdvisory();
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().electorTerm(), 2U);
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().sequenceNumber(), 1U);
 
@@ -1750,13 +1755,13 @@ static void test17_followerClusterStateRespFailureFollowerNext()
                      mqbc::ClusterStateTableState::e_LDR_HEALING_STG2);
 
     // Verify that a cluster state snapshot is applied to the CSL
-    const Advisories& advisories =
-        tester.d_clusterStateLedger_p->_uncommittedAdvisories();
+    ClusterMessageCRefList advisories;
+    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
-    BMQTST_ASSERT(advisories.front().choice().isLeaderAdvisoryValue());
+    BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
     const bmqp_ctrlmsg::LeaderAdvisory& advisory =
-        advisories.front().choice().leaderAdvisory();
+        advisories.front().get().choice().leaderAdvisory();
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().electorTerm(), 2U);
     BMQTST_ASSERT_EQ(advisory.sequenceNumber().sequenceNumber(), 1U);
 

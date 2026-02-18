@@ -120,7 +120,6 @@ void Application::oneTimeInit()
         // Make MessageGUID generation thread-safe by calling initialize
         mqbu::MessageGUIDUtil::initialize();
 
-        bmqt::UriParser::initialize();
         bmqp::ProtocolUtil::initialize();
     }
 }
@@ -130,7 +129,6 @@ void Application::oneTimeShutdown()
     BSLMT_ONCE_DO
     {
         bmqp::ProtocolUtil::shutdown();
-        bmqt::UriParser::shutdown();
         bmqsys::Time::shutdown();
     }
 }
@@ -637,18 +635,18 @@ bool Application::initiateShutdown()
 
     {
         bslmt::Latch latch(1);
-        d_dispatcher_mp->execute(mqbi::Dispatcher::VoidFunctor(),
-                                 mqbi::DispatcherClientType::e_QUEUE,
-                                 bdlf::BindUtil::bind(&bslmt::Latch::arrive,
-                                                      &latch));
+        d_dispatcher_mp->executeOnAllQueues(
+            mqbi::Dispatcher::VoidFunctor(),
+            mqbi::DispatcherClientType::e_QUEUE,
+            bdlf::BindUtil::bind(&bslmt::Latch::arrive, &latch));
         latch.wait();
     }
     {
         bslmt::Latch latch(1);
-        d_dispatcher_mp->execute(mqbi::Dispatcher::VoidFunctor(),
-                                 mqbi::DispatcherClientType::e_CLUSTER,
-                                 bdlf::BindUtil::bind(&bslmt::Latch::arrive,
-                                                      &latch));
+        d_dispatcher_mp->executeOnAllQueues(
+            mqbi::Dispatcher::VoidFunctor(),
+            mqbi::DispatcherClientType::e_CLUSTER,
+            bdlf::BindUtil::bind(&bslmt::Latch::arrive, &latch));
         latch.wait();
     }
 

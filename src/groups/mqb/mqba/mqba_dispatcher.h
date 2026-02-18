@@ -39,15 +39,11 @@
 /// =================
 ///
 /// As required by the @bbref{mqbi::Dispatcher} protocol, this implementation
-/// provides two types of executors, each available through the dispatcher's
-/// `executor` and `clientExecutor` member functions respectively.  Provided
-/// executors compares equal only if they refer to the same processor (for
-/// executors returned by `executor`), or if they refer to the same client (for
-/// executors returned by `clientExecutor`).  A call to `dispatch` on such
-/// executors performed from within the executor's associated processor thread
-/// results in the submitted functor to be executed in-place.  A call to
-/// `dispatch` from outside of the executor's associated processor thread is
-/// equivalent to a call to `post`.
+/// provides an executor, available through the dispatcher's `executor` member
+/// function.  A call to `dispatch` on such executor performed from within the
+/// executor's associated processor thread results in the submitted functor to
+/// be executed in-place.  A call to `dispatch` from outside of the executor's
+/// associated processor thread is equivalent to a call to `post`.
 
 // MQB
 #include <mqbcfg_messages.h>
@@ -69,7 +65,6 @@
 #include <bslma_managedptr.h>
 #include <bslma_usesbslmaallocator.h>
 #include <bslmf_nestedtraitdeclaration.h>
-#include <bslmt_threadutil.h>
 #include <bsls_assert.h>
 
 namespace BloombergLP {
@@ -114,7 +109,7 @@ class Dispatcher_Executor {
     /// on a processor owned by the specified `dispacher` and in charge of
     /// the specified `client`.  The behavior is undefined unless the
     /// specified `client` is registered on the specified `dispacher` and
-    /// the client type is not `e_UNDEFINED` or `e_ALL`.
+    /// the client type is not `e_UNDEFINED`.
     Dispatcher_Executor(const Dispatcher*             dispacher,
                         const mqbi::DispatcherClient* client)
         BSLS_CPP11_NOEXCEPT;
@@ -129,70 +124,6 @@ class Dispatcher_Executor {
     /// Submit the specified function object `f` to be executed on the
     /// executor's associated processor.  Return immediately without waiting
     /// for the submitted function object to complete.
-    void post(const bsl::function<void()>& f) const;
-
-    /// If this function is called from the thread owned by the executor's
-    /// associated processor, invoke the specified function object `f`
-    /// in-place as if by `f()`.  Otherwise, submit the function object for
-    /// execution as if by `post(f)`.
-    void dispatch(const bsl::function<void()>& f) const;
-};
-
-// ===============================
-// class Dispatcher_ClientExecutor
-// ===============================
-
-/// Provides an executor suitable for submitting function objects on an
-/// dispatcher's processor to be executed by a dispatcher's client.
-///
-/// Note that this class conforms to the Executor concept as defined in
-/// the `bmqex` package documentation.
-///
-/// Note also that it is undefined behavior to submit work on this
-/// executor unless its associated dispatcher is started and the
-/// dispatcher's client used to initialize the executor has not been
-/// unregistered from the executor's associated dispatcher.
-class Dispatcher_ClientExecutor {
-  private:
-    // PRIVATE DATA
-    const mqbi::DispatcherClient* d_client_p;
-
-  private:
-    // PRIVATE ACCESSORS
-
-    /// Return a pointer to the processor pool used to submit work.
-    bmqc::MultiQueueThreadPool<mqbi::DispatcherEvent>*
-    processorPool() const BSLS_CPP11_NOEXCEPT;
-
-    /// Return the handle of the associated processor.
-    mqbi::Dispatcher::ProcessorHandle
-    processorHandle() const BSLS_CPP11_NOEXCEPT;
-
-  public:
-    // CREATORS
-
-    /// Create a `Dispatcher_ClientExecutor` object for executing function
-    /// objects by the specified `client` on a processor in charge of that
-    /// client owned by the specified `dispacher`.  The behavior is
-    /// undefined unless the specified `client` is registered on the
-    /// specified `dispacher` and the client type is not `e_UNDEFINED` or
-    /// `e_ALL`.
-    Dispatcher_ClientExecutor(const Dispatcher*             dispacher,
-                              const mqbi::DispatcherClient* client)
-        BSLS_CPP11_NOEXCEPT;
-
-  public:
-    // ACCESSORS
-
-    /// Return `true` if `*this` refer to the same client as `rhs`, and
-    /// `false` otherwise.
-    bool
-    operator==(const Dispatcher_ClientExecutor& rhs) const BSLS_CPP11_NOEXCEPT;
-
-    /// Submit the specified function object `f` to be executed by the
-    /// executor's associated client on the executor's associated processor.
-    /// Return immediately without waiting for the submitted function object
-    /// to complete.
     void post(const bsl::function<void()>& f) const;
 
     /// If this function is called from the thread owned by the executor's
@@ -313,7 +244,6 @@ class Dispatcher BSLS_CPP11_FINAL : public mqbi::Dispatcher {
     bsl::vector<DispatcherContextSp> d_contexts;
 
     // FRIENDS
-    friend class Dispatcher_ClientExecutor;
     friend class Dispatcher_Executor;
 
   private:
@@ -346,7 +276,7 @@ class Dispatcher BSLS_CPP11_FINAL : public mqbi::Dispatcher {
     void queueEventCb(mqbi::DispatcherClientType::Enum type,
                       int                              processorId,
                       void*                            context,
-                      const ProcessorPool::Event*      event);
+                      const ProcessorPool::EventSp&    event);
 
     /// Flush clients of the specified `type` for the specified
     /// `processorId`.
@@ -404,36 +334,37 @@ class Dispatcher BSLS_CPP11_FINAL : public mqbi::Dispatcher {
     /// Retrieve an event from the pool to send to a client of the specified
     /// `type`.  This event *must* be enqueued by calling `dispatchEvent`;
     /// otherwise it will be leaked.
-    mqbi::DispatcherEvent*
+    bsl::shared_ptr<mqbi::DispatcherEvent>
     getEvent(mqbi::DispatcherClientType::Enum type) BSLS_KEYWORD_OVERRIDE;
 
     /// Retrieve an event from the pool to send to the specified `client`.
     /// This event *must* be enqueued by calling `dispatchEvent`; otherwise it
     /// will be leaked.
-    mqbi::DispatcherEvent*
+    bsl::shared_ptr<mqbi::DispatcherEvent>
     getEvent(const mqbi::DispatcherClient* client) BSLS_KEYWORD_OVERRIDE;
 
     /// Dispatch the specified `event` to the specified `destination`.
     void
-    dispatchEvent(mqbi::DispatcherEvent*  event,
+    dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
                   mqbi::DispatcherClient* destination) BSLS_KEYWORD_OVERRIDE;
 
     /// Dispatch the specified `event` to the queue associated with the
     /// specified `type` and `handle`.  The behavior is undefined unless the
     /// `event` was obtained by a call to `getEvent`.
-    void dispatchEvent(mqbi::DispatcherEvent*            event,
-                       mqbi::DispatcherClientType::Enum  type,
-                       mqbi::Dispatcher::ProcessorHandle handle)
+    void dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
+                       mqbi::DispatcherClientType::Enum       type,
+                       mqbi::Dispatcher::ProcessorHandle      handle)
         BSLS_KEYWORD_OVERRIDE;
 
     /// Execute the specified `functor` in the processors in charge of
     /// clients of the specified `type`, and invoke the optionally specified
     /// `doneCallback` (if any) when all the relevant processors are done
     /// executing the `functor`.
-    void execute(const mqbi::Dispatcher::VoidFunctor& functor,
-                 mqbi::DispatcherClientType::Enum     type,
-                 const mqbi::Dispatcher::VoidFunctor& doneCallback =
-                     mqbi::Dispatcher::VoidFunctor()) BSLS_KEYWORD_OVERRIDE;
+    void executeOnAllQueues(const mqbi::Dispatcher::VoidFunctor& functor,
+                            mqbi::DispatcherClientType::Enum     type,
+                            const mqbi::Dispatcher::VoidFunctor& doneCallback =
+                                mqbi::Dispatcher::VoidFunctor())
+        BSLS_KEYWORD_OVERRIDE;
 
     /// Execute the specified `functor`, using the specified dispatcher `type`,
     /// in the processor associated with the specified `client`.  The behavior
@@ -473,22 +404,10 @@ class Dispatcher BSLS_CPP11_FINAL : public mqbi::Dispatcher {
     int numProcessors(mqbi::DispatcherClientType::Enum type) const
         BSLS_KEYWORD_OVERRIDE;
 
-    /// Return whether the current thread is the dispatcher thread associated
-    /// with the specified `client`.  This is useful for precondition assert
-    /// validation.
-    bool inDispatcherThread(const mqbi::DispatcherClient* client) const
-        BSLS_KEYWORD_OVERRIDE;
-
-    /// Return whether the current thread is the dispatcher thread associated
-    /// with the specified dispatcher client `data`.  This is useful for
-    /// precondition assert validation.
-    bool inDispatcherThread(const mqbi::DispatcherClientData* data) const
-        BSLS_KEYWORD_OVERRIDE;
-
     /// Return an executor object suitable for executing function objects on
     /// the processor in charge of the specified `client`.  The behavior is
     /// undefined unless the specified `client` is registered on this
-    /// dispatcher and the client type is not `e_UNDEFINED` or `e_ALL`.
+    /// dispatcher and the client type is not `e_UNDEFINED`.
     ///
     /// Note that submitting work on the returned executor is undefined
     /// behavior unless this dispatcher is started.
@@ -498,18 +417,6 @@ class Dispatcher BSLS_CPP11_FINAL : public mqbi::Dispatcher {
     /// dispatcher.
     bmqex::Executor
     executor(const mqbi::DispatcherClient* client) const BSLS_KEYWORD_OVERRIDE;
-
-    /// Return an executor object suitable for executing function objects by
-    /// the specified `client` on the processor in charge of that client.
-    /// The behavior is undefined unless the specified `client` is
-    /// registered on this dispatcher and the client type is not
-    /// `e_UNDEFINED` or `e_ALL`.
-    ///
-    /// Note that submitting work on the returned executor is undefined
-    /// behavior unless this dispatcher is started or if the specified
-    /// `client` was unregistered from this dispatcher.
-    bmqex::Executor clientExecutor(const mqbi::DispatcherClient* client) const
-        BSLS_KEYWORD_OVERRIDE;
 };
 
 // ============================================================================
@@ -521,55 +428,55 @@ class Dispatcher BSLS_CPP11_FINAL : public mqbi::Dispatcher {
 // ----------------
 
 // MANIPULATORS
-inline mqbi::DispatcherEvent*
+inline bsl::shared_ptr<mqbi::DispatcherEvent>
 Dispatcher::getEvent(mqbi::DispatcherClientType::Enum type)
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(type != mqbi::DispatcherClientType::e_UNDEFINED &&
-                     type != mqbi::DispatcherClientType::e_ALL);
+    BSLS_ASSERT_SAFE(type != mqbi::DispatcherClientType::e_UNDEFINED);
 
-    return &d_contexts[type]
-                ->d_processorPool_mp->getUnmanagedEvent()
-                ->object();
+    return d_contexts[type]->d_processorPool_mp->getEvent();
 }
 
-inline mqbi::DispatcherEvent*
+inline bsl::shared_ptr<mqbi::DispatcherEvent>
 Dispatcher::getEvent(const mqbi::DispatcherClient* client)
 {
     return getEvent(client->dispatcherClientData().clientType());
 }
 
-inline void Dispatcher::dispatchEvent(mqbi::DispatcherEvent*  event,
-                                      mqbi::DispatcherClient* destination)
+inline void
+Dispatcher::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
+                          mqbi::DispatcherClient*                destination)
 {
     BALL_LOG_TRACE << "Enqueuing Event to '" << destination->description()
-                   << "': " << *event;
+                   << "': " << *bslmf::MovableRefUtil::access(event);
 
-    event->setDestination(destination);
+    bslmf::MovableRefUtil::access(event)->setDestination(destination);
 
-    dispatchEvent(event,
+    dispatchEvent(bslmf::MovableRefUtil::move(event),
                   destination->dispatcherClientData().clientType(),
                   destination->dispatcherClientData().processorHandle());
 }
 
-inline void Dispatcher::dispatchEvent(mqbi::DispatcherEvent*            event,
-                                      mqbi::DispatcherClientType::Enum  type,
-                                      mqbi::Dispatcher::ProcessorHandle handle)
+inline void
+Dispatcher::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
+                          mqbi::DispatcherClientType::Enum       type,
+                          mqbi::Dispatcher::ProcessorHandle      handle)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(handle != mqbi::Dispatcher::k_INVALID_PROCESSOR_HANDLE);
 
     BALL_LOG_TRACE << "Enqueuing Event to processor " << handle << " of "
-                   << type << ": " << *event;
+                   << type << ": " << *bslmf::MovableRefUtil::access(event);
 
     switch (type) {
     case mqbi::DispatcherClientType::e_SESSION:
     case mqbi::DispatcherClientType::e_QUEUE:
     case mqbi::DispatcherClientType::e_CLUSTER: {
-        d_contexts[type]->d_processorPool_mp->enqueueEvent(event, handle);
+        d_contexts[type]->d_processorPool_mp->enqueueEvent(
+            bslmf::MovableRefUtil::move(event),
+            handle);
     } break;
     case mqbi::DispatcherClientType::e_UNDEFINED:
-    case mqbi::DispatcherClientType::e_ALL:
     default: {
         BSLS_ASSERT_OPT(false && "Invalid destination type");
     }
@@ -586,11 +493,11 @@ inline void Dispatcher::execute(const mqbi::Dispatcher::VoidFunctor& functor,
                      type == mqbi::DispatcherEventType::e_DISPATCHER);
     BSLS_ASSERT_SAFE(functor);
 
-    mqbi::DispatcherEvent* event = getEvent(client);
+    bsl::shared_ptr<mqbi::DispatcherEvent> event = getEvent(client);
 
     (*event).setType(type).callback().set(functor);
 
-    dispatchEvent(event, client);
+    dispatchEvent(bslmf::MovableRefUtil::move(event), client);
 }
 
 inline void Dispatcher::execute(const mqbi::Dispatcher::VoidFunctor& functor,
@@ -599,14 +506,17 @@ inline void Dispatcher::execute(const mqbi::Dispatcher::VoidFunctor& functor,
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(functor);
 
-    mqbi::DispatcherEvent* event = getEvent(client.clientType());
+    bsl::shared_ptr<mqbi::DispatcherEvent> event = getEvent(
+        client.clientType());
 
     (*event)
         .setType(mqbi::DispatcherEventType::e_DISPATCHER)
         .callback()
         .set(functor);
 
-    dispatchEvent(event, client.clientType(), client.processorHandle());
+    dispatchEvent(bslmf::MovableRefUtil::move(event),
+                  client.clientType(),
+                  client.processorHandle());
 }
 
 // ACCESSORS
@@ -623,11 +533,6 @@ Dispatcher::numProcessors(mqbi::DispatcherClientType::Enum type) const
     case mqbi::DispatcherClientType::e_CLUSTER: {
         return d_config.clusters().numProcessors();  // RETURN
     }  // break;
-    case mqbi::DispatcherClientType::e_ALL: {
-        return d_config.sessions().numProcessors() +
-               d_config.queues().numProcessors() +
-               d_config.clusters().numProcessors();  // RETURN
-    }  // break;
     case mqbi::DispatcherClientType::e_UNDEFINED: {
         BSLS_ASSERT_OPT(false && "Invalid type");
         return -1;  // RETURN
@@ -636,23 +541,6 @@ Dispatcher::numProcessors(mqbi::DispatcherClientType::Enum type) const
     }
 
     return 0;
-}
-
-inline bool
-Dispatcher::inDispatcherThread(const mqbi::DispatcherClient* client) const
-{
-    return inDispatcherThread(&(client->dispatcherClientData()));
-}
-
-inline bool
-Dispatcher::inDispatcherThread(const mqbi::DispatcherClientData* data) const
-
-{
-    mqbi::DispatcherClientType::Enum type = data->clientType();
-    int                              proc = data->processorHandle();
-
-    return (d_contexts[type]->d_processorPool_mp->queueThreadHandle(proc) ==
-            bslmt::ThreadUtil::self());
 }
 
 }  // close package namespace

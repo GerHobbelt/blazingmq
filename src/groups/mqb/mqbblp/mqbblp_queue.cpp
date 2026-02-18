@@ -60,12 +60,38 @@ namespace mqbblp {
 
 namespace {
 
-void onHandleDeconfigured(const bmqp_ctrlmsg::Status&,
-                          const bmqp_ctrlmsg::StreamParameters&,
-                          const bsl::function<void(void)>& cb)
+struct Counter {
+    bsls::AtomicUint d_count;
+
+    explicit Counter(unsigned count)
+    : d_count(count)
+    {
+        // NOTHING
+    }
+    unsigned decrement()
+    {
+        BSLS_ASSERT_SAFE(d_count.load());
+        return d_count.subtract(1);
+    }
+};
+
+void onHandleDeconfigured(
+    const bmqp_ctrlmsg::Status&,
+    const bmqp_ctrlmsg::StreamParameters&,
+    mqbi::Queue*                               queue,
+    mqbi::QueueHandle*                         handle,
+    const bmqp_ctrlmsg::QueueHandleParameters& handleParameters,
+    const bsl::shared_ptr<Counter>&            counter)
 {
-    BSLS_ASSERT_SAFE(cb);
-    cb();
+    BSLS_ASSERT_SAFE(queue);
+    BSLS_ASSERT_SAFE(handle);
+
+    const bool isFinal = (counter->decrement() == 0);
+
+    queue->releaseHandle(handle,
+                         handleParameters,
+                         isFinal,
+                         mqbi::QueueHandle::HandleReleasedCallback());
 }
 
 }
@@ -82,7 +108,7 @@ void Queue::configureDispatchedAndPost(int*              result,
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
     BSLS_ASSERT_SAFE(result);
     BSLS_ASSERT_SAFE(errorDescription);
     BSLS_ASSERT_SAFE(sync);
@@ -107,7 +133,7 @@ void Queue::configureDispatched(bool isReconfigure)
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     bmqu::MemOutStream throwaway(d_allocator_p);
 
@@ -123,6 +149,7 @@ void Queue::configureDispatched(bool isReconfigure)
 }
 
 void Queue::getHandleDispatched(
+    const mqbi::OpenQueueConfirmationCookieSp&                context,
     const bsl::shared_ptr<mqbi::QueueHandleRequesterContext>& clientContext,
     const bmqp_ctrlmsg::QueueHandleParameters&                handleParameters,
     unsigned int                                upstreamSubQueueId,
@@ -131,19 +158,21 @@ void Queue::getHandleDispatched(
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
     BSLS_ASSERT_SAFE(
         clientContext->requesterId() !=
         mqbi::QueueHandleRequesterContext::k_INVALID_REQUESTER_ID);
 
     if (d_localQueue_mp) {
-        d_localQueue_mp->getHandle(clientContext,
+        d_localQueue_mp->getHandle(context,
+                                   clientContext,
                                    handleParameters,
                                    upstreamSubQueueId,
                                    callback);
     }
     else if (d_remoteQueue_mp) {
-        d_remoteQueue_mp->getHandle(clientContext,
+        d_remoteQueue_mp->getHandle(context,
+                                    clientContext,
                                     handleParameters,
                                     upstreamSubQueueId,
                                     callback);
@@ -164,7 +193,7 @@ void Queue::releaseHandleDispatched(
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->releaseHandle(handle,
@@ -190,7 +219,7 @@ void Queue::dropHandleDispatched(mqbi::QueueHandle* handle, bool doDeconfigure)
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (!d_state.handleCatalog().hasHandle(handle)) {
         // Specified 'handle' may have been destroyed by the time this routine
@@ -225,8 +254,13 @@ void Queue::dropHandleDispatched(mqbi::QueueHandle* handle, bool doDeconfigure)
         return;  // RETURN
     }
 
+    bsl::shared_ptr<Counter> counter(
+        new (*d_allocator_p) Counter(handle->subStreamInfos().size()),
+        d_allocator_p);
+
     BALL_LOG_INFO << "Dropping QueueHandle [" << handle << "] for queue ["
-                  << description() << "].";
+                  << description() << "] having "
+                  << handle->subStreamInfos().size() << " subStreams.";
 
     // Since the handle is being dropped (which typically occurs if a client is
     // stopping without explicitly closing its queues, or if a client crashes),
@@ -243,6 +277,7 @@ void Queue::dropHandleDispatched(mqbi::QueueHandle* handle, bool doDeconfigure)
     // Execute the 'configureHandle' & 'releaseHandle' sequence to drop each
     // subStream of the handle in turn.
 
+    int totalReadCount = handle->handleParameters().readCount();
     mqbi::QueueHandle::SubStreams::const_iterator citer =
         handle->subStreamInfos().begin();
     bool isFinal = (citer == handle->subStreamInfos().end());
@@ -261,17 +296,15 @@ void Queue::dropHandleDispatched(mqbi::QueueHandle* handle, bool doDeconfigure)
                                                     subStreamInfo,
                                                     info.d_counts.d_readCount);
 
-        // Set 'isFinal' when releasing the last subStream of this handle
         isFinal = ((++citer) == handle->subStreamInfos().end());
+        totalReadCount -= consumerHandleParams.readCount();
 
         BALL_LOG_INFO << "For queue [" << handle->queue()->description()
                       << "] and handle [" << handle->client() << ":"
                       << handle->id() << "] " << "having [handleParamerers: "
                       << handle->handleParameters() << "], dropping subStream "
                       << "[" << subStreamInfo << "] having [streamParameters: "
-                      << info.d_streamParameters
-                      << "]. 'isFinal' flag: " << bsl::boolalpha << isFinal
-                      << ".";
+                      << info.d_streamParameters << "].";
 
         if (doDeconfigure) {
             bmqp_ctrlmsg::StreamParameters nullStreamParameters;
@@ -279,20 +312,15 @@ void Queue::dropHandleDispatched(mqbi::QueueHandle* handle, bool doDeconfigure)
 
             // Do not send CloseQueue request without waiting for deconfigure
             // response.
-            const bsl::function<void(void)> cb = bdlf::BindUtil::bind(
-                &Queue::releaseHandleDispatched,
-                this,
-                handle,
-                consumerHandleParams,
-                isFinal,
-                mqbi::QueueHandle::HandleReleasedCallback());
-
             configureHandle(handle,
                             nullStreamParameters,
                             bdlf::BindUtil::bind(&onHandleDeconfigured,
                                                  bdlf::PlaceHolders::_1,
                                                  bdlf::PlaceHolders::_2,
-                                                 cb));
+                                                 this,
+                                                 handle,
+                                                 consumerHandleParams,
+                                                 counter));
         }
         else {
             // 'releaseHandle' erases from 'handle->subStreamInfos()'
@@ -304,6 +332,8 @@ void Queue::dropHandleDispatched(mqbi::QueueHandle* handle, bool doDeconfigure)
                 mqbi::QueueHandle::HandleReleasedCallback());
         }
     }
+
+    BSLS_ASSERT_SAFE(0 == totalReadCount);
 }
 
 void Queue::closeDispatched()
@@ -311,7 +341,7 @@ void Queue::closeDispatched()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->close();
@@ -331,7 +361,7 @@ void Queue::convertToLocalDispatched()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
     BSLS_ASSERT_SAFE(d_remoteQueue_mp);
 
     BALL_LOG_INFO << d_state.uri() << ": converting to local "
@@ -413,7 +443,7 @@ void Queue::listMessagesDispatched(mqbcmd::QueueResult* result,
 {
     // executed by the *QUEUE* dispatcher thread
 
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (!appId.empty() && !d_state.storage()->hasVirtualStorage(appId)) {
         mqbcmd::Error& error = result->makeError();
@@ -438,7 +468,7 @@ void Queue::loadInternals(mqbcmd::QueueInternals* out)
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     // State
     d_state.loadInternals(&out->state());
@@ -547,7 +577,7 @@ void Queue::convertToRemote()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
     BSLS_ASSERT_SAFE(d_localQueue_mp);
 
     BALL_LOG_INFO << d_state.uri() << ": converting to remote";
@@ -560,7 +590,7 @@ void Queue::onLostUpstream()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_remoteQueue_mp) {
         d_remoteQueue_mp->onLostUpstream();
@@ -572,7 +602,7 @@ void Queue::onOpenFailure(unsigned int subQueueId)
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_remoteQueue_mp) {
         d_remoteQueue_mp->onOpenFailure(subQueueId);
@@ -586,7 +616,7 @@ void Queue::onOpenUpstream(bsls::Types::Uint64 genCount,
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_remoteQueue_mp) {
         d_remoteQueue_mp->onOpenUpstream(genCount, subQueueId, isWriterOnly);
@@ -615,7 +645,7 @@ void Queue::onReplicatedBatch()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->deliverIfNeeded();
@@ -659,6 +689,7 @@ int Queue::configure(bsl::ostream* errorDescription_p,
 }
 
 void Queue::getHandle(
+    const mqbi::OpenQueueConfirmationCookieSp&                context,
     const bsl::shared_ptr<mqbi::QueueHandleRequesterContext>& clientContext,
     const bmqp_ctrlmsg::QueueHandleParameters&                handleParameters,
     unsigned int                                upstreamSubQueueId,
@@ -667,11 +698,11 @@ void Queue::getHandle(
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(
-        dispatcher()->inDispatcherThread(d_state.domain()->cluster()));
+    BSLS_ASSERT_SAFE(d_state.domain()->cluster()->inDispatcherThread());
 
     dispatcher()->execute(bdlf::BindUtil::bind(&Queue::getHandleDispatched,
                                                this,
+                                               context,
                                                clientContext,
                                                handleParameters,
                                                upstreamSubQueueId,
@@ -687,7 +718,7 @@ void Queue::configureHandle(
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->configureHandle(handle,
@@ -751,7 +782,7 @@ void Queue::onPushMessage(
     // executed by the *CLUSTER* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(domain()->cluster()));
+    BSLS_ASSERT_SAFE(domain()->cluster()->inDispatcherThread());
 
     // NOTE: This routine is invoked by clusterProxy/cluster whenever it
     //       receives a PUSH message from upstream.  It should only be used on
@@ -761,7 +792,8 @@ void Queue::onPushMessage(
     //       LocalQueue dispatcherEvent method to event warn on that invalid
     //       usage.
 
-    mqbi::DispatcherEvent* dispEvent = dispatcher()->getEvent(this);
+    mqbi::Dispatcher::DispatcherEventSp dispEvent = dispatcher()->getEvent(
+        this);
 
     (*dispEvent)
         .setType(mqbi::DispatcherEventType::e_PUSH)
@@ -773,7 +805,7 @@ void Queue::onPushMessage(
         .setCompressionAlgorithmType(compressionAlgorithmType)
         .setOutOfOrderPush(isOutOfOrder);
 
-    dispatcher()->dispatchEvent(dispEvent, this);
+    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(dispEvent), this);
 }
 
 void Queue::confirmMessage(const bmqt::MessageGUID& msgGUID,
@@ -783,7 +815,7 @@ void Queue::confirmMessage(const bmqt::MessageGUID& msgGUID,
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->confirmMessage(msgGUID, upstreamSubQueueId, source);
@@ -801,7 +833,7 @@ int Queue::rejectMessage(const bmqt::MessageGUID& msgGUID,
                          mqbi::QueueHandle*       source)
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
     int result = false;
 
     if (d_localQueue_mp) {
@@ -825,7 +857,7 @@ void Queue::onAckMessage(const bmqp::AckMessage& ackMessage)
     // executed by the *CLUSTER* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(domain()->cluster()));
+    BSLS_ASSERT_SAFE(domain()->cluster()->inDispatcherThread());
 
     // NOTE: This routine is invoked by clusterProxy/cluster whenever it
     //       receives an ACK from upstream.  It should only be used on a
@@ -835,13 +867,14 @@ void Queue::onAckMessage(const bmqp::AckMessage& ackMessage)
     //       LocalQueue dispatcherEvent method to event warn on that invalid
     //       usage.
 
-    mqbi::DispatcherEvent* dispEvent = dispatcher()->getEvent(this);
+    mqbi::Dispatcher::DispatcherEventSp dispEvent = dispatcher()->getEvent(
+        this);
 
     (*dispEvent)
         .setType(mqbi::DispatcherEventType::e_ACK)
         .setAckMessage(ackMessage);
 
-    dispatcher()->dispatchEvent(dispEvent, this);
+    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(dispEvent), this);
 }
 
 int Queue::processCommand(mqbcmd::QueueResult*        result,
@@ -886,7 +919,7 @@ void Queue::onDispatcherEvent(const mqbi::DispatcherEvent& event)
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->onDispatcherEvent(event);
@@ -904,7 +937,7 @@ void Queue::flush()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (d_localQueue_mp) {
         d_localQueue_mp->flush();
@@ -922,7 +955,7 @@ bsls::Types::Int64 Queue::countUnconfirmed() const
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     return d_state.handleCatalog().countUnconfirmed();  // RETURN
 }
@@ -932,7 +965,7 @@ void Queue::setStopping()
     // executed by the *QUEUE* dispatcher thread
 
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(dispatcher()->inDispatcherThread(this));
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
     if (isAtMostOnce()) {
         // Attempt to deliver all data in the storage.  Otherwise, broadcast

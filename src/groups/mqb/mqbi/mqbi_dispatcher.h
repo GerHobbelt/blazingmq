@@ -93,17 +93,13 @@
 /// Executors support
 ///-----------------
 // Implementations of the 'mqbi::Dispatcher' protocol are required to provide
-// two types of executors.  The first being an executor, available through the
-// dispatcher's 'executor' member function, to execute functors on a
-// dispatcher's processor.  The second being an executor, available through the
-// dispatcher's 'clientExecutor' member function, to execute functors, still in
-// a dispatcher's processor, but directly by a dispatcher's client.  Submitting
-// a functor via each of the executor's 'post' member functions shall be
-// functionally equivalent to dispatching an event of type 'e_DISPATCHER' and
-// 'e_CALLBACK' respectively.  The comparison of such executor objects and the
-// blocking behavior of their 'dispatch' member functions is implementation-
-// defined.  For more information about executors see the 'bmqex' package
-// documentation.
+// an executor, available through the dispatcher's 'executor' member function,
+// to execute functors on a dispatcher's processor.  Submitting a functor via
+// the executor's 'post' member functions shall be functionally equivalent to
+// dispatching an event of type 'e_DISPATCHER'.
+// The blocking behavior of the executor's 'dispatch' member functions is
+// implementation-defined.  For more information about executors see the
+// 'bmqex' package documentation.
 
 // MQB
 
@@ -127,6 +123,7 @@
 #include <bslma_allocator.h>
 #include <bslma_usesbslmaallocator.h>
 #include <bslmf_nestedtraitdeclaration.h>
+#include <bslmt_threadutil.h>
 #include <bsls_assert.h>
 #include <bsls_nullptr.h>
 
@@ -154,18 +151,14 @@ class QueueHandle;
 struct DispatcherClientType {
     // TYPES
     enum Enum {
-        e_UNDEFINED = -1  // type has not been specified
-        ,
-        e_SESSION = 0  // client is assimilated to a session
-        ,
-        e_QUEUE = 1  // client is assimilated to a queue
-        ,
-        e_CLUSTER = 2  // client is assimilated to a cluster
-        ,
-        e_ALL = 3  // represents all of the possible types (see below)
+        /// Unspecified client type
+        e_UNDEFINED = -1,
+
+        /// Specified client types
+        e_SESSION = 0,
+        e_QUEUE   = 1,
+        e_CLUSTER = 2
     };
-    // NOTE: the 'e_ALL' type is used by certain Dispatcher methods to indicate
-    //        they should be applied to all types of clients.
 
     // CONSTANTS
     static const int k_COUNT = 3;  // Total number of different ClientTypes.
@@ -323,6 +316,9 @@ class Dispatcher {
   public:
     // TYPES
 
+    typedef bsl::shared_ptr<mqbi::DispatcherEvent> DispatcherEventSp;
+    typedef bslmf::MovableRef<DispatcherEventSp>   DispatcherEventRvRef;
+
     /// Type representing a handle to a processor in the dispatcher.
     typedef int ProcessorHandle;
 
@@ -372,25 +368,25 @@ class Dispatcher {
     /// Retrieve an event from the event pool to send to the specified
     /// `client`.  Once populated, the returned event *must* be enqueued for
     /// processing by calling `dispatchEvent` otherwise it will be leaked.
-    virtual DispatcherEvent* getEvent(const DispatcherClient* client) = 0;
+    virtual DispatcherEventSp getEvent(const DispatcherClient* client) = 0;
 
     /// Retrieve an event from the event pool to send to a client of the
     /// specified `type`.  Once populated, the returned event *must* be
     /// enqueued for processing by calling `dispatchEvent` otherwise it will
     /// be leaked.
-    virtual DispatcherEvent* getEvent(DispatcherClientType::Enum type) = 0;
+    virtual DispatcherEventSp getEvent(DispatcherClientType::Enum type) = 0;
 
     /// Dispatch the specified `event` to the specified `destination`.  The
     /// behavior is undefined unless `event` was obtained by a call to
     /// `getEvent` with a type matching the one of `destination`.
-    virtual void dispatchEvent(DispatcherEvent*  event,
-                               DispatcherClient* destination) = 0;
+    virtual void dispatchEvent(DispatcherEventRvRef event,
+                               DispatcherClient*    destination) = 0;
 
     /// Dispatch the specified `event` to the processor in charge of clients
     /// of the specified `type` and associated with the specified `handle`.
     /// The behavior is undefined unless `event` was obtained by a call to
     /// `getEvent` with a matching `type`..
-    virtual void dispatchEvent(DispatcherEvent*           event,
+    virtual void dispatchEvent(DispatcherEventRvRef       event,
                                DispatcherClientType::Enum type,
                                ProcessorHandle            handle) = 0;
 
@@ -416,9 +412,10 @@ class Dispatcher {
     /// clients of the specified `type`, and invoke the specified
     /// `doneCallback` (if any) when all the relevant processors are done
     /// executing the `functor`.
-    virtual void execute(const VoidFunctor&         functor,
-                         DispatcherClientType::Enum type,
-                         const VoidFunctor& doneCallback = VoidFunctor()) = 0;
+    virtual void
+    executeOnAllQueues(const VoidFunctor&         functor,
+                       DispatcherClientType::Enum type,
+                       const VoidFunctor& doneCallback = VoidFunctor()) = 0;
 
     /// Enqueue an event to the processor associated to the specified
     /// `client` or pair of the specified `type` and `handle` and block
@@ -437,38 +434,15 @@ class Dispatcher {
     /// the specified `type`.
     virtual int numProcessors(DispatcherClientType::Enum type) const = 0;
 
-    /// Return whether the current thread is the dispatcher thread
-    /// associated to the specified `client`.  This is useful for
-    /// preconditions assert validation.
-    virtual bool inDispatcherThread(const DispatcherClient* client) const = 0;
-
-    /// Return whether the current thread is the dispatcher thread
-    /// associated to the specified dispatcher client `data`.  This is
-    /// useful for preconditions assert validation.
-    virtual bool
-    inDispatcherThread(const DispatcherClientData* data) const = 0;
-
     /// Return an executor object suitable for executing function objects on
     /// the processor in charge of the specified `client`.  The behavior is
     /// undefined unless the specified `client` is registered on this
-    /// dispatcher and the client type is not `e_UNDEFINED` or `e_ALL`.
+    /// dispatcher and the client type is not `e_UNDEFINED`.
     ///
     /// Note that the returned executor can be used to submit work even
     /// after the specified `client` has been unregistered from this
     /// dispatcher.
     virtual bmqex::Executor executor(const DispatcherClient* client) const = 0;
-
-    /// Return an executor object suitable for executing function objects by
-    /// the specified `client` on the processor in charge of that client.
-    /// The behavior is undefined unless the specified `client` is
-    /// registered on this dispatcher and the client type is not
-    /// `e_UNDEFINED` or `e_ALL`.
-    ///
-    /// Note that submitting work on the returned executor is undefined
-    /// behavior if the specified `client` was unregistered from this
-    /// dispatcher.
-    virtual bmqex::Executor
-    clientExecutor(const mqbi::DispatcherClient* client) const = 0;
 };
 
 // ===============================
@@ -567,10 +541,6 @@ class DispatcherConfirmEvent {
 
     /// Return whether this event is a relay event or not.
     virtual bool isRelay() const = 0;
-
-    /// Return the partitionId affected to the queue associated to this
-    /// confirm message.  This is only valid when `isRelay() == true`.
-    virtual int partitionId() const = 0;
 };
 
 // ===========================
@@ -659,10 +629,6 @@ class DispatcherPushEvent {
     virtual const bmqp::Protocol::SubQueueInfosArray&
     subQueueInfos() const = 0;
 
-    /// Return a reference not offering modifiable access to the Message
-    /// Group Id associated with a message in this event.
-    virtual const bmqp::Protocol::MsgGroupId& msgGroupId() const = 0;
-
     /// Return (true, *) if the associated PUSH message contains message
     /// properties.  Return (true, true) if the properties is de-compressed
     /// even if the `compressionAlgorithmType` is not `e_NONE`.
@@ -710,10 +676,6 @@ class DispatcherPutEvent {
 
     /// Return whether this event is a relay event or not.
     virtual bool isRelay() const = 0;
-
-    /// Return the partitionId affected to the queue associated to this
-    /// put message.  This is only valid when `isRelay() == true`.
-    virtual int partitionId() const = 0;
 
     /// Return a reference not offering modifiable access to the put header
     /// associated to this event.  This protocol struct is only valid when
@@ -965,10 +927,6 @@ class DispatcherEvent : public DispatcherDispatcherEvent,
     // subQueueInfos associated with the
     // message in this event
 
-    bmqp::Protocol::MsgGroupId d_msgGroupId;
-    // Message Group Id associated with
-    // the message in this event
-
     bmqp::MessagePropertiesInfo d_messagePropertiesInfo;
     // Flags indicating if the associated
     // message has message properties or
@@ -1033,8 +991,7 @@ class DispatcherEvent : public DispatcherDispatcherEvent,
     const bmqp::PutHeader&   putHeader() const BSLS_KEYWORD_OVERRIDE;
     int                      queueId() const BSLS_KEYWORD_OVERRIDE;
     const bmqp::Protocol::SubQueueInfosArray&
-    subQueueInfos() const BSLS_KEYWORD_OVERRIDE;
-    const bmqp::Protocol::MsgGroupId& msgGroupId() const BSLS_KEYWORD_OVERRIDE;
+                 subQueueInfos() const BSLS_KEYWORD_OVERRIDE;
     QueueHandle* queueHandle() const BSLS_KEYWORD_OVERRIDE;
     const bmqp::MessagePropertiesInfo&
     messagePropertiesInfo() const BSLS_KEYWORD_OVERRIDE;
@@ -1079,7 +1036,6 @@ class DispatcherEvent : public DispatcherDispatcherEvent,
     DispatcherEvent& setQueueId(int value);
     DispatcherEvent&
     setSubQueueInfos(const bmqp::Protocol::SubQueueInfosArray& value);
-    DispatcherEvent& setMsgGroupId(const bmqp::Protocol::MsgGroupId& value);
     DispatcherEvent&
     setMessagePropertiesInfo(const bmqp::MessagePropertiesInfo& value);
 
@@ -1159,23 +1115,20 @@ bsl::ostream& operator<<(bsl::ostream& stream, const DispatcherEvent& rhs);
 class DispatcherClientData {
   private:
     // DATA
+    /// Type of dispatcher client.
     DispatcherClientType::Enum d_clientType;
-    // Type of dispatcher client.
 
+    /// Processor handle to which the client is associated with.
     Dispatcher::ProcessorHandle d_processorHandle;
-    // Processor handle to which the client is
-    // associated with.
 
-    bool d_addedToFlushList;
-    // Flag indicating whether the dispatcher
-    // added the corresponding client to its
-    // internal flush list -- this is a
-    // Dispatcher internal member that should
-    // only be manipulated by the dispatcher, and
-    // not the clients.
-
+    /// The dispatcher associated with the client.
     Dispatcher* d_dispatcher_p;
-    // The dispatcher associated with the client.
+
+    /// The flag indicating whether the dispatcher have added the corresponding
+    /// client to its internal flush list -- this is a Dispatcher internal
+    /// member that should only be manipulated by the dispatcher, and not the
+    /// clients.
+    bool d_addedToFlushList;
 
   public:
     // CREATORS
@@ -1231,13 +1184,34 @@ bsl::ostream& operator<<(bsl::ostream&               stream,
 
 /// Interface for a client of the Dispatcher.
 class DispatcherClient {
+  private:
+    // DATA
+
+    /// The id of the thread this dispatcher client is assigned to.
+    bslmt::ThreadUtil::Id d_threadId;
+
   public:
+    // PUBLIC CONSTANTS
+    static const bslmt::ThreadUtil::Id k_ANY_THREAD_ID;
+
     // CREATORS
+    DispatcherClient()
+    : d_threadId(k_ANY_THREAD_ID)
+    {
+        // NOTHING
+    }
 
     /// Destructor.
     virtual ~DispatcherClient();
 
     // MANIPULATORS
+
+    /// @brief Assign thread id for this dispatcher client.
+    /// @param threadId to assign.
+    inline void setThreadId(bslmt::ThreadUtil::Id threadId)
+    {
+        d_threadId = threadId;
+    }
 
     /// Return a pointer to the dispatcher this client is associated with.
     virtual Dispatcher* dispatcher() = 0;
@@ -1265,6 +1239,16 @@ class DispatcherClient {
 
     /// Return a printable description of the client (e.g., for logging).
     virtual const bsl::string& description() const = 0;
+
+    /// Return whether the current thread is the thread this client is
+    /// associated with in dispatcher.
+    inline bool inDispatcherThread() const
+    {
+        // In most cases the following condition should short-circuit on
+        // the first operand:
+        return (d_threadId == bslmt::ThreadUtil::selfId()) ||
+               (d_threadId == k_ANY_THREAD_ID);
+    }
 };
 
 // FREE OPERATORS
@@ -1280,35 +1264,6 @@ bsl::ostream& operator<<(bsl::ostream& stream, const DispatcherClient& client);
 // ---------------------
 // class DispatcherEvent
 // ---------------------
-
-inline DispatcherEvent::DispatcherEvent(bslma::Allocator* allocator)
-: d_type(DispatcherEventType::e_UNDEFINED)
-, d_source_p(0)
-, d_destination_p(0)
-, d_ackMessage()
-, d_blob_sp(0, allocator)
-, d_options_sp(0, allocator)
-, d_clusterNode_p(0)
-, d_confirmMessage()
-, d_rejectMessage()
-, d_controlMessage(allocator)
-, d_guid(bmqt::MessageGUID())
-, d_isRelay(false)
-, d_partitionId(-1)
-, d_putHeader()
-, d_queueHandle_p(0)
-, d_queueId(-1)
-, d_subQueueInfos(allocator)
-, d_msgGroupId(allocator)
-, d_messagePropertiesInfo()
-, d_compressionAlgorithmType(bmqt::CompressionAlgorithmType::e_NONE)
-, d_isOutOfOrder(false)
-, d_genCount(0)
-, d_callback(allocator)
-, d_finalizeCallback(allocator)
-{
-    // NOTHING
-}
 
 inline const bmqp::AckMessage& DispatcherEvent::ackMessage() const
 {
@@ -1395,11 +1350,6 @@ inline const bmqp::Protocol::SubQueueInfosArray&
 DispatcherEvent::subQueueInfos() const
 {
     return d_subQueueInfos;
-}
-
-inline const bmqp::Protocol::MsgGroupId& DispatcherEvent::msgGroupId() const
-{
-    return d_msgGroupId;
 }
 
 inline QueueHandle* DispatcherEvent::queueHandle() const
@@ -1576,13 +1526,6 @@ inline DispatcherEvent& DispatcherEvent::setSubQueueInfos(
     return *this;
 }
 
-inline DispatcherEvent&
-DispatcherEvent::setMsgGroupId(const bmqp::Protocol::MsgGroupId& value)
-{
-    d_msgGroupId = value;
-    return *this;
-}
-
 inline DispatcherEvent& DispatcherEvent::setMessagePropertiesInfo(
     const bmqp::MessagePropertiesInfo& value)
 {
@@ -1615,33 +1558,6 @@ DispatcherEvent::setState(const bsl::shared_ptr<bmqu::AtomicState>& state)
 {
     d_state = state;
     return *this;
-}
-
-inline void DispatcherEvent::reset()
-{
-    d_type          = DispatcherEventType::e_UNDEFINED;
-    d_source_p      = 0;
-    d_destination_p = 0;
-    d_ackMessage    = bmqp::AckMessage();
-    d_blob_sp.reset();
-    d_options_sp.reset();
-    d_callback.reset();
-    d_finalizeCallback.reset();
-    d_clusterNode_p    = 0;
-    d_confirmMessage   = bmqp::ConfirmMessage();
-    d_rejectMessage    = bmqp::RejectMessage();
-    d_guid             = bmqt::MessageGUID();
-    d_isRelay          = false;
-    d_putHeader        = bmqp::PutHeader();
-    d_queueHandle_p    = 0;
-    d_queueId          = -1;
-    d_subQueueInfos.clear();
-    d_msgGroupId.clear();
-    d_messagePropertiesInfo    = bmqp::MessagePropertiesInfo();
-    d_compressionAlgorithmType = bmqt::CompressionAlgorithmType::e_NONE;
-    d_isOutOfOrder             = false;
-    d_genCount                 = 0;
-    d_state.reset();
 }
 
 inline DispatcherEventType::Enum DispatcherEvent::type() const
@@ -1765,8 +1681,8 @@ inline const DispatcherReceiptEvent* DispatcherEvent::asReceiptEvent() const
 inline DispatcherClientData::DispatcherClientData()
 : d_clientType(DispatcherClientType::e_UNDEFINED)
 , d_processorHandle(Dispatcher::k_INVALID_PROCESSOR_HANDLE)
-, d_addedToFlushList(false)
 , d_dispatcher_p(0)
+, d_addedToFlushList(false)
 {
     // NOTHING
 }
