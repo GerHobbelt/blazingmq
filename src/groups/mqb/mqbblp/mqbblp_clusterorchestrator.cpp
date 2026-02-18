@@ -62,6 +62,33 @@ const bsls::Types::Int64 k_WATCHDOG_TIMEOUT_DURATION = 60 * 5;
 
 }  // close unnamed namespace
 
+// ------------------------------------------------
+// class ClusterOrchestrator::OnElectorEventFunctor
+// ------------------------------------------------
+
+ClusterOrchestrator::OnElectorEventFunctor::OnElectorEventFunctor(
+    ClusterOrchestrator*           orchestrator_p,
+    bslmf::MovableRef<bmqp::Event> event,
+    mqbnet::ClusterNode*           source_p)
+: d_orchestrator_p(orchestrator_p)
+, d_event(bslmf::MovableRefUtil::move(event))
+, d_source_p(source_p)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_orchestrator_p);
+}
+
+ClusterOrchestrator::OnElectorEventFunctor::~OnElectorEventFunctor()
+{
+    // NOTHING
+}
+
+void ClusterOrchestrator::OnElectorEventFunctor::operator()() const
+{
+    // Thread: CLUSTER dispatcher
+    d_orchestrator_p->processElectorEventDispatched(d_event, d_source_p);
+}
+
 // -------------------------
 // class ClusterOrchestrator
 // -------------------------
@@ -464,7 +491,7 @@ void ClusterOrchestrator::onNodeUnavailable(mqbnet::ClusterNode* node)
             << " partition(s): [";
         for (unsigned int i = 0; i < ns->primaryPartitions().size(); ++i) {
             BALL_LOG_OUTPUT_STREAM << ns->primaryPartitions()[i];
-            if (i < (ns->primaryPartitions().size() - 1)) {
+            if (i + 1 < ns->primaryPartitions().size()) {
                 BALL_LOG_OUTPUT_STREAM << ", ";
             }
         }
@@ -475,7 +502,6 @@ void ClusterOrchestrator::onNodeUnavailable(mqbnet::ClusterNode* node)
     // followers as well.  Is the correct behavior?  Should this be done only
     // by the leader, and followers should update the info only upon being
     // notified from the leader?
-
     d_stateManager_mp->markOrphan(ns->primaryPartitions(), node);
     ns->removeAllPartitions();
 
@@ -666,7 +692,7 @@ int ClusterOrchestrator::start(bsl::ostream& errorDescription)
                                  _4),  // Term
             ledgerLSN.electorTerm(),
             &d_clusterData_p->blobSpPool(),
-            d_allocator_p),
+            d_allocators.get("Elector")),
         d_allocator_p);
 
     rc = d_elector_mp->start();
@@ -830,16 +856,6 @@ void ClusterOrchestrator::processStopRequest(
                   << ", current status: " << ns->nodeStatus()
                   << ", new status: " << bmqp_ctrlmsg::NodeStatus::E_STOPPING;
 
-    // TODO(shutdown-v2): TEMPORARY, remove when all switch to StopRequest V2.
-    if (stopRequest.version() == bmqp::Protocol::eStopRequestVersion::e_V1 &&
-        stopRequest.clusterName() != name) {
-        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
-        BALL_LOG_ERROR << d_clusterData_p->identity().description()
-                       << ": invalid cluster name in the StopRequest from "
-                       << source->nodeDescription() << ", " << request;
-        return;  // RETURN
-    }
-
     ns->setNodeStatus(bmqp_ctrlmsg::NodeStatus::E_STOPPING);
 
     processNodeStoppingNotification(ns, &request);
@@ -977,9 +993,7 @@ void ClusterOrchestrator::processNodeStoppingNotification(
             mqbc::ElectorInfoLeaderStatus::e_PASSIVE);
     }
 
-    // Self node needs to issue close-queue requests for all the queues for
-    // which specified 'source' node is the primary.
-
+    // Replica makes all open queues buffer PUTs (by calling 'onOpenUpstream').
     d_queueHelper.processNodeStoppingNotification(ns->clusterNode(),
                                                   request,
                                                   ns);
@@ -990,7 +1004,7 @@ void ClusterOrchestrator::processNodeStoppingNotification(
 
     const bsl::vector<int>& partitions =
         d_clusterData_p->membership().selfNodeSession()->primaryPartitions();
-    for (unsigned int i = 0; i < partitions.size(); ++i) {
+    for (int i = static_cast<int>(partitions.size()) - 1; 0 <= i; --i) {
         d_storageManager_p->processReplicaStatusAdvisory(
             partitions[i],
             ns->clusterNode(),
@@ -1095,7 +1109,7 @@ void ClusterOrchestrator::processNodeStatusAdvisory(
         const bsl::vector<int>& partitions = d_clusterData_p->membership()
                                                  .selfNodeSession()
                                                  ->primaryPartitions();
-        for (unsigned int i = 0; i < partitions.size(); ++i) {
+        for (int i = static_cast<int>(partitions.size()) - 1; 0 <= i; --i) {
             d_storageManager_p->processReplicaStatusAdvisory(
                 partitions[i],
                 source,
@@ -1196,7 +1210,7 @@ void ClusterOrchestrator::processNodeStateChangeEvent(
         const bsl::vector<int>& partitions = d_clusterData_p->membership()
                                                  .selfNodeSession()
                                                  ->primaryPartitions();
-        for (unsigned int i = 0; i < partitions.size(); ++i) {
+        for (int i = static_cast<int>(partitions.size()) - 1; 0 <= i; --i) {
             d_storageManager_p->processReplicaStatusAdvisory(
                 partitions[i],
                 node,
@@ -1252,17 +1266,19 @@ void ClusterOrchestrator::processElectorEvent(const bmqp::Event&   event,
     // important that elector events are processed in the dispatcher thread
     // too, otherwise, depending upon thread scheduling, a new node may get
     // certain events "out of order" (some cases were found out while testing).
-    // Note that 'bindA' instead of 'bind' is needed below because we need to
-    // pass allocator to one of the 'bmqp::Event' instances created below
-    // (allocator is *not* optional for 'bmqp::Event')
-    dispatcher()->execute(
-        bdlf::BindUtil::bindS(
-            d_allocator_p,
-            &ClusterOrchestrator::processElectorEventDispatched,
+
+    mqbi::DispatcherEvent* clusterEvent = dispatcher()->getEvent(
+        mqbi::DispatcherClientType::e_CLUSTER);
+
+    (*clusterEvent).setType(mqbi::DispatcherEventType::e_CALLBACK);
+
+    clusterEvent->callback()
+        .createInplace<ClusterOrchestrator::OnElectorEventFunctor>(
             this,
             event.clone(d_allocator_p),
-            source),
-        d_cluster_p);
+            source);
+
+    dispatcher()->dispatchEvent(clusterEvent, d_cluster_p);
 }
 
 void ClusterOrchestrator::processLeaderSyncStateQuery(

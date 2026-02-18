@@ -272,12 +272,9 @@ class Cluster : public DispatcherClient {
     /// Initiate the shutdown of the cluster and invoke the specified
     /// `callback` upon completion of (asynchronous) shutdown sequence. It
     /// is expected that `stop()` will be called soon after this routine is
-    /// invoked.  If the optional (temporary) specified 'supportShutdownV2' is
-    /// 'true' execute shutdown logic V2 where upstream (not downstream) nodes
-    /// deconfigure  queues and the shutting down node (not downstream) wait
-    /// for CONFIRMS.
-    virtual void initiateShutdown(const VoidFunctor& callback,
-                                  bool supportShutdownV2 = false) = 0;
+    /// invoked.  Execute shutdown logic where upstream (not downstream) nodes
+    /// deconfigure  queues and the shutting down node waits for CONFIRMS.
+    virtual void initiateShutdown(const VoidFunctor& callback) = 0;
 
     /// Stop the `Cluster`; this is the counterpart of the `start()`
     /// operation.
@@ -291,8 +288,8 @@ class Cluster : public DispatcherClient {
     /// used by this cluster.
     virtual RequestManagerType& requestManager() = 0;
 
-    // Return a reference offering a modifiable access to the multi request
-    // manager used by this cluster.
+    /// Return a reference offering a modifiable access to the multi request
+    /// manager used by this cluster.
     virtual MultiRequestManagerType& multiRequestManager() = 0;
 
     /// Send the specified `request` with the specified `timeout` to the

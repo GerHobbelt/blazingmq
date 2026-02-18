@@ -697,12 +697,8 @@ class QueueHandle {
     virtual const bsl::vector<const mqbu::ResourceUsageMonitor*>
     unconfirmedMonitors(const bsl::string& appId) const = 0;
 
-    /// Return number of unconfirmed messages for the optionally specified
-    /// `subId` unless it has the default value `k_UNASSIGNED_SUBQUEUE_ID`,
-    /// in which case return number of unconfirmed messages for all streams.
-    virtual bsls::Types::Int64
-    countUnconfirmed(unsigned int subId =
-                         bmqp::QueueId::k_UNASSIGNED_SUBQUEUE_ID) const = 0;
+    /// Return number of unconfirmed messages for all streams.
+    virtual bsls::Types::Int64 countUnconfirmed() const = 0;
 
     /// Load in the specified `out` object, the internal details about this
     /// queue handle.
@@ -794,13 +790,15 @@ class Queue : public DispatcherClient {
     virtual void
     setStats(const bsl::shared_ptr<mqbstat::QueueStatsDomain>& stats) = 0;
 
-    /// Return number of unconfirmed messages across all handles with the
-    /// `specified `subId'.
-    virtual bsls::Types::Int64 countUnconfirmed(unsigned int subId) = 0;
+    /// Return number of unconfirmed messages across all handles.
+    virtual bsls::Types::Int64 countUnconfirmed() const = 0;
 
-    /// Stop sending PUSHes but continue receiving CONFIRMs, receiving and
-    /// sending PUTs and ACKs.
-    virtual void stopPushing() = 0;
+    /// Set the state of this queue to "stopping".
+    /// This is a one-way step before shutting down the broker.
+    /// In this state, the queue will:
+    /// - Continue receiving CONFIRMs, receiving and sending PUTs and ACKs.
+    /// - Stop sending PUSHes and stop idle GC.
+    virtual void setStopping() = 0;
 
     /// Called when a message with the specified `msgGUID`, `appData`,
     /// `options`, `compressionAlgorithmType` payload is pushed to this
@@ -869,13 +867,11 @@ class Queue : public DispatcherClient {
 
     /// Invoked by the Data Store when it receives quorum Receipts for the
     /// specified `msgGUID`.  Send ACK to the specified `queueHandle` if it
-    /// is present in the queue handle catalog.  Update AVK time stats using
-    /// the specified `arrivalTimepoint`.
+    /// is present in the queue handle catalog.
     ///
     /// THREAD: This method is called from the Queue's dispatcher thread.
-    virtual void onReceipt(const bmqt::MessageGUID&  msgGUID,
-                           mqbi::QueueHandle*        queueHandle,
-                           const bsls::Types::Int64& arrivalTimepoint) = 0;
+    virtual void onReceipt(const bmqt::MessageGUID& msgGUID,
+                           mqbi::QueueHandle*       queueHandle) = 0;
 
     /// Invoked by the Data Store when it removes (times out waiting for
     /// quorum Receipts for) a message with the specified `msgGUID`.  Send

@@ -443,6 +443,22 @@ int FileStore::openInRecoveryMode(bsl::ostream&          errorDescription,
         return 100 * rc + rc_FILE_ITERATOR_FAILURE;  // RETURN
     }
 
+    // Get first sync point after rollover.
+    if (jit.firstSyncPointAfterRolloverPosition() > 0) {
+        const RecordHeader& recHeader =
+            jit.firstSyncPointAfterRolloverHeader();
+
+        d_firstSyncPointAfterRolloverSeqNum.primaryLeaseId() =
+            recHeader.primaryLeaseId();
+        d_firstSyncPointAfterRolloverSeqNum.sequenceNumber() =
+            recHeader.sequenceNumber();
+
+        BALL_LOG_INFO << partitionDesc()
+                      << "First sync point after rollover sequence number: "
+                      << d_firstSyncPointAfterRolloverSeqNum
+                      << ", Timestamp (epoch): " << recHeader.timestamp();
+    }
+
     // Print last sync point in the journal, if available.
 
     if (0 != jit.lastSyncPointPosition()) {
@@ -604,10 +620,10 @@ int FileStore::openInRecoveryMode(bsl::ostream&          errorDescription,
 
                 BALL_LOG_WARN
                     << partitionDesc()
-                    << "JOURNAL's last record is not SyncPt record,"
+                    << "JOURNAL's last record is not sync point record,"
                     << " in a multi-node cluster.  Last record "
                     << "offset: " << jit.lastRecordPosition()
-                    << ", SyncPt offset: " << jit.lastSyncPointPosition()
+                    << ", sync point offset: " << jit.lastSyncPointPosition()
                     << ".";
             }
             else {
@@ -981,11 +997,12 @@ int FileStore::openInRecoveryMode(bsl::ostream&          errorDescription,
     if (1 == clusterSize() && appendSyncPoint) {
         BSLS_ASSERT_SAFE(!d_isFSMWorkflow);
 
-        BALL_LOG_INFO << partitionDesc() << "Appending a SyncPt with "
-                      << "(primaryLeaseId, sequenceNum): (" << d_primaryLeaseId
-                      << ", " << (d_sequenceNum + 1)
-                      << ") since journal does not end with a SyncPt for this "
-                      << "partition belonging to a 1-node cluster.";
+        BALL_LOG_INFO
+            << partitionDesc() << "Appending a sync point with "
+            << "(primaryLeaseId, sequenceNum): (" << d_primaryLeaseId << ", "
+            << (d_sequenceNum + 1)
+            << ") since journal does not end with a sync point for this "
+            << "partition belonging to a 1-node cluster.";
 
         BSLS_ASSERT_SAFE(0 == fileSetSp->d_dataFilePosition %
                                   bmqp::Protocol::k_DWORD_SIZE);
@@ -1471,7 +1488,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
 
     BALL_LOG_INFO << partitionDesc() << "Completed first pass over the journal"
                   << " with rc: " << rc
-                  << ". Offset of 1st SyncPt: " << firstSyncPtOffset << ".";
+                  << ". Offset of 1st sync point: " << firstSyncPtOffset
+                  << ".";
 
     typedef bsl::unordered_set<bmqt::MessageGUID,
                                bslh::Hash<bmqt::MessageGUIDHashAlgo> >
@@ -1568,12 +1586,11 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             // Perform basic sanity check for as many fields as possible.
 
             if (SyncPointType::e_UNDEFINED == rec.syncPointType()) {
-                BALL_LOG_ERROR
-                    << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
-                    << " with invalid sub-type. Record offset: "
-                    << jit->recordOffset()
-                    << ", record index: " << jit->recordIndex();
+                BALL_LOG_ERROR << partitionDesc()
+                               << "Encountered a sync point during backward "
+                               << "journal iteration  with invalid sub-type. "
+                               << "Record offset:" << jit->recordOffset()
+                               << ", record index: " << jit->recordIndex();
 
                 return rc_INVALID_SYNC_PT_SUB_TYPE;  // RETURN
             }
@@ -1581,9 +1598,9 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             if (0 == rec.dataFileOffsetDwords()) {
                 BALL_LOG_ERROR
                     << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
-                    << " with invalid DATA file offset field. Record offset: "
-                    << jit->recordOffset()
+                    << "Encountered a sync point during backward journal "
+                    << "iteration with invalid DATA file offset field. Record "
+                    << "offset: " << jit->recordOffset()
                     << ", record index: " << jit->recordIndex();
 
                 return rc_INVALID_DATA_OFFSET;  // RETURN
@@ -1594,8 +1611,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                  bmqp::Protocol::k_DWORD_SIZE)) {
                 BALL_LOG_ERROR
                     << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
-                    << " with DATA file offset field ["
+                    << "Encountered a sync point during backward "
+                    << "journal iteration with DATA file offset field ["
                     << (static_cast<bsls::Types::Uint64>(
                             rec.dataFileOffsetDwords()) *
                         bmqp::Protocol::k_DWORD_SIZE)
@@ -1610,7 +1627,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             if (d_qListAware && 0 == rec.qlistFileOffsetWords()) {
                 BALL_LOG_ERROR
                     << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
+                    << "Encountered a sync point during backward journal "
+                       "iteration"
                     << " with invalid QLIST file offset field. Record offset: "
                     << jit->recordOffset()
                     << ", record index: " << jit->recordIndex();
@@ -1622,17 +1640,17 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                 qlistFd->fileSize() < (static_cast<bsls::Types::Uint64>(
                                            rec.qlistFileOffsetWords()) *
                                        bmqp::Protocol::k_WORD_SIZE)) {
-                BALL_LOG_ERROR
-                    << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
-                    << " with QLIST file offset field ["
-                    << (static_cast<bsls::Types::Uint64>(
-                            rec.qlistFileOffsetWords()) *
-                        bmqp::Protocol::k_WORD_SIZE)
-                    << "], which is greater than QLIST file size ["
-                    << qlistFd->fileSize()
-                    << "]. Record offset: " << jit->recordOffset()
-                    << ", record index: " << jit->recordIndex();
+                BALL_LOG_ERROR << partitionDesc()
+                               << "Encountered a sync point during backward "
+                                  "journal iteration"
+                               << " with QLIST file offset field ["
+                               << (static_cast<bsls::Types::Uint64>(
+                                       rec.qlistFileOffsetWords()) *
+                                   bmqp::Protocol::k_WORD_SIZE)
+                               << "], which is greater than QLIST file size ["
+                               << qlistFd->fileSize()
+                               << "]. Record offset: " << jit->recordOffset()
+                               << ", record index: " << jit->recordIndex();
 
                 return rc_INVALID_QLIST_OFFSET;  // RETURN
             }
@@ -1640,7 +1658,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             if (0 == rec.primaryLeaseId()) {
                 BALL_LOG_ERROR
                     << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
+                    << "Encountered a sync point during backward journal "
+                       "iteration"
                     << " with zero primaryLeaseId, current primaryLeaseId: "
                     << primaryLeaseId
                     << ". Record offset: " << jit->recordOffset()
@@ -1652,7 +1671,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             if (0 == rec.sequenceNum()) {
                 BALL_LOG_ERROR
                     << partitionDesc()
-                    << "Encountered a SyncPt during backward journal iteration"
+                    << "Encountered a sync point during backward journal "
+                       "iteration"
                     << " with zero sequenceNum, current sequenceNum: "
                     << sequenceNum
                     << ". Record offset: " << jit->recordOffset()
@@ -1670,7 +1690,7 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             if (rec.primaryLeaseId() > primaryLeaseId) {
                 BMQTSK_ALARMLOG_ALARM("RECOVERY")
                     << partitionDesc()
-                    << "Encountered a SyncPt during backward journal "
+                    << "Encountered a sync point during backward journal "
                     << "iteration with higher primaryLeaseId: "
                     << rec.primaryLeaseId()
                     << ", current primaryLeaseId: " << primaryLeaseId
@@ -1685,7 +1705,7 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                 if (rec.sequenceNum() != sequenceNum) {
                     BMQTSK_ALARMLOG_ALARM("RECOVERY")
                         << partitionDesc()
-                        << "Encountered a Syncpt during backward journal "
+                        << "Encountered a sync point during backward journal "
                         << "iteration with incorrect sequence number: "
                         << rec.sequenceNum()
                         << ", expected sequence number: " << sequenceNum
@@ -2808,19 +2828,26 @@ int FileStore::rollover(bsls::Types::Uint64 timestamp)
     rJournalFilePos += FileStoreProtocol::k_JOURNAL_RECORD_SIZE;
 
     // Update first sync point of JournalFileHeader of new active file set with
-    // 'syncPointOffset'.  A non-zero JournalFileHeader.d_firstSyncPointOffset
-    // implies that rollover was successfully finished (this may help during
-    // recovery after crash) ** NOTE ** Updating
-    // JournalFileHeader.d_firstSyncPointOffset must be the last operation to
-    // occur in rolling over file store.
+    // 'syncPointOffset'.  A non-zero
+    // JournalFileHeader.d_firstSyncPointAfterRolloverOffset implies that
+    // rollover was successfully finished (this may help during recovery after
+    // crash) ** NOTE ** Updating
+    // JournalFileHeader.d_firstSyncPointAfterRolloverOffset must be the last
+    // operation to occur in rolling over file store.
 
     OffsetPtr<const FileHeader>  fhJ(rJournalFile.block(), 0);
     OffsetPtr<JournalFileHeader> jfh(rJournalFile.block(),
                                      fhJ->headerWords() *
                                          bmqp::Protocol::k_WORD_SIZE);
 
-    jfh->setFirstSyncPointOffsetWords(spoPair.offset() /
-                                      bmqp::Protocol::k_WORD_SIZE);
+    jfh->setFirstSyncPointAfterRolloverOffsetWords(
+        spoPair.offset() / bmqp::Protocol::k_WORD_SIZE);
+
+    // Initialize first sync point after rollover sequence number.
+    d_firstSyncPointAfterRolloverSeqNum.primaryLeaseId() =
+        syncPoint.primaryLeaseId();
+    d_firstSyncPointAfterRolloverSeqNum.sequenceNumber() =
+        syncPoint.sequenceNum();
 
     // Now clear the 'd_syncPoints' as the rollover is complete, and make the
     // previous newest sync point the first new sync point.
@@ -3038,6 +3065,8 @@ int FileStore::rolloverIfNeeded(FileType::Enum              fileType,
             << bmqu::PrintUtil::prettyNumber(static_cast<bsls::Types::Int64>(
                    activeFileSet->d_outstandingBytesQlist));
     }
+
+    BALL_LOG_INFO << out.str();
 
     // All 3 files must satisfy the rollover policy before we can initiate the
     // rollover.  Note that we also add the 'requestedSpace' in the
@@ -3954,6 +3983,8 @@ int FileStore::issueSyncPointInternal(SyncPointType::Enum type,
         return 10 * rc + rc_WRITE_FAILURE;  // RETURN
     }
 
+    BALL_LOG_INFO << partitionDesc() << "Issued a sync point: " << *spptr;
+
     // Retrieve sync point's offset.
     bsls::Types::Uint64 syncPointJournalOffset =
         d_fileSets[0]->d_journalFilePosition -
@@ -4047,8 +4078,19 @@ void FileStore::processReceiptEvent(unsigned int         primaryLeaseId,
         }
         if (++(from->second.d_count) >= d_replicationFactor) {
             from->second.d_handle->second.d_hasReceipt = true;
-            // notify the queue
 
+            // Calculate time it took for the message to be stored and
+            // replicated.
+            const bsls::Types::Int64 timeDelta =
+                bmqsys::Time::highResolutionTimer() -
+                from->second.d_handle->second.d_arrivalTimepoint;
+            d_clusterStats_p->onPartitionEvent(
+                mqbstat::ClusterStats::PartitionEventType::
+                    e_PARTITION_REPLICATION,
+                d_config.partitionId(),
+                timeDelta);
+
+            // notify the queue
             const mqbu::StorageKey& queueKey  = from->second.d_queueKey;
             bool                    haveQueue = (queueKey == lastKey);
             if (!haveQueue) {
@@ -4058,16 +4100,12 @@ void FileStore::processReceiptEvent(unsigned int         primaryLeaseId,
                     lastKey   = queueKey;
                     lastQueue = sit->second->queue();
                     BSLS_ASSERT_SAFE(lastQueue);
-
                     affectedQueues.insert(lastQueue);
                 }
                 // else the queue and its storage are gone; ignore the receipt
             }
             if (haveQueue) {
-                lastQueue->onReceipt(
-                    from->second.d_guid,
-                    from->second.d_qH,
-                    from->second.d_handle->second.d_arrivalTimepoint);
+                lastQueue->onReceipt(from->second.d_guid, from->second.d_qH);
             }  // else the queue is gone
             from = d_unreceipted.erase(from);
         }
@@ -4643,7 +4681,7 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
             if (SyncPointType::e_ROLLOVER == jOpRec->syncPointType()) {
                 BALL_LOG_INFO
                     << partitionDesc()
-                    << "Received SyncPt indicating rollover: " << syncPoint
+                    << "Received sync point indicating rollover: " << syncPoint
                     << ", at journal offset: " << recordOffset
                     << ". Initiating rollover.";
 
@@ -4670,7 +4708,8 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
 
                 BALL_LOG_INFO
                     << partitionDesc()
-                    << "Received last SyncPt from the primary while shutting "
+                    << "Received last sync point from the primary while "
+                       "shutting "
                     << "down. No further storage events will be processed by "
                     << "self. Current seqNum: (" << d_primaryLeaseId << ", "
                     << d_sequenceNum << ").";
@@ -5120,6 +5159,7 @@ FileStore::FileStore(const DataStoreConfig&  config,
                         bmqp::EventType::e_STORAGE,
                         d_blobSpPool_p,
                         allocator)
+, d_firstSyncPointAfterRolloverSeqNum()
 {
     // PRECONDITIONS
     BSLS_ASSERT(allocator);
@@ -5297,7 +5337,8 @@ void FileStore::createStorage(bsl::shared_ptr<ReplicatedStorage>* storageSp,
     bslma::Allocator* storageAlloc = d_storageAllocatorStore.baseAllocator();
     if (storageCfg.isInMemoryValue()) {
         storageSp->reset(new (*storageAlloc)
-                             InMemoryStorage(queueUri,
+                             InMemoryStorage(this,
+                                             queueUri,
                                              queueKey,
                                              domain,
                                              config().partitionId(),
@@ -6708,7 +6749,7 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
 
     if (issueOldSyncPt) {
         BALL_LOG_INFO << partitionDesc() << "New primary (self) will "
-                      << "issue a SyncPt with old (leaseId, seqNum): ("
+                      << "issue a sync point with old (leaseId, seqNum): ("
                       << lastRecordLeaseId << ", " << (lastRecordSeqNum + 1)
                       << "), because last JOURNAL record, at offset: "
                       << lastRecordOffset << ", is of type [" << lastRecordType
@@ -6732,7 +6773,8 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
             BMQTSK_ALARMLOG_ALARM("REPLICATION")
                 << partitionDesc()
                 << "Not enough space in journal for new primary to issue a "
-                << "SyncPt on behalf of previous primary. Max journal file "
+                << "sync point on behalf of previous primary. Max journal "
+                   "file "
                 << "size: " << fs->d_journalFile.fileSize()
                 << ", current journal file offset: "
                 << fs->d_journalFilePosition << ", minimum required space: "
@@ -6777,18 +6819,19 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
         if (0 != rc) {
             BMQTSK_ALARMLOG_ALARM("REPLICATION")
                 << partitionDesc()
-                << "New primary failed to issue SyncPt on behalf of previous "
+                << "New primary failed to issue sync point on behalf of "
+                   "previous "
                 << "primary, rc: " << rc << BMQTSK_ALARMLOG_END;
             return;  // RETURN
         }
 
-        BALL_LOG_INFO << partitionDesc()
-                      << "New primary successfully issued SyncPt on behalf of "
-                      << "previous primary: " << syncPoint
-                      << ", at journal offset: "
-                      << (fs->d_journalFilePosition -
-                          FileStoreProtocol::k_JOURNAL_RECORD_SIZE)
-                      << ".";
+        BALL_LOG_INFO
+            << partitionDesc()
+            << "New primary successfully issued sync point on behalf of "
+            << "previous primary: " << syncPoint << ", at journal offset: "
+            << (fs->d_journalFilePosition -
+                FileStoreProtocol::k_JOURNAL_RECORD_SIZE)
+            << ".";
     }
 
     // Issue one SyncPt right away.  Note that we invoke the 'higher' level
@@ -6799,7 +6842,7 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
     if (0 != rc) {
         BMQTSK_ALARMLOG_ALARM("REPLICATION")
             << partitionDesc()
-            << "New primary failed to issue SyncPt , rc: " << rc
+            << "New primary failed to issue sync point , rc: " << rc
             << BMQTSK_ALARMLOG_END;
         return;  // RETURN
     }
@@ -6924,14 +6967,19 @@ void FileStore::notifyQueuesOnReplicatedBatch()
     }
 }
 
-bool FileStore::gcExpiredMessages(const bdlt::Datetime& currentTimeUtc)
+void FileStore::gcExpiredMessages()
 {
     if (!d_isOpen) {
-        return false;  // RETURN
+        return;  // RETURN
     }
 
     if (!d_isPrimary) {
-        return false;  // RETURN
+        return;  // RETURN
+    }
+
+    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(d_isStopping)) {
+        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
+        return;  // RETURN
     }
 
     BSLS_ASSERT_SAFE(0 < d_fileSets.size());
@@ -6939,56 +6987,25 @@ bool FileStore::gcExpiredMessages(const bdlt::Datetime& currentTimeUtc)
     BSLS_ASSERT_SAFE(activeFileSet);
 
     if (!activeFileSet->d_journalFileAvailable) {
-        return false;  // RETURN
+        return;  // RETURN
     }
 
     // Go over each file-backed storage registered with this partition and
     // indicate it to GC any applicable messages.
 
+    const bdlt::Datetime      currentTimeUtc = bdlt::CurrentTime::utc();
     const bsls::Types::Uint64 currentSecondsFromEpoch =
         static_cast<bsls::Types::Uint64>(
             bdlt::EpochUtil::convertToTimeT64(currentTimeUtc));
-    bool haveMore    = false;
-    bool needToFlush = false;
 
+    bool needToFlush = false;
     for (StorageMapIter it = d_storages.begin(); it != d_storages.end();
          ++it) {
-        ReplicatedStorage*  rs                        = it->second;
-        bsls::Types::Uint64 latestMsgTimestamp        = 0;
-        bsls::Types::Int64  configuredTtlValueSeconds = 0;
-        int numMsgsGc = rs->gcExpiredMessages(&latestMsgTimestamp,
-                                              &configuredTtlValueSeconds,
-                                              currentSecondsFromEpoch);
-        if (numMsgsGc <= 0) {
-            // No messages GC'd or error.
-
-            continue;  // CONTINUE
-        }
-        else {
+        ReplicatedStorage* rs        = it->second;
+        const int          numMsgsGc = rs->gcExpiredMessages(currentTimeUtc,
+                                                    currentSecondsFromEpoch);
+        if (numMsgsGc > 0) {
             needToFlush = true;
-        }
-
-        BALL_LOG_INFO << partitionDesc() << "For storage for queue ["
-                      << rs->queueUri() << "] and queueKey [" << it->first
-                      << "] configured with TTL value of ["
-                      << configuredTtlValueSeconds
-                      << "] seconds, garbage-collected [" << numMsgsGc
-                      << "] messages due to TTL expiration. "
-                      << "Timestamp (UTC) of the latest encountered message: "
-                      << bdlt::EpochUtil::convertFromTimeT64(
-                             latestMsgTimestamp)
-                      << " (Epoch: " << latestMsgTimestamp
-                      << "). Current time (UTC): " << currentTimeUtc
-                      << " (Epoch: " << currentSecondsFromEpoch << ")."
-                      << " Num messages remaining in the storage: "
-                      << rs->numMessages(mqbu::StorageKey::k_NULL_KEY)
-                      << ". Storage type: "
-                      << (rs->isPersistent() ? "persistent." : "in-memory.");
-
-        if (!rs->isEmpty() &&
-            (latestMsgTimestamp + configuredTtlValueSeconds) <=
-                currentSecondsFromEpoch) {
-            haveMore = true;
         }
     }
 
@@ -7000,25 +7017,27 @@ bool FileStore::gcExpiredMessages(const bdlt::Datetime& currentTimeUtc)
 
         flushStorage();
     }
-
-    return haveMore;
 }
 
-bool FileStore::gcHistory()
+void FileStore::gcHistory()
 {
     if (!d_isOpen) {
-        return false;  // RETURN
+        return;  // RETURN
     }
-    const bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
 
-    bool haveMore = false;
+    // We try to remove at most k_GC_MESSAGES_BATCH_SIZE items in history.
+    // If there are more items ready to remove, the container's state changes,
+    // so any additional `insert` operation to the container will cause
+    // additional GC, until all old items are removed.
+    // If we don't balance adding new elements to the history with GC history,
+    // we might lose a lot of time on allocations of new items to the history,
+    // as well as get OOM due to uncontrollable history size increase.
+
+    const bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
     for (StorageMapIter it = d_storages.begin(); it != d_storages.end();
          ++it) {
-        if (it->second->gcHistory(now) < 0) {
-            haveMore = true;
-        }
+        it->second->gcHistory(now);
     }
-    return haveMore;
 }
 
 void FileStore::applyForEachQueue(const QueueFunctor& functor) const
@@ -7173,24 +7192,9 @@ void FileStore::flush()
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(inDispatcherThread());
-
-    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(d_isStopping)) {
-        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
-        return;  // RETURN
-    }
-
-    // Iterate over messages for TTL on primary only
-    const bool haveMore = gcExpiredMessages(bdlt::CurrentTime::utc());
-
-    if (haveMore) {
-        // Explicitly schedule 'flush()'
-        dispatcher()->execute(bdlf::BindUtil::bind(&FileStore::flush, this),
-                              this,
-                              mqbi::DispatcherEventType::e_CALLBACK);
-    }
 }
 
-void FileStore::gcStorage()
+void FileStore::scheduledCleanupStorages()
 {
     // executed by the *DISPATCHER* thread
     // This is scheduled for execution every k_GC_MESSAGES_INTERVAL_SECONDS
@@ -7204,16 +7208,8 @@ void FileStore::gcStorage()
         return;  // RETURN
     }
 
-    const bool haveMore        = gcExpiredMessages(bdlt::CurrentTime::utc());
-    const bool haveMoreHistory = gcHistory();
-
-    if (haveMore || haveMoreHistory) {
-        // Explicitly schedule 'gcStorage()'
-        dispatcher()->execute(bdlf::BindUtil::bind(&FileStore::gcStorage,
-                                                   this),
-                              this,
-                              mqbi::DispatcherEventType::e_CALLBACK);
-    }
+    gcExpiredMessages();
+    gcHistory();
 }
 
 void FileStore::setReplicationFactor(int value)
@@ -7241,8 +7237,19 @@ void FileStore::setReplicationFactor(int value)
     while (it != d_unreceipted.end()) {
         if (it->second.d_count >= d_replicationFactor) {
             it->second.d_handle->second.d_hasReceipt = true;
-            // notify the queue.
 
+            // Calculate time it took for the message to be stored and
+            // replicated.
+            const bsls::Types::Int64 timeDelta =
+                bmqsys::Time::highResolutionTimer() -
+                it->second.d_handle->second.d_arrivalTimepoint;
+            d_clusterStats_p->onPartitionEvent(
+                mqbstat::ClusterStats::PartitionEventType::
+                    e_PARTITION_REPLICATION,
+                d_config.partitionId(),
+                timeDelta);
+
+            // notify the queue.
             const mqbu::StorageKey& queueKey  = it->second.d_queueKey;
             bool                    haveQueue = (queueKey == lastKey);
             if (!haveQueue) {
@@ -7252,16 +7259,12 @@ void FileStore::setReplicationFactor(int value)
                     lastKey   = queueKey;
                     lastQueue = sit->second->queue();
                     BSLS_ASSERT_SAFE(lastQueue);
-
                     affectedQueues.insert(lastQueue);
                 }
                 // else the queue and its storage are gone; ignore the receipt
             }
             if (haveQueue) {
-                lastQueue->onReceipt(
-                    it->second.d_guid,
-                    it->second.d_qH,
-                    it->second.d_handle->second.d_arrivalTimepoint);
+                lastQueue->onReceipt(it->second.d_guid, it->second.d_qH);
             }  // else the queue is gone
             it = d_unreceipted.erase(it);
         }

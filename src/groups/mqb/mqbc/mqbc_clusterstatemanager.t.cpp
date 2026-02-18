@@ -172,7 +172,7 @@ struct Tester {
                 mqbc::ClusterStateManager(d_cluster_mp->_clusterDefinition(),
                                           d_cluster_mp.get(),
                                           d_cluster_mp->_clusterData(),
-                                          &d_cluster_mp->_state(),
+                                          d_cluster_mp->_state(),
                                           clusterStateLedger_mp,
                                           k_WATCHDOG_TIMEOUT_DURATION,
                                           bmqtst::TestHelperUtil::allocator()),
@@ -521,10 +521,10 @@ struct Tester {
         // Load (empty) cluster state into the response
         mqbc::ClusterUtil::loadPartitionsInfo(
             &response.clusterStateSnapshot().partitions(),
-            d_cluster_mp->_state());
+            *d_cluster_mp->_state());
         mqbc::ClusterUtil::loadQueuesInfo(
             &response.clusterStateSnapshot().queues(),
-            d_cluster_mp->_state());
+            *d_cluster_mp->_state());
 
         for (TestChannelMapCIter cit = d_cluster_mp->_channels().cbegin();
              cit != d_cluster_mp->_channels().cend();
@@ -1321,7 +1321,7 @@ static void test12_followerHighestLeaderHealed()
     clusterStateSnapshot.sequenceNumber().electorTerm()    = 1U;
     clusterStateSnapshot.sequenceNumber().sequenceNumber() = 8U;
     clusterStateSnapshot.partitions().resize(
-        tester.d_cluster_mp->_state().partitions().size());
+        tester.d_cluster_mp->_state()->partitions().size());
     for (size_t i = 0; i < clusterStateSnapshot.partitions().size(); ++i) {
         clusterStateSnapshot.partitions()[i].partitionId() = i;
     }
@@ -1739,7 +1739,7 @@ static void test17_followerClusterStateRespFailureFollowerNext()
     clusterStateSnapshot.sequenceNumber().electorTerm()    = 1U;
     clusterStateSnapshot.sequenceNumber().sequenceNumber() = 5U;
     clusterStateSnapshot.partitions().resize(
-        tester.d_cluster_mp->_state().partitions().size());
+        tester.d_cluster_mp->_state()->partitions().size());
     for (size_t i = 0; i < clusterStateSnapshot.partitions().size(); ++i) {
         clusterStateSnapshot.partitions()[i].partitionId() = i;
     }
@@ -1900,7 +1900,7 @@ static void test19_stopNode()
     tester1.d_clusterStateManager_mp->stop();
 
     BMQTST_ASSERT_EQ(tester1.d_clusterStateManager_mp->healthState(),
-                     mqbc::ClusterStateTableState::e_STOPPING);
+                     mqbc::ClusterStateTableState::e_STOPPED);
 
     // 2.) Stopping from Follower Healing state
     Tester tester2(false);  // isLeader
@@ -1914,7 +1914,7 @@ static void test19_stopNode()
     tester2.d_clusterStateManager_mp->stop();
 
     BMQTST_ASSERT_EQ(tester2.d_clusterStateManager_mp->healthState(),
-                     mqbc::ClusterStateTableState::e_STOPPING);
+                     mqbc::ClusterStateTableState::e_STOPPED);
 
     // 3.) Stopping from Follower Healed state
     Tester tester3(false);  // isLeader
@@ -1937,7 +1937,7 @@ static void test19_stopNode()
     tester3.d_clusterStateManager_mp->stop();
 
     BMQTST_ASSERT_EQ(tester3.d_clusterStateManager_mp->healthState(),
-                     mqbc::ClusterStateTableState::e_STOPPING);
+                     mqbc::ClusterStateTableState::e_STOPPED);
 
     // 4.) Stopping from Leader Healing Stage 1 state
     Tester tester4(true);  // isLeader
@@ -1951,7 +1951,7 @@ static void test19_stopNode()
     tester4.d_clusterStateManager_mp->stop();
 
     BMQTST_ASSERT_EQ(tester4.d_clusterStateManager_mp->healthState(),
-                     mqbc::ClusterStateTableState::e_STOPPING);
+                     mqbc::ClusterStateTableState::e_STOPPED);
 
     // 5.) Stopping from Leader Healing Stage 2 state
     Tester tester5(true);  // isLeader
@@ -1988,7 +1988,7 @@ static void test19_stopNode()
     tester5.d_clusterStateManager_mp->stop();
 
     BMQTST_ASSERT_EQ(tester5.d_clusterStateManager_mp->healthState(),
-                     mqbc::ClusterStateTableState::e_STOPPING);
+                     mqbc::ClusterStateTableState::e_STOPPED);
 
     // 6.) Stopping from Leader Healed state
     Tester tester6(true);  // isLeader
@@ -2022,7 +2022,7 @@ static void test19_stopNode()
     tester6.d_clusterStateManager_mp->stop();
 
     BMQTST_ASSERT_EQ(tester6.d_clusterStateManager_mp->healthState(),
-                     mqbc::ClusterStateTableState::e_STOPPING);
+                     mqbc::ClusterStateTableState::e_STOPPED);
 }
 
 static void test20_resetUnknownLeader()
@@ -2425,19 +2425,19 @@ static void test23_selectLeaderFromFollower()
 
 static void test24_watchDogLeader()
 // ------------------------------------------------------------------------
-// WATCH DOG LEADER
+// WATCHDOG LEADER
 //
 // Concerns:
 //   Verify that the watchdog triggers upon timeout when the leader is
 //   healing.
 //
 // Testing:
-//   Watch dog for healing leader
+//   Watchdog for healing leader
 // ------------------------------------------------------------------------
 // ------------------------------------------------------------------------
 {
     bmqtst::TestHelper::printTestName("CLUSTER STATE MANAGER - "
-                                      "WATCH DOG LEADER");
+                                      "WATCHDOG LEADER");
 
     Tester tester(true);  // isLeader
     BSLS_ASSERT_OPT(tester.d_clusterStateManager_mp->healthState() ==
@@ -2456,11 +2456,11 @@ static void test24_watchDogLeader()
     tester.verifyFollowerLSNRequestsSent();
     tester.clearChannels();
 
-    // 1.b.) Trigger watch dog via timeout
+    // 1.b.) Trigger watchdog via timeout
     tester.d_cluster_mp->advanceTime(k_WATCHDOG_TIMEOUT_DURATION);
     tester.d_cluster_mp->waitForScheduler();
 
-    // Verify that the watch dog triggers re-transition to Leader Healing
+    // Verify that the watchdog triggers re-transition to Leader Healing
     // Stage 1, where we send follower LSN requests again.
     BMQTST_ASSERT_EQ(tester.d_clusterStateManager_mp->healthState(),
                      mqbc::ClusterStateTableState::e_LDR_HEALING_STG1);
@@ -2494,11 +2494,11 @@ static void test24_watchDogLeader()
     BSLS_ASSERT_OPT(tester.d_clusterStateManager_mp->healthState() ==
                     mqbc::ClusterStateTableState::e_LDR_HEALING_STG2);
 
-    // 2.b.) Trigger watch dog via timeout
+    // 2.b.) Trigger watchdog via timeout
     tester.d_cluster_mp->advanceTime(k_WATCHDOG_TIMEOUT_DURATION);
     tester.d_cluster_mp->waitForScheduler();
 
-    // Verify that the watch dog triggers re-transition to Leader Healing
+    // Verify that the watchdog triggers re-transition to Leader Healing
     // Stage 1, where we send follower LSN requests again.
     BMQTST_ASSERT_EQ(tester.d_clusterStateManager_mp->healthState(),
                      mqbc::ClusterStateTableState::e_LDR_HEALING_STG1);
@@ -2520,30 +2520,30 @@ static void test24_watchDogLeader()
     BSLS_ASSERT_OPT(tester.d_clusterStateManager_mp->healthState() ==
                     mqbc::ClusterStateTableState::e_LDR_HEALED);
 
-    // 3.b.) Attempt to trigger watch dog via timeout, but should fail
+    // 3.b.) Attempt to trigger watchdog via timeout, but should fail
     tester.d_cluster_mp->advanceTime(k_WATCHDOG_TIMEOUT_DURATION);
     tester.d_cluster_mp->waitForScheduler();
 
-    // Verify that watch dog did not trigger
+    // Verify that watchdog did not trigger
     BMQTST_ASSERT_EQ(tester.d_clusterStateManager_mp->healthState(),
                      mqbc::ClusterStateTableState::e_LDR_HEALED);
 }
 
 static void test25_watchDogFollower()
 // ------------------------------------------------------------------------
-// WATCH DOG FOLLOWER
+// WATCHDOG FOLLOWER
 //
 // Concerns:
 //   Verify that the watchdog triggers upon timeout when the follower is
 //   healing.
 //
 // Testing:
-//   Watch dog for healing follower
+//   Watchdog for healing follower
 // ------------------------------------------------------------------------
 // ------------------------------------------------------------------------
 {
     bmqtst::TestHelper::printTestName("CLUSTER STATE MANAGER - "
-                                      "WATCH DOG FOLLOWER");
+                                      "WATCHDOG FOLLOWER");
 
     Tester tester(false);  // isLeader
 

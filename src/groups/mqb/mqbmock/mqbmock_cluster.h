@@ -304,13 +304,9 @@ class Cluster : public mqbi::Cluster {
     /// Initiate the shutdown of the cluster and invoke the specified
     /// `callback` upon completion of (asynchronous) shutdown sequence. It
     /// is expected that `stop()` will be called soon after this routine is
-    /// invoked.  If the optional (temporary) specified 'supportShutdownV2' is
-    /// 'true' execute shutdown logic V2 where upstream (not downstream) nodes
-    /// deconfigure  queues and the shutting down node (not downstream) wait
-    /// for CONFIRMS.
-    void
-    initiateShutdown(const VoidFunctor& callback,
-                     bool supportShutdownV2 = false) BSLS_KEYWORD_OVERRIDE;
+    /// invoked.  Execute shutdown logic where upstream (not downstream) nodes
+    /// deconfigure  queues and the shutting down node waits for CONFIRMS.
+    void initiateShutdown(const VoidFunctor& callback) BSLS_KEYWORD_OVERRIDE;
 
     /// Stop the `Cluster`.
     void stop() BSLS_KEYWORD_OVERRIDE;
@@ -432,7 +428,7 @@ class Cluster : public mqbi::Cluster {
     mqbc::ClusterData* _clusterData();
 
     /// Get a modifiable reference to this object's cluster state.
-    mqbc::ClusterState& _state();
+    mqbc::ClusterState* _state();
 
     /// Move the test timer forward the specified `seconds`.
     void advanceTime(int seconds);
@@ -594,9 +590,9 @@ inline mqbc::ClusterData* Cluster::_clusterData()
     return d_clusterData_mp.get();
 }
 
-inline mqbc::ClusterState& Cluster::_state()
+inline mqbc::ClusterState* Cluster::_state()
 {
-    return d_state;
+    return &d_state;
 }
 
 inline bdlbb::BlobBufferFactory* Cluster::bufferFactory()
