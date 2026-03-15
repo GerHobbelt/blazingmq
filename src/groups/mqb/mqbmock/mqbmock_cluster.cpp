@@ -77,6 +77,18 @@ static void createBlob(bdlbb::BlobBufferFactory* bufferFactory,
 
 const int Cluster::k_LEADER_NODE_ID = 1;
 
+const bsls::Types::Uint64 Cluster::k_MAX_DATA_FILE_SIZE    = 5 * k_GiB;
+const bsls::Types::Uint64 Cluster::k_MAX_JOURNAL_FILE_SIZE = 256 * k_MiB;
+const bsls::Types::Uint64 Cluster::k_MAX_QLIST_FILE_SIZE   = 16 * k_KiB;
+const bsls::Types::Uint64 Cluster::k_MAX_CSL_FILE_SIZE     = 16 * k_KiB;
+
+const bsls::Types::Uint64 Cluster::k_DATA_FILE_GROW_LIMIT =
+    Cluster::k_MAX_DATA_FILE_SIZE * 2;
+const bsls::Types::Uint64 Cluster::k_JOURNAL_FILE_GROW_LIMIT =
+    Cluster::k_MAX_JOURNAL_FILE_SIZE * 2;
+const bsls::Types::Uint64 Cluster::k_QLIST_FILE_GROW_LIMIT =
+    Cluster::k_MAX_QLIST_FILE_SIZE * 2;
+
 // PRIVATE MANIPULATORS
 void Cluster::_initializeClusterDefinition(
     const bslstl::StringRef&                name,
@@ -104,17 +116,20 @@ void Cluster::_initializeClusterDefinition(
 
     mqbcfg::PartitionConfig& partitionCfg =
         d_clusterDefinition.partitionConfig();
-    partitionCfg.numPartitions()       = 4;
-    partitionCfg.location()            = bsl::string(location, d_allocator_p);
-    partitionCfg.archiveLocation()     = bsl::string(archive, d_allocator_p);
-    partitionCfg.maxDataFileSize()     = 5 * k_GiB;
-    partitionCfg.maxJournalFileSize()  = 256 * k_MiB;
-    partitionCfg.maxQlistFileSize()    = 16 * k_KiB;
-    partitionCfg.maxCSLFileSize()      = 16 * k_KiB;
-    partitionCfg.preallocate()         = false;
-    partitionCfg.maxArchivedFileSets() = 0;
-    partitionCfg.prefaultPages()       = true;
-    partitionCfg.syncConfig()          = mqbcfg::StorageSyncConfig();
+    partitionCfg.numPartitions()        = 4;
+    partitionCfg.location()             = bsl::string(location, d_allocator_p);
+    partitionCfg.archiveLocation()      = bsl::string(archive, d_allocator_p);
+    partitionCfg.maxDataFileSize()      = k_MAX_DATA_FILE_SIZE;
+    partitionCfg.maxJournalFileSize()   = k_MAX_JOURNAL_FILE_SIZE;
+    partitionCfg.maxQlistFileSize()     = k_MAX_QLIST_FILE_SIZE;
+    partitionCfg.maxCSLFileSize()       = k_MAX_CSL_FILE_SIZE;
+    partitionCfg.dataFileGrowLimit()    = k_DATA_FILE_GROW_LIMIT;
+    partitionCfg.journalFileGrowLimit() = k_JOURNAL_FILE_GROW_LIMIT;
+    partitionCfg.qListFileGrowLimit()   = k_QLIST_FILE_GROW_LIMIT;
+    partitionCfg.preallocate()          = false;
+    partitionCfg.maxArchivedFileSets()  = 0;
+    partitionCfg.prefaultPages()        = true;
+    partitionCfg.syncConfig()           = mqbcfg::StorageSyncConfig();
 
     d_clusterDefinition.nodes() = nodes;
 
@@ -338,7 +353,7 @@ void Cluster::flush()
 
 // MANIPULATORS
 //   (virtual: mqbi::Cluster)
-int Cluster::start(BSLA_UNUSED bsl::ostream& errorDescription)
+int Cluster::start(BSLA_MAYBE_UNUSED bsl::ostream& errorDescription)
 {
     // PRECONDITIONS
     BSLS_ASSERT_OPT(!d_isStarted &&
@@ -351,7 +366,7 @@ int Cluster::start(BSLA_UNUSED bsl::ostream& errorDescription)
     return 0;
 }
 
-void Cluster::initiateShutdown(BSLA_UNUSED const VoidFunctor& callback)
+void Cluster::initiateShutdown(BSLA_MAYBE_UNUSED const VoidFunctor& callback)
 {
     // PRECONDITIONS
     BSLS_ASSERT_OPT(!d_isStarted &&
@@ -427,20 +442,21 @@ Cluster::sendRequest(const Cluster::RequestManagerType::RequestSp& request,
 }
 
 void Cluster::openQueue(
-    BSLA_UNUSED const bmqt::Uri& uri,
-    BSLA_UNUSED mqbi::Domain* domain,
-    BSLA_UNUSED const bmqp_ctrlmsg::QueueHandleParameters& handleParameters,
-    BSLA_UNUSED const bsl::shared_ptr<mqbi::QueueHandleRequesterContext>&
-                      clientContext,
-    BSLA_UNUSED const mqbi::Cluster::OpenQueueCallback& callback)
+    BSLA_MAYBE_UNUSED const bmqt::Uri& uri,
+    BSLA_MAYBE_UNUSED mqbi::Domain* domain,
+    BSLA_MAYBE_UNUSED const         bmqp_ctrlmsg::QueueHandleParameters&
+                                    handleParameters,
+    BSLA_MAYBE_UNUSED const bsl::shared_ptr<mqbi::QueueHandleRequesterContext>&
+                            clientContext,
+    BSLA_MAYBE_UNUSED const mqbi::Cluster::OpenQueueCallback& callback)
 {
     // NOTHING
 }
 
 void Cluster::configureQueue(
-    BSLA_UNUSED mqbi::Queue*                           queue,
+    BSLA_MAYBE_UNUSED mqbi::Queue*                     queue,
     const bmqp_ctrlmsg::StreamParameters&              streamParameters,
-    BSLA_UNUSED unsigned int                           upstreamSubQueueId,
+    BSLA_MAYBE_UNUSED unsigned int                     upstreamSubQueueId,
     const mqbi::QueueHandle::HandleConfiguredCallback& callback)
 {
     if (callback) {
@@ -453,10 +469,11 @@ void Cluster::configureQueue(
 }
 
 void Cluster::closeQueue(
-    BSLA_UNUSED mqbi::Queue* queue,
-    BSLA_UNUSED const bmqp_ctrlmsg::QueueHandleParameters& handleParameters,
-    BSLA_UNUSED unsigned int                               upstreamSubQueueId,
-    const Cluster::HandleReleasedCallback&                 callback)
+    BSLA_MAYBE_UNUSED mqbi::Queue*         queue,
+    BSLA_MAYBE_UNUSED const                bmqp_ctrlmsg::QueueHandleParameters&
+                                           handleParameters,
+    BSLA_MAYBE_UNUSED unsigned int         upstreamSubQueueId,
+    const Cluster::HandleReleasedCallback& callback)
 {
     if (callback) {
         bmqp_ctrlmsg::Status status(d_allocator_p);
@@ -467,20 +484,21 @@ void Cluster::closeQueue(
     }
 }
 
-void Cluster::onQueueHandleCreated(BSLA_UNUSED mqbi::Queue* queue,
-                                   BSLA_UNUSED const bmqt::Uri& uri,
-                                   BSLA_UNUSED bool             handleCreated)
+void Cluster::onQueueHandleCreated(BSLA_MAYBE_UNUSED mqbi::Queue* queue,
+                                   BSLA_MAYBE_UNUSED const bmqt::Uri& uri,
+                                   BSLA_MAYBE_UNUSED bool handleCreated)
 {
 }
 
-void Cluster::onQueueHandleDestroyed(BSLA_UNUSED mqbi::Queue* queue,
-                                     BSLA_UNUSED const bmqt::Uri& uri)
+void Cluster::onQueueHandleDestroyed(BSLA_MAYBE_UNUSED mqbi::Queue* queue,
+                                     BSLA_MAYBE_UNUSED const bmqt::Uri& uri)
 {
 }
 
-void Cluster::onDomainReconfigured(BSLA_UNUSED const mqbi::Domain& domain,
-                                   BSLA_UNUSED const mqbconfm::Domain& oldDefn,
-                                   BSLA_UNUSED const mqbconfm::Domain& newDefn)
+void Cluster::onDomainReconfigured(
+    BSLA_MAYBE_UNUSED const mqbi::Domain& domain,
+    BSLA_MAYBE_UNUSED const mqbconfm::Domain& oldDefn,
+    BSLA_MAYBE_UNUSED const mqbconfm::Domain& newDefn)
 {
 }
 
@@ -498,9 +516,9 @@ void Cluster::loadClusterStatus(mqbcmd::ClusterResult* out)
     out->makeClusterStatus();
 }
 
-mqbi::InlineResult::Enum
-Cluster::sendConfirmInline(BSLA_UNUSED int   partitionId,
-                           BSLA_UNUSED const bmqp::ConfirmMessage& message)
+mqbi::InlineResult::Enum Cluster::sendConfirmInline(
+    BSLA_MAYBE_UNUSED int   partitionId,
+    BSLA_MAYBE_UNUSED const bmqp::ConfirmMessage& message)
 {
     return mqbi::InlineResult::e_UNAVAILABLE;
 }
@@ -524,8 +542,8 @@ Cluster::sendPutInline(int                                       partitionId,
 }
 
 void Cluster::purgeAndGCQueueOnDomain(
-    mqbcmd::ClusterResult* result,
-    BSLA_UNUSED const bsl::string& domainName)
+    mqbcmd::ClusterResult*  result,
+    BSLA_MAYBE_UNUSED const bsl::string& domainName)
 {
     bmqu::MemOutStream os;
     os << "MockCluster::purgeAndGCQueueOnDomain not implemented!";
@@ -584,9 +602,10 @@ const mqbnet::Cluster& Cluster::netCluster() const
     return *(d_clusterData_mp->membership().netCluster());
 }
 
-void Cluster::printClusterStateSummary(bsl::ostream&   out,
-                                       BSLA_UNUSED int level,
-                                       BSLA_UNUSED int spacesPerLevel) const
+void Cluster::printClusterStateSummary(
+    bsl::ostream&         out,
+    BSLA_MAYBE_UNUSED int level,
+    BSLA_MAYBE_UNUSED int spacesPerLevel) const
 {
     out << "MockCluster::printClusterStateSummary not implemented";
 }

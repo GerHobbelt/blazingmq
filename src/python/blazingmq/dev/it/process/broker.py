@@ -25,22 +25,20 @@ with a broker: sending commands, waiting until a leader is elected, etc.
 
 import itertools
 import os
-from pathlib import Path
 import re
 import signal
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional, TypeVar
 
-from typing import Optional, TypeVar
-from typing import TYPE_CHECKING
+import blazingmq.dev.configurator.configurator as cfg
+from blazingmq.dev.it.process.admin import AdminClient
+import blazingmq.dev.it.process.bmqproc
+import blazingmq.dev.it.testconstants as tc
+from blazingmq.dev.it.process import proc
+from blazingmq.dev.it.util import ListContextManager, Queue, internal_use, wait_until
 
 if TYPE_CHECKING:
     from blazingmq.dev.it.cluster import Cluster
-
-from blazingmq.dev.it.process import proc
-import blazingmq.dev.it.process.bmqproc
-import blazingmq.dev.it.testconstants as tc
-import blazingmq.dev.configurator.configurator as cfg
-
-from blazingmq.dev.it.util import internal_use, ListContextManager, Queue
 
 BLOCK_TIMEOUT = 20
 START_TIMEOUT = 20
@@ -86,6 +84,17 @@ class Broker(blazingmq.dev.it.process.bmqproc.BMQProcess):
             self.last_known_leader = None
             self.last_known_active = None
 
+        # The order of the "broker started successfully" and "cluster is ready"
+        # messages is not guaranteed, so we monitor the standard output
+        # asynchronously, looking for the "started successfully" message. If we
+        # used 'capture' in 'wait_until_ready', we could accidentally skip
+        # "cluster is ready".
+        self.add_async_log_hook(self.__started_successfully_hook)
+
+    def __started_successfully_hook(self, line: str) -> None:
+        if "BMQbrkr started successfully" in line:
+            self._started_successfully = True
+
     def __str__(self):
         return f"Broker({self.name})"
 
@@ -109,14 +118,25 @@ class Broker(blazingmq.dev.it.process.bmqproc.BMQProcess):
         """
         return self._pid
 
+    def start(self):
+        """
+        Set '_started_successfully' to False, then start the broker using
+        'Process.start'.
+        """
+
+        self._started_successfully = False
+        super().start()
+
     def wait_until_started(self):
         """
-        Wait until the broker has started.
+        Wait until the broker has written "started successfully" in its
+        standard output.
         """
+
         with internal_use(self):
-            if not self.outputs_substr(
-                "BMQbrkr started successfully", timeout=START_TIMEOUT
-            ):
+            seen = wait_until(lambda: self._started_successfully, START_TIMEOUT)
+            self.raise_if_exited_in_error()
+            if not seen:
                 raise RuntimeError(f"Failed to start broker on {self.name}: timeout")
 
         with (self._cwd / "bmqbrkr.pid").open("r") as file:
@@ -315,6 +335,50 @@ class Broker(blazingmq.dev.it.process.bmqproc.BMQProcess):
         return self.command(
             f"CLUSTERS CLUSTER {cluster} STORAGE REPLICATION SET quorum {quorum}",
             succeed,
+        )
+
+    def open_admin_client(self) -> AdminClient:
+        """
+        Open a new AdminClient connected to this broker.
+        Return this AdminClient.
+        """
+        admin = AdminClient()
+        admin.connect(self.config.host, int(self.config.port))
+        return admin
+
+    def _is_healthy(self, admin: AdminClient) -> bool:
+        """
+        Return 'True' if this broker sees itself in a healthy state,
+        'False' otherwise.
+        This is an implementation function that expects the caller code to
+        manage AdminClient lifetime efficiently.
+        """
+        res = admin.send_admin(f"CLUSTERS CLUSTER {self.cluster_name} STATUS")
+        assert isinstance(res, str)
+        mm = re.search(r"Is Healthy\s*:\s*(\w+)", res)
+        return mm is not None and mm.group(1) == "Yes"
+
+    def is_healthy(self) -> bool:
+        """
+        Return 'True' if this broker sees itself in a healthy state,
+        'False' otherwise.
+        Note that this check actively opens an admin connection to the broker
+        and sends an admin command, altering the state of the broker.
+        """
+        admin = self.open_admin_client()
+        return self._is_healthy(admin)
+
+    def wait_healthy(self) -> None:
+        """
+        Wait up to 'BLOCK_TIMEOUT' until this broker becomes healthy, or raise
+        an exception if it does not.
+        Note that this check actively opens an admin connection to the broker
+        and sends an admin command, altering the state of the broker.
+        """
+        admin = self.open_admin_client()
+        wait_until(
+            lambda: self._is_healthy(admin),
+            timeout=BLOCK_TIMEOUT,
         )
 
     def force_gc_queues(self, block=None, succeed=None) -> int:

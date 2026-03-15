@@ -1324,6 +1324,11 @@ int StorageUtil::assignPartitionDispatcherThreads(
             .setMaxDataFileSize(config.maxDataFileSize())
             .setMaxJournalFileSize(config.maxJournalFileSize())
             .setMaxQlistFileSize(config.maxQlistFileSize())
+            .setDataFileGrowLimit(config.dataFileGrowLimit())
+            .setJournalFileGrowLimit(config.journalFileGrowLimit())
+            .setQlistFileGrowLimit(config.qListFileGrowLimit())
+            .setGrowStepPercent(config.growStepPercent())
+            .setMinAvailSpacePercent(config.minAvailSpacePercent())
             .setMaxArchivedFileSets(config.maxArchivedFileSets())
             .setRecoveredQueuesCb(recoveredQueuesCb);
 
@@ -3119,11 +3124,11 @@ void StorageUtil::updateQueueStorageDispatched(
 }
 
 void StorageUtil::resetQueueDispatched(
-    StorageSpMap*      storageMap,
-    bslmt::Mutex*      storagesLock,
-    const bsl::string& description,
-    const bmqt::Uri&   uri,
-    BSLA_UNUSED const bsl::shared_ptr<mqbi::Queue>& queue_sp)
+    StorageSpMap*           storageMap,
+    bslmt::Mutex*           storagesLock,
+    const bsl::string&      description,
+    const bmqt::Uri&        uri,
+    BSLA_MAYBE_UNUSED const bsl::shared_ptr<mqbi::Queue>& queue_sp)
 {
     // executed by *QUEUE_DISPATCHER* thread with the specified 'partitionId'
 
@@ -3852,8 +3857,7 @@ void StorageUtil::forceIssueAdvisoryAndSyncPt(mqbc::ClusterData*   clusterData,
             .makeClusterMessage()
             .choice()
             .makePrimaryStatusAdvisory();
-    primaryAdv.partitionId() = fs->config().partitionId();
-    ;
+    primaryAdv.partitionId()    = fs->config().partitionId();
     primaryAdv.primaryLeaseId() = pinfo.primaryLeaseId();
     primaryAdv.status()         = bmqp_ctrlmsg::PrimaryStatus::E_ACTIVE;
 
