@@ -128,14 +128,17 @@ bool AuthenticatedChannelFactory::sendRequest(
     const ResultCallback&                  cb,
     bool                                   isReauthentication) const
 {
-    bmqu::MemOutStream errStream;
-
-    bsl::optional<bmqt::AuthnCredential> credential =
-        d_config.d_authnCredentialCb(errStream);
+    bsl::optional<bmqt::AuthnCredential> credential;
+    try {
+        credential = d_config.d_authnCredentialCb();
+    }
+    // NOLINTNEXTLINE(bugprone-empty-catch)
+    catch (...) {
+        // Intentionally discard, we can't tolerate user exceptions
+    }
 
     if (!credential.has_value()) {
-        BALL_LOG_ERROR << "Failed to get authentication credential: "
-                       << errStream.str();
+        BALL_LOG_ERROR << "Failed to get authentication credential";
         bmqio::Status status(bmqio::StatusCategory::e_GENERIC_ERROR,
                              "authenticationError",
                              rc_AUTHENTICATION_FAILURE);
@@ -227,7 +230,8 @@ bsls::Types::Uint64 AuthenticatedChannelFactory::timeoutInterval(
     bsls::Types::Uint64 lifetimeMs) const
 {
     const bsls::Types::Uint64 intervalMsWithRatio =
-        static_cast<bsls::Types::Uint64>(lifetimeMs * k_REAUTHN_EARLY_RATIO);
+        static_cast<bsls::Types::Uint64>(static_cast<double>(lifetimeMs) *
+                                         k_REAUTHN_EARLY_RATIO);
     const bsls::Types::Uint64 intervalMsWithBuffer =
         saturatingSub(lifetimeMs, k_REAUTHN_EARLY_BUFFER);
     return bsl::min(intervalMsWithRatio, intervalMsWithBuffer);

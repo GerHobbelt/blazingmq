@@ -64,10 +64,10 @@ fetch_git() {
 }
 
 fetch_deps() {
-    fetch_git bloomberg bde-tools 4.38.0.0
-    fetch_git bloomberg bde 4.38.0.0
     fetch_git bloomberg ntf-core 2.6.12
     fetch_git google googletest v1.8.x
+    fetch_git bloomberg bde-tools 4.38.0.0
+    fetch_git bloomberg bde 4.38.0.0
 }
 
 configure() {
@@ -128,9 +128,11 @@ build_google_test() {
     pushd srcs/googletest
     cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_CXX_STANDARD="$cmake_cxx_standard" \
+        -DCMAKE_INSTALL_PREFIX=/opt/bb \
+        -DCMAKE_INSTALL_LIBDIR=lib64 \
         -S . -B build
     cmake --build build -j8
-    cd build && sudo make install
+    cd build && make install
     popd
 }
 

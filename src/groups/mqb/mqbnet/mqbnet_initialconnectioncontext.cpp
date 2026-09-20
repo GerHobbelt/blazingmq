@@ -276,7 +276,8 @@ int InitialConnectionContext::readBlob(bsl::ostream& errorDescription,
 
     // Have a full blob, indicate no more bytes needed (we have to do this
     // because 'handleRead' above set it back to 4 at the end).
-    *numNeeded = 0;
+    *isFullBlob = true;
+    *numNeeded  = 0;
 
     return 0;
 }
@@ -466,10 +467,7 @@ void InitialConnectionContext::readCallback(const bmqio::Status& status,
     BALL_LOG_TRACE << "InitialConnectionContext readCb: [status: " << status
                    << ", peer: '" << channel().get() << "']";
 
-    bdlbb::Blob        outPacket;
-    bool               isFullBlob = true;
     bmqu::MemOutStream errStream;
-    int                rc = 0;
 
     if (!status) {
         errStream << "Read error: " << status;
@@ -477,7 +475,9 @@ void InitialConnectionContext::readCallback(const bmqio::Status& status,
         return;  // RETURN
     }
 
-    rc = readBlob(errStream, &outPacket, &isFullBlob, numNeeded, blob);
+    bdlbb::Blob outPacket;
+    bool        isFullBlob = true;
+    int rc = readBlob(errStream, &outPacket, &isFullBlob, numNeeded, blob);
     if (rc != 0) {
         handleEvent(errStream.str(), InitialConnectionEvent::e_ERROR);
         return;  // RETURN

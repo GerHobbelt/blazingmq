@@ -16,6 +16,7 @@
 #include <mqbc_storagemanager.h>
 
 // BMQ
+#include <bmqio_testchannel.h>
 #include <bmqp_crc32c.h>
 #include <bmqp_ctrlmsg_messages.h>
 #include <bmqp_event.h>
@@ -498,7 +499,8 @@ struct TestHelper {
     void verifyPrimarySendsReplicaDataRqstPull(
         int                                          partitionId,
         int                                          highestSeqNumNodeId,
-        const bmqp_ctrlmsg::PartitionSequenceNumber& highestSeqNum)
+        const bmqp_ctrlmsg::PartitionSequenceNumber& highestSeqNum,
+        unsigned int                                 primaryLeaseId = 1U)
     {
         bmqp_ctrlmsg::ClusterMessage      expectedMessage;
         bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRequest =
@@ -507,7 +509,8 @@ struct TestHelper {
                 .choice()
                 .makeReplicaDataRequest();
 
-        replicaDataRequest.partitionId() = partitionId;
+        replicaDataRequest.partitionId()    = partitionId;
+        replicaDataRequest.primaryLeaseId() = primaryLeaseId;
         replicaDataRequest.replicaDataType() =
             bmqp_ctrlmsg::ReplicaDataType::E_PULL;
         replicaDataRequest.endSequenceNumber() = highestSeqNum;
@@ -541,7 +544,8 @@ struct TestHelper {
     void verifyPrimarySendsReplicaDataRqstPush(
         int                                          partitionId,
         const NodeIdToPSNMap&                        destinationReplicas,
-        const bmqp_ctrlmsg::PartitionSequenceNumber& selfSeqNum)
+        const bmqp_ctrlmsg::PartitionSequenceNumber& selfSeqNum,
+        unsigned int                                 primaryLeaseId = 1U)
     {
         bmqp_ctrlmsg::ClusterMessage      expectedMessage;
         bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRequest =
@@ -553,6 +557,7 @@ struct TestHelper {
         replicaDataRequest.replicaDataType() =
             bmqp_ctrlmsg::ReplicaDataType::E_PUSH;
         replicaDataRequest.partitionId()       = partitionId;
+        replicaDataRequest.primaryLeaseId()    = primaryLeaseId;
         replicaDataRequest.endSequenceNumber() = selfSeqNum;
 
         for (TestChannelMapCIter cit = d_cluster_mp->_channels().cbegin();
@@ -2495,8 +2500,6 @@ static void test15_replicaWaitingReceivesReplicaDataRqstPull()
 
     helper.startStorageManager(&storageManager, primaryNode);
 
-    mqbs::FileStore& fs = storageManager.fileStore(k_PARTITION_ID);
-
     BSLS_ASSERT_OPT(storageManager.partitionHealthState(k_PARTITION_ID) ==
                     mqbc::PartitionFSM::State::e_REPLICA_WAITING);
 
@@ -2570,13 +2573,11 @@ static void test15_replicaWaitingReceivesReplicaDataRqstPull()
     replicaDataRequest.replicaDataType() =
         bmqp_ctrlmsg::ReplicaDataType::E_PULL;
     replicaDataRequest.partitionId()         = k_PARTITION_ID;
+    replicaDataRequest.primaryLeaseId()      = 1U;
     replicaDataRequest.beginSequenceNumber() = k_PRIMARY_SEQ_NUM;
     replicaDataRequest.endSequenceNumber()   = selfSeqNum;
 
     storageManager.processReplicaDataRequest(requestMessage, primaryNode);
-
-    BSLS_ASSERT_OPT(fs.primaryLeaseId() == selfSeqNum.primaryLeaseId());
-    BSLS_ASSERT_OPT(fs.sequenceNumber() == selfSeqNum.sequenceNumber());
 
     // Verify that Replica sends data chunks followed by
     // ReplicaDataRspnPull.
@@ -2942,7 +2943,7 @@ static void test18_primaryHealingWatchdogRetry()
     PSN.primaryLeaseId() = k_PRIMARY_LEASE_ID;
 
     replicaStateResponse.partitionId()          = k_PARTITION_ID;
-    replicaStateResponse.primaryLeaseId()       = k_PRIMARY_LEASE_ID;
+    replicaStateResponse.primaryLeaseId()       = 1U;
     replicaStateResponse.latestSequenceNumber() = PSN;
 
     helper.d_cluster_mp->requestManager().processResponse(message);
@@ -3489,6 +3490,7 @@ static void test23_replicaHealingReceivesReplicaDataRqstDropInvalidPid()
     PSN.primaryLeaseId() = 1U;
 
     primaryStateResponse.partitionId()          = k_PARTITION_ID;
+    primaryStateResponse.primaryLeaseId()       = 1U;
     primaryStateResponse.latestSequenceNumber() = PSN;
 
     helper.d_cluster_mp->requestManager().processResponse(pstMessage);

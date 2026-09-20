@@ -133,8 +133,7 @@ struct AuthnCredentialProvider {
     }
 
     // MANIPULATORS
-    bsl::optional<bmqt::AuthnCredential>
-    operator()(bsl::ostream& /* error */) const
+    bsl::optional<bmqt::AuthnCredential> operator()() const
     {
         return bsl::optional<bmqt::AuthnCredential>(bsl::in_place,
                                                     d_mechanism,
@@ -408,7 +407,8 @@ void Application::printFinalStats()
        << bmqu::PrintUtil::prettyBytes(evtBytes) << "]";
 
     if (msgBytes != 0) {
-        double protocol = (evtBytes - msgBytes) * 100.0 / evtBytes;
+        double protocol = static_cast<double>(evtBytes - msgBytes) * 100.0 /
+                          static_cast<double>(evtBytes);
         ss << " (Protocol: " << bsl::setprecision(4) << protocol << "%)";
     }
 

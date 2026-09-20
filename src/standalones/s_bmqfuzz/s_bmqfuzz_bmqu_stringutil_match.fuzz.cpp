@@ -13,17 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Automatically generated file.  **DO NOT EDIT**
+#include <fuzzer/FuzzedDataProvider.h>
+#include <string>
 
-// Generated on Wed Jun 18 14:44:06 2025
-// Command line: sim_cpp11_features.pl bmqu_managedcallback.cpp
+#include <bmqu_stringutil.h>
+#include <bsl_string.h>
 
-#define INCLUDED_BMQU_MANAGEDCALLBACK_CPP03  // Disable inclusion
-#include <bmqu_managedcallback_cpp03.h>      // Pro-forma #include
+using namespace BloombergLP;
 
-// Empty file except when compiling bmqu_managedcallback.cpp
-#ifdef COMPILING_BMQU_MANAGEDCALLBACK_CPP
-
-// No C++03 Expansion
-
-#endif  // defined(COMPILING_BMQU_MANAGEDCALLBACK_CPP)
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* Data, size_t Size)
+{
+    FuzzedDataProvider provider(Data, Size);
+    std::string        pattern = provider.ConsumeRandomLengthString();
+    std::string        text    = provider.ConsumeRemainingBytesAsString();
+    bmqu::StringUtil::match(bsl::string(text.data(), text.size()),
+                            bsl::string(pattern.data(), pattern.size()));
+    return 0;
+}

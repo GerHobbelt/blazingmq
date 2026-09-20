@@ -280,7 +280,10 @@ int RecoveryManager::processSendDataChunks(
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(destination);
     BSLS_ASSERT_SAFE(fs.inDispatcherThread());
-    BSLS_ASSERT_SAFE(fs.isOpen());
+    // Either the FileStore is open, or the recovery file set is open.
+    BSLS_ASSERT_SAFE(
+        fs.isOpen() ||
+        d_recoveryContextVec[partitionId].d_mappedJournalFd.isValid());
 
     enum RcEnum {
         // Value for the various RC error categories
@@ -302,7 +305,12 @@ int RecoveryManager::processSendDataChunks(
                   << ". Peer: " << destination->nodeDescription() << ".";
 
     mqbs::FileStoreSet fileSet;
-    fs.loadCurrentFiles(&fileSet);
+    if (fs.isOpen()) {
+        fs.loadCurrentFiles(&fileSet);
+    }
+    else {
+        fileSet = d_recoveryContextVec[partitionId].d_recoveryFileSet;
+    }
 
     bsl::shared_ptr<mqbs::MappedFileDescriptor> mappedJournalFd =
         bsl::make_shared<mqbs::MappedFileDescriptor>();
@@ -889,26 +897,27 @@ int RecoveryManager::createRecoveryFileSet(bsl::ostream&    errorDescription,
     }
 
     RecoveryContext& recoveryCtx = d_recoveryContextVec[partitionId];
-    recoveryCtx.d_recoveryFileSet.setJournalFile(fileSetSp->d_journalFileName)
+    recoveryCtx.d_recoveryFileSet
+        .setJournalFile(fileSetSp->d_journal.d_fileName)
         .setJournalFileSize(d_dataStoreConfig.maxJournalFileSize())
-        .setDataFile(fileSetSp->d_dataFileName)
+        .setDataFile(fileSetSp->d_data.d_fileName)
         .setDataFileSize(d_dataStoreConfig.maxDataFileSize())
         .setQlistFileSize(d_dataStoreConfig.maxQlistFileSize())
-        .setQlistFile(fileSetSp->d_qlistFileName);
+        .setQlistFile(fileSetSp->d_qlist.d_fileName);
 
     mqbs::FileStoreUtil::loadCurrentFiles(&recoveryCtx.d_recoveryFileSet,
                                           *fileSetSp,
                                           d_qListAware);  // needQList
 
-    recoveryCtx.d_mappedJournalFd     = fileSetSp->d_journalFile;
-    recoveryCtx.d_journalFilePosition = fileSetSp->d_journalFilePosition;
-    recoveryCtx.d_mappedDataFd        = fileSetSp->d_dataFile;
-    recoveryCtx.d_dataFilePosition    = fileSetSp->d_dataFilePosition;
+    recoveryCtx.d_mappedJournalFd     = fileSetSp->d_journal.d_file;
+    recoveryCtx.d_journalFilePosition = fileSetSp->d_journal.d_filePosition;
+    recoveryCtx.d_mappedDataFd        = fileSetSp->d_data.d_file;
+    recoveryCtx.d_dataFilePosition    = fileSetSp->d_data.d_filePosition;
     BSLS_ASSERT_SAFE(recoveryCtx.d_mappedJournalFd.isValid());
     BSLS_ASSERT_SAFE(recoveryCtx.d_mappedDataFd.isValid());
     if (d_qListAware) {
-        recoveryCtx.d_mappedQlistFd     = fileSetSp->d_qlistFile;
-        recoveryCtx.d_qlistFilePosition = fileSetSp->d_qlistFilePosition;
+        recoveryCtx.d_mappedQlistFd     = fileSetSp->d_qlist.d_file;
+        recoveryCtx.d_qlistFilePosition = fileSetSp->d_qlist.d_filePosition;
         BSLS_ASSERT_SAFE(recoveryCtx.d_mappedQlistFd.isValid());
     }
 
@@ -922,7 +931,7 @@ int RecoveryManager::createRecoveryFileSet(bsl::ostream&    errorDescription,
             << ", data file position: " << recoveryCtx.d_dataFilePosition;
         if (d_qListAware) {
             BALL_LOG_OUTPUT_STREAM << ", qlist file position: "
-                                   << fileSetSp->d_qlistFilePosition;
+                                   << fileSetSp->d_qlist.d_filePosition;
         }
     }
 
@@ -1584,6 +1593,47 @@ int RecoveryManager::recoverPSN(bmqp_ctrlmsg::PartitionSequenceNumber* psn,
     return rc_SUCCESS;
 }
 
+int RecoveryManager::loadHighestSeqNums(
+    mqbs::FileStore::LeaseIdToSeqNumMap* out,
+    int                                  partitionId)
+{
+    // executed by the *QUEUE DISPATCHER* thread associated with 'partitionId'
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(out);
+    validatePartitionId(partitionId);
+
+    enum RcEnum {
+        // Value for the various RC error categories
+        rc_SUCCESS               = 0,
+        rc_FILE_ITERATOR_FAILURE = -1
+    };
+
+    RecoveryContext& recoveryCtx = d_recoveryContextVec[partitionId];
+    BSLS_ASSERT_SAFE(recoveryCtx.d_mappedJournalFd.isValid());
+
+    mqbs::JournalFileIterator journalIt;
+    int                       rc = journalIt.reset(
+        &recoveryCtx.d_mappedJournalFd,
+        mqbs::FileStoreProtocolUtil::bmqHeader(recoveryCtx.d_mappedJournalFd));
+    if (0 != rc) {
+        BALL_LOG_ERROR << d_clusterData.identity().description()
+                       << " Partition [" << partitionId << "]: "
+                       << "While loading highest sequence numbers, failed to "
+                       << "reset journal iterator, rc: " << rc;
+        return 10 * rc + rc_FILE_ITERATOR_FAILURE;  // RETURN
+    }
+
+    // Journal records are laid out in ascending PSN order, so the last
+    // sequence number seen for each lease id is the highest one.
+    while (1 == journalIt.nextRecord()) {
+        const mqbs::RecordHeader& recHeader = journalIt.recordHeader();
+        (*out)[recHeader.primaryLeaseId()]  = recHeader.sequenceNumber();
+    }
+
+    return rc_SUCCESS;
+}
+
 void RecoveryManager::setLiveDataSource(mqbnet::ClusterNode* source,
                                         int                  partitionId)
 {
@@ -1706,7 +1756,8 @@ void RecoveryManager::clearBufferedStorageEvent(int partitionId)
 // ACCESSORS
 void RecoveryManager::loadReplicaDataResponsePush(
     bmqp_ctrlmsg::ControlMessage* out,
-    int                           partitionId) const
+    int                           partitionId,
+    unsigned int                  primaryLeaseId) const
 {
     // executed by the *QUEUE DISPATCHER* thread associated with 'partitionId'
 
@@ -1727,8 +1778,9 @@ void RecoveryManager::loadReplicaDataResponsePush(
             .choice()
             .makeReplicaDataResponse();
 
-    response.replicaDataType()     = bmqp_ctrlmsg::ReplicaDataType::E_PUSH;
     response.partitionId()         = partitionId;
+    response.primaryLeaseId()      = primaryLeaseId;
+    response.replicaDataType()     = bmqp_ctrlmsg::ReplicaDataType::E_PUSH;
     response.beginSequenceNumber() = receiveDataCtx.d_beginPSN;
     response.endSequenceNumber()   = receiveDataCtx.d_endPSN;
 }
