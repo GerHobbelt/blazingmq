@@ -46,9 +46,9 @@
 
 #include <bmqscm_version.h>
 #include <bmqst_statcontext.h>
-#include <bmqsys_operationlogger.h>
-#include <bmqsys_time.h>
 #include <bmqu_memoutstream.h>
+#include <bmqu_operationlogger.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <baljsn_encoder.h>
@@ -70,6 +70,7 @@
 #include <bslmt_latch.h>
 #include <bslmt_lockguard.h>
 #include <bslmt_once.h>
+#include <bslmt_threadattributes.h>
 #include <bsls_assert.h>
 #include <bsls_systemclocktype.h>
 #include <bsls_timeinterval.h>
@@ -103,7 +104,7 @@ void Application::oneTimeInit()
     BSLMT_ONCE_DO
     {
         // Initialize Time with platform-specific clocks/timers
-        bmqsys::Time::initialize();
+        bmqu::Time::initialize();
 
         // Initialize pseudo-random number generator.  We add some
         // machine-specific (high resolution timer) and task-specific (pid)
@@ -112,7 +113,7 @@ void Application::oneTimeInit()
         unsigned int seed =
             bsl::time(NULL) +
             static_cast<unsigned int>(bdls::ProcessUtil::getProcessId()) +
-            static_cast<unsigned int>(bmqsys::Time::highResolutionTimer() &
+            static_cast<unsigned int>(bmqu::Time::highResolutionTimer() &
                                       0xFFFFFFFF);
 
         bsl::srand(seed);
@@ -123,7 +124,7 @@ void Application::oneTimeShutdown()
 {
     BSLMT_ONCE_DO
     {
-        bmqsys::Time::shutdown();
+        bmqu::Time::shutdown();
     }
 }
 
@@ -133,12 +134,12 @@ Application::Application(bdlmt::EventScheduler* scheduler,
                          bslma::Allocator*      allocator)
 : d_allocators(allocator)
 , d_scheduler_p(scheduler)
-, d_adminExecutionPool(bmqsys::ThreadUtil::defaultAttributes(),
+, d_adminExecutionPool(bslmt::ThreadAttributes(),
                        0,
                        1,
                        bsls::TimeInterval(120).totalMilliseconds(),
                        allocator)
-, d_adminRerouteExecutionPool(bmqsys::ThreadUtil::defaultAttributes(),
+, d_adminRerouteExecutionPool(bslmt::ThreadAttributes(),
                               0,
                               1,
                               bsls::TimeInterval(120).totalMilliseconds(),
@@ -990,7 +991,7 @@ int Application::processCommandCb(
     const bsl::function<void(int, const bsl::string&)>& onProcessedCb,
     bool                                                fromReroute)
 {
-    bmqsys::OperationLogger opLogger(d_allocator_p);
+    bmqu::OperationLogger opLogger(d_allocator_p);
     // Set operation name later when we have a return code
     opLogger.start();
 

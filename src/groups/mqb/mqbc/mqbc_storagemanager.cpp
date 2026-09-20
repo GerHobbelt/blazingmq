@@ -34,12 +34,12 @@
 #include <bmqp_protocol.h>
 #include <bmqp_storagemessageiterator.h>
 
-#include <bmqsys_time.h>
 #include <bmqtsk_alarmlog.h>
 #include <bmqu_blob.h>
 #include <bmqu_blobobjectproxy.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlbb_blob.h>
@@ -69,7 +69,7 @@ const bsls::Types::Int64 k_NS_PER_MESSAGE =
 
 const int k_GC_MESSAGES_INTERVAL_SECONDS = 5;
 
-bool isPrimaryActive(const mqbi::StorageManager_PartitionInfo pinfo)
+bool isPrimaryActive(const mqbi::StorageManager_PartitionInfo& pinfo)
 {
     return pinfo.primaryStatus() == bmqp_ctrlmsg::PrimaryStatus::E_ACTIVE;
 }
@@ -114,7 +114,7 @@ void StorageManager::startRecoveryCb(int partitionId)
         return;  // RETURN
     }
 
-    d_recoveryStartTimes[partitionId] = bmqsys::Time::highResolutionTimer();
+    d_recoveryStartTimes[partitionId] = bmqu::Time::highResolutionTimer();
 }
 
 void StorageManager::shutdownCb(int partitionId, bslmt::Latch* latch)
@@ -616,28 +616,25 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
     const PartitionFSMEventData& eventData   = eventDataVec[0];
     const int                    partitionId = eventData.partitionId();
 
-    bsl::vector<NodeToSeqNumCtxMapCIter>& dataPushDestinations =
+    bsl::vector<NodeToPSNCtxMapCIter>& dataPushDestinations =
         destinations->d_dataPushDestinations;
-    bsl::vector<NodeToSeqNumCtxMapCIter>& dataDropDestinations =
+    bsl::vector<NodeToPSNCtxMapCIter>& dataDropDestinations =
         destinations->d_dataDropDestinations;
     dataPushDestinations.clear();
     dataDropDestinations.clear();
 
-    const NodeToSeqNumCtxMap& nodeToSeqNumCtxMap =
-        d_nodeToSeqNumCtxMapVec[partitionId];
+    const NodeToPSNCtxMap& nodeToPSNCtxMap = d_nodeToPSNCtxMapVec[partitionId];
     mqbnet::ClusterNode* const selfNode =
         d_clusterData_p->membership().selfNode();
-    BSLS_ASSERT_SAFE(nodeToSeqNumCtxMap.find(selfNode) !=
-                     nodeToSeqNumCtxMap.end());
-    const bmqp_ctrlmsg::PartitionSequenceNumber& selfSeqNum =
-        nodeToSeqNumCtxMap.at(selfNode).d_seqNum;
+    BSLS_ASSERT_SAFE(nodeToPSNCtxMap.find(selfNode) != nodeToPSNCtxMap.end());
+    const bmqp_ctrlmsg::PartitionSequenceNumber& selfPSN =
+        nodeToPSNCtxMap.at(selfNode).d_PSN;
     const bmqp_ctrlmsg::PartitionSequenceNumber&
-        selfFirstSyncAfterRolloverSeqNum =
-            nodeToSeqNumCtxMap.at(selfNode)
-                .d_firstSyncPointAfterRolloverSeqNum;
+        selfFirstSyncAfterRolloverPSN =
+            nodeToPSNCtxMap.at(selfNode).d_firstSyncPointAfterRolloverPSN;
 
     // Collect which nodes to check as potential data push/drop destinations
-    bsl::vector<NodeToSeqNumCtxMapCIter> nodesToCheck;
+    bsl::vector<NodeToPSNCtxMapCIter> nodesToCheck;
     if (eventType == PartitionFSM::Event::e_REPLICA_STATE_RSPN ||
         eventType == PartitionFSM::Event::e_PRIMARY_STATE_RQST) {
         // Such events can contain a vector of responses.  Only check
@@ -650,13 +647,13 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
             BSLS_ASSERT_SAFE(source);
             BSLS_ASSERT_SAFE(source->nodeId() != selfNode->nodeId());
 
-            NodeToSeqNumCtxMapCIter cit = nodeToSeqNumCtxMap.find(source);
-            if (cit == nodeToSeqNumCtxMap.end()) {
-                BALL_LOG_ERROR
-                    << d_clusterData_p->identity().description()
-                    << " Partition [" << partitionId << "]: " << "Replica "
-                    << source->nodeDescription()
-                    << " not found in nodeToSeqNumCtxMap, skipping.";
+            NodeToPSNCtxMapCIter cit = nodeToPSNCtxMap.find(source);
+            if (cit == nodeToPSNCtxMap.end()) {
+                BALL_LOG_ERROR << d_clusterData_p->identity().description()
+                               << " Partition [" << partitionId
+                               << "]: " << "Replica "
+                               << source->nodeDescription()
+                               << " not found in nodeToPSNCtxMap, skipping.";
                 continue;  // CONTINUE
             }
 
@@ -672,29 +669,29 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
             eventType == PartitionFSM::Event::e_SELF_HIGHEST_SEQ ||
             eventType == PartitionFSM::Event::e_REPLICA_DATA_RSPN_PULL);
 
-        for (NodeToSeqNumCtxMapCIter cit = nodeToSeqNumCtxMap.cbegin();
-             cit != nodeToSeqNumCtxMap.cend();
+        for (NodeToPSNCtxMapCIter cit = nodeToPSNCtxMap.cbegin();
+             cit != nodeToPSNCtxMap.cend();
              cit++) {
             nodesToCheck.push_back(cit);
         }
     }
 
     // Determine data push/drop destinations
-    typedef bsl::vector<NodeToSeqNumCtxMapCIter>::const_iterator
+    typedef bsl::vector<NodeToPSNCtxMapCIter>::const_iterator
         NodesToCheckCIter;
     for (NodesToCheckCIter nit = nodesToCheck.cbegin();
          nit != nodesToCheck.cend();
          nit++) {
-        NodeToSeqNumCtxMapCIter cit = *nit;
+        NodeToPSNCtxMapCIter cit = *nit;
         if (cit->first->nodeId() == selfNode->nodeId()) {
             continue;  // CONTINUE
         }
-        const bmqp_ctrlmsg::PartitionSequenceNumber& nodeSeqNum =
-            cit->second.d_seqNum;
+        const bmqp_ctrlmsg::PartitionSequenceNumber& nodePSN =
+            cit->second.d_PSN;
 
-        if (nodeSeqNum != bmqp_ctrlmsg::PartitionSequenceNumber() &&
-            cit->second.d_firstSyncPointAfterRolloverSeqNum !=
-                selfFirstSyncAfterRolloverSeqNum) {
+        if (nodePSN != bmqp_ctrlmsg::PartitionSequenceNumber() &&
+            cit->second.d_firstSyncPointAfterRolloverPSN !=
+                selfFirstSyncAfterRolloverPSN) {
             BALL_LOG_WARN
                 << d_clusterData_p->identity().description() << " Partition ["
                 << partitionId << "]: " << "Replica "
@@ -707,39 +704,38 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
             continue;  // CONTINUE
         }
 
-        const mqbs::FileStore::LeaseIdToSeqNumMap& highestSeqNums =
+        const mqbs::FileStore::LeaseIdToSeqNumMap& highestPSNs =
             fileStore(partitionId).highestSeqNums();
-        mqbs::FileStore::LeaseIdToSeqNumMapCIter seqNumCit =
-            highestSeqNums.find(nodeSeqNum.primaryLeaseId());
-        if (seqNumCit != highestSeqNums.end() &&
-            nodeSeqNum.sequenceNumber() > seqNumCit->second) {
-            bmqp_ctrlmsg::PartitionSequenceNumber highestSeqNum;
-            highestSeqNum.primaryLeaseId() = seqNumCit->first;
-            highestSeqNum.sequenceNumber() = seqNumCit->second;
+        mqbs::FileStore::LeaseIdToSeqNumMapCIter PSNCit = highestPSNs.find(
+            nodePSN.primaryLeaseId());
+        if (PSNCit != highestPSNs.end() &&
+            nodePSN.sequenceNumber() > PSNCit->second) {
+            bmqp_ctrlmsg::PartitionSequenceNumber highestPSN;
+            highestPSN.primaryLeaseId() = PSNCit->first;
+            highestPSN.sequenceNumber() = PSNCit->second;
 
             BALL_LOG_WARN
                 << d_clusterData_p->identity().description() << " Partition ["
                 << partitionId << "]: " << "Replica "
                 << cit->first->nodeDescription() << " has PSN "
-                << mqbs::printPSN(nodeSeqNum)
+                << mqbs::printPSN(nodePSN)
                 << ", while the highest PSN for the same primary "
-                << "lease ID is " << mqbs::printPSN(highestSeqNum)
+                << "lease ID is " << mqbs::printPSN(highestPSN)
                 << ", implying that it has extra irreconcilable records.  We "
                 << "need to send ReplicaDataRequestDrop to this replica.";
 
             dataDropDestinations.emplace_back(cit);
             continue;  // CONTINUE
         }
-        if (seqNumCit == highestSeqNums.end() &&
-            nodeSeqNum.primaryLeaseId() > 0 &&
-            nodeSeqNum.primaryLeaseId() < selfSeqNum.primaryLeaseId()) {
+        if (PSNCit == highestPSNs.end() && nodePSN.primaryLeaseId() > 0 &&
+            nodePSN.primaryLeaseId() < selfPSN.primaryLeaseId()) {
             BALL_LOG_WARN
                 << d_clusterData_p->identity().description() << " Partition ["
                 << partitionId << "]: " << "Replica "
                 << cit->first->nodeDescription() << " has PSN "
-                << mqbs::printPSN(nodeSeqNum)
+                << mqbs::printPSN(nodePSN)
                 << ", whose primary lease id is lower than self's PSN "
-                << mqbs::printPSN(selfSeqNum)
+                << mqbs::printPSN(selfPSN)
                 << ", and there is no known highest PSN for the "
                 << "same primary lease id.  This implies that this replica "
                    "has "
@@ -750,7 +746,7 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
             continue;  // CONTINUE
         }
 
-        if (nodeSeqNum <= selfSeqNum) {
+        if (nodePSN <= selfPSN) {
             // We need to send `ReplicaDataRequestPush` to all outdated and
             // up-to-date replicas.  It is important to inform up-to-date
             // replicas such that they know they can transition to healed
@@ -759,9 +755,9 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
                 << d_clusterData_p->identity().description() << " Partition ["
                 << partitionId << "]: " << "Replica "
                 << cit->first->nodeDescription() << " has PSN "
-                << mqbs::printPSN(nodeSeqNum)
+                << mqbs::printPSN(nodePSN)
                 << ", which is lower than or equal to self's PSN "
-                << mqbs::printPSN(selfSeqNum)
+                << mqbs::printPSN(selfPSN)
                 << ".  We need to send ReplicaDataRequestPush to this "
                 << "replica.";
 
@@ -772,9 +768,9 @@ void StorageManager::determineDataDestinations(DataDestinations* destinations,
                 << d_clusterData_p->identity().description() << " Partition ["
                 << partitionId << "]: " << "Replica "
                 << cit->first->nodeDescription() << " has PSN "
-                << mqbs::printPSN(nodeSeqNum)
+                << mqbs::printPSN(nodePSN)
                 << ", which is higher than self's PSN "
-                << mqbs::printPSN(selfSeqNum)
+                << mqbs::printPSN(selfPSN)
                 << ".  We need to send ReplicaDataRequestDrop to this "
                 << "replica.";
 
@@ -790,18 +786,17 @@ void StorageManager::sendReplicaDataRequestPush(
     // executed by the *QUEUE DISPATCHER* thread associated with the
     // paritionId contained in 'event'
 
-    const NodeToSeqNumCtxMap& nodeToSeqNumCtxMap = d_nodeToSeqNumCtxMapVec.at(
+    const NodeToPSNCtxMap& nodeToPSNCtxMap = d_nodeToPSNCtxMapVec.at(
         partitionId);
     mqbnet::ClusterNode* const selfNode =
         d_clusterData_p->membership().selfNode();
-    BSLS_ASSERT_SAFE(nodeToSeqNumCtxMap.find(selfNode) !=
-                     nodeToSeqNumCtxMap.end());
+    BSLS_ASSERT_SAFE(nodeToPSNCtxMap.find(selfNode) != nodeToPSNCtxMap.end());
 
     // Send ReplicaDataRequestPush to destination replicas
-    const bsl::vector<NodeToSeqNumCtxMapCIter>& destinationReplicas =
+    const bsl::vector<NodeToPSNCtxMapCIter>& destinationReplicas =
         destinations.d_dataPushDestinations;
     EventData failedEventDataVec;
-    for (bsl::vector<NodeToSeqNumCtxMapCIter>::const_iterator cit =
+    for (bsl::vector<NodeToPSNCtxMapCIter>::const_iterator cit =
              destinationReplicas.cbegin();
          cit != destinationReplicas.cend();
          ++cit) {
@@ -822,9 +817,9 @@ void StorageManager::sendReplicaDataRequestPush(
         replicaDataRqst.replicaDataType() =
             bmqp_ctrlmsg::ReplicaDataType::E_PUSH;
         replicaDataRqst.partitionId()         = partitionId;
-        replicaDataRqst.beginSequenceNumber() = (*cit)->second.d_seqNum;
+        replicaDataRqst.beginSequenceNumber() = (*cit)->second.d_PSN;
         replicaDataRqst.endSequenceNumber() =
-            nodeToSeqNumCtxMap.at(selfNode).d_seqNum;
+            nodeToPSNCtxMap.at(selfNode).d_PSN;
 
         request->setResponseCb(
             bdlf::BindUtil::bind(&StorageManager::processReplicaDataResponse,
@@ -866,14 +861,14 @@ void StorageManager::sendReplicaDataRequestDrop(
 
     mqbnet::ClusterNode* const selfNode =
         d_clusterData_p->membership().selfNode();
-    BSLS_ASSERT_SAFE(d_nodeToSeqNumCtxMapVec.at(partitionId).find(selfNode) !=
-                     d_nodeToSeqNumCtxMapVec.at(partitionId).end());
+    BSLS_ASSERT_SAFE(d_nodeToPSNCtxMapVec.at(partitionId).find(selfNode) !=
+                     d_nodeToPSNCtxMapVec.at(partitionId).end());
 
     // Send ReplicaDataRequestDrop to replicas with obsolete data
-    const bsl::vector<NodeToSeqNumCtxMapCIter>& destinationReplicas =
+    const bsl::vector<NodeToPSNCtxMapCIter>& destinationReplicas =
         destinations.d_dataDropDestinations;
     EventData failedEventDataVec;
-    for (bsl::vector<NodeToSeqNumCtxMapCIter>::const_iterator cit =
+    for (bsl::vector<NodeToPSNCtxMapCIter>::const_iterator cit =
              destinationReplicas.cbegin();
          cit != destinationReplicas.cend();
          ++cit) {
@@ -936,20 +931,20 @@ void StorageManager::startSendDataChunksAsPrimary(
 
     // End PSN is primary's latest PSN.
     const bmqp_ctrlmsg::PartitionSequenceNumber& endPSN =
-        d_nodeToSeqNumCtxMapVec.at(partitionId)
+        d_nodeToPSNCtxMapVec.at(partitionId)
             .at(d_clusterData_p->membership().selfNode())
-            .d_seqNum;
+            .d_PSN;
 
     // For each node, check if we need to send data chunks
-    const bsl::vector<NodeToSeqNumCtxMapCIter>& destinationReplicas =
+    const bsl::vector<NodeToPSNCtxMapCIter>& destinationReplicas =
         destinations.d_dataPushDestinations;
-    for (bsl::vector<NodeToSeqNumCtxMapCIter>::const_iterator cit =
+    for (bsl::vector<NodeToPSNCtxMapCIter>::const_iterator cit =
              destinationReplicas.begin();
          cit != destinationReplicas.end();
          ++cit) {
         mqbnet::ClusterNode*                         destNode = (*cit)->first;
         const bmqp_ctrlmsg::PartitionSequenceNumber& beginPSN =
-            (*cit)->second.d_seqNum;
+            (*cit)->second.d_PSN;
         if (beginPSN == endPSN) {
             // Replica in-sync with primary: no need to send data chunks
             continue;  // CONTINUE
@@ -1059,7 +1054,7 @@ void StorageManager::processReplicaDataRequestPull(
     mqbnet::ClusterNode* const selfNode =
         d_clusterData_p->membership().selfNode();
     const bmqp_ctrlmsg::PartitionSequenceNumber selfPSN =
-        d_nodeToSeqNumCtxMapVec.at(partitionId).at(selfNode).d_seqNum;
+        d_nodeToPSNCtxMapVec.at(partitionId).at(selfNode).d_PSN;
     if (replicaDataRequest.endSequenceNumber() != selfPSN) {
         bmqp_ctrlmsg::ControlMessage controlMsg;
         controlMsg.rId() = message.rId();
@@ -1869,20 +1864,19 @@ void StorageManager::do_storeSelfSeq(const EventWithData& event)
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
 
-    mqbnet::ClusterNode* selfNode = d_clusterData_p->membership().selfNode();
-    NodeSeqNumContext&   nodeSeqNumCtx = d_nodeToSeqNumCtxMapVec.at(
+    mqbnet::ClusterNode* selfNode   = d_clusterData_p->membership().selfNode();
+    NodePSNContext&      nodePSNCtx = d_nodeToPSNCtxMapVec.at(
         partitionId)[selfNode];
 
     mqbs::FileStore* fs = d_fileStores[partitionId].get();
     BSLS_ASSERT_SAFE(fs);
     if (fs->isOpen()) {
-        nodeSeqNumCtx.d_seqNum.primaryLeaseId() = fs->primaryLeaseId();
-        nodeSeqNumCtx.d_seqNum.sequenceNumber() = fs->sequenceNumber();
+        nodePSNCtx.d_PSN.primaryLeaseId() = fs->primaryLeaseId();
+        nodePSNCtx.d_PSN.sequenceNumber() = fs->sequenceNumber();
     }
     else {
-        const int rc = d_recoveryManager_mp->recoverPSN(
-            &nodeSeqNumCtx.d_seqNum,
-            partitionId);
+        const int rc = d_recoveryManager_mp->recoverPSN(&nodePSNCtx.d_PSN,
+                                                        partitionId);
         if (rc != 0) {
             BMQTSK_ALARMLOG_ALARM("FILE_IO")
                 << d_clusterData_p->identity().description() << " Partition ["
@@ -1895,16 +1889,15 @@ void StorageManager::do_storeSelfSeq(const EventWithData& event)
         }
     }
 
-    nodeSeqNumCtx.d_firstSyncPointAfterRolloverSeqNum =
-        getSelfFirstSyncPointAfterRolloverSequenceNumber(partitionId);
+    nodePSNCtx.d_firstSyncPointAfterRolloverPSN =
+        getSelfFirstSyncPointAfterRolloverPSN(partitionId);
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << ": In Partition [" << partitionId << "]'s FSM, "
-                  << "storing self PSN as "
-                  << mqbs::printPSN(nodeSeqNumCtx.d_seqNum)
+                  << "storing self PSN as " << mqbs::printPSN(nodePSNCtx.d_PSN)
                   << ", first sync point after rollover as "
                   << mqbs::printPSN(
-                         nodeSeqNumCtx.d_firstSyncPointAfterRolloverSeqNum);
+                         nodePSNCtx.d_firstSyncPointAfterRolloverPSN);
 }
 
 void StorageManager::do_storePrimarySeq(const EventWithData& event)
@@ -1917,7 +1910,7 @@ void StorageManager::do_storePrimarySeq(const EventWithData& event)
 
     const PartitionFSMEventData& eventData   = eventDataVec[0];
     int                          partitionId = eventData.partitionId();
-    const bmqp_ctrlmsg::PartitionSequenceNumber& seqNum =
+    const bmqp_ctrlmsg::PartitionSequenceNumber& PSN =
         eventData.partitionSequenceNumber();
 
     BSLS_ASSERT_SAFE(0 <= partitionId &&
@@ -1930,33 +1923,33 @@ void StorageManager::do_storePrimarySeq(const EventWithData& event)
 
     // Information from 'ReplicaStateRequest' or 'PrimaryStateResponse' could
     // be stale; ignore if so.
-    bool                   hasNew = false;
-    NodeToSeqNumCtxMapIter it     = d_nodeToSeqNumCtxMapVec[partitionId].find(
+    bool                hasNew = false;
+    NodeToPSNCtxMapIter it     = d_nodeToPSNCtxMapVec[partitionId].find(
         eventData.source());
-    if (it == d_nodeToSeqNumCtxMapVec[partitionId].end()) {
-        NodeSeqNumContext nodeSeqNumContext(
-            seqNum,
-            eventData.firstSyncPointAfterRolloverSequenceNumber());
-        d_nodeToSeqNumCtxMapVec[partitionId].insert(
-            bsl::make_pair(eventData.source(), nodeSeqNumContext));
+    if (it == d_nodeToPSNCtxMapVec[partitionId].end()) {
+        NodePSNContext nodePSNContext(
+            PSN,
+            eventData.firstSyncPointAfterRolloverPSN());
+        d_nodeToPSNCtxMapVec[partitionId].insert(
+            bsl::make_pair(eventData.source(), nodePSNContext));
         hasNew = true;
     }
-    else if (seqNum > it->second.d_seqNum) {
-        it->second.d_seqNum = seqNum;
-        it->second.d_firstSyncPointAfterRolloverSeqNum =
-            eventData.firstSyncPointAfterRolloverSequenceNumber();
+    else if (PSN > it->second.d_PSN) {
+        it->second.d_PSN = PSN;
+        it->second.d_firstSyncPointAfterRolloverPSN =
+            eventData.firstSyncPointAfterRolloverPSN();
         hasNew = true;
     }
 
     if (hasNew) {
-        BALL_LOG_INFO
-            << d_clusterData_p->identity().description() << ": In Partition ["
-            << partitionId << "]'s FSM, " << "storing the PSN of "
-            << eventData.source()->nodeDescription() << " as "
-            << mqbs::printPSN(seqNum)
-            << ", first sync point after rollover PSN: "
-            << mqbs::printPSN(
-                   eventData.firstSyncPointAfterRolloverSequenceNumber());
+        BALL_LOG_INFO << d_clusterData_p->identity().description()
+                      << ": In Partition [" << partitionId << "]'s FSM, "
+                      << "storing the PSN of "
+                      << eventData.source()->nodeDescription() << " as "
+                      << mqbs::printPSN(PSN)
+                      << ", first sync point after rollover PSN: "
+                      << mqbs::printPSN(
+                             eventData.firstSyncPointAfterRolloverPSN());
     }
 }
 
@@ -1972,45 +1965,46 @@ void StorageManager::do_storeReplicaSeq(const EventWithData& event)
          cit != eventDataVec.cend();
          cit++) {
         int partitionId = cit->partitionId();
-        const bmqp_ctrlmsg::PartitionSequenceNumber& seqNum =
+        const bmqp_ctrlmsg::PartitionSequenceNumber& PSN =
             cit->partitionSequenceNumber();
 
         BSLS_ASSERT_SAFE(0 <= partitionId &&
                          partitionId < static_cast<int>(d_fileStores.size()));
         BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfPrimary());
+        BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
         BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary()->nodeId() ==
                          d_clusterData_p->membership().selfNode()->nodeId());
 
         // Information from 'PrimaryStateRequest' or 'ReplicaStateResponse'
         // could be stale; ignore if so.
-        bool                   hasNew = false;
-        NodeToSeqNumCtxMapIter it = d_nodeToSeqNumCtxMapVec[partitionId].find(
+        bool                hasNew = false;
+        NodeToPSNCtxMapIter it     = d_nodeToPSNCtxMapVec[partitionId].find(
             cit->source());
-        if (it == d_nodeToSeqNumCtxMapVec[partitionId].end()) {
-            NodeSeqNumContext nodeSeqNumContext(
-                seqNum,
-                cit->firstSyncPointAfterRolloverSequenceNumber());
-            d_nodeToSeqNumCtxMapVec[partitionId].insert(
-                bsl::make_pair(cit->source(), nodeSeqNumContext));
+        if (it == d_nodeToPSNCtxMapVec[partitionId].end()) {
+            NodePSNContext nodePSNContext(
+                PSN,
+                cit->firstSyncPointAfterRolloverPSN());
+            d_nodeToPSNCtxMapVec[partitionId].insert(
+                bsl::make_pair(cit->source(), nodePSNContext));
             hasNew = true;
         }
-        else if (seqNum > it->second.d_seqNum ||
+        else if (PSN > it->second.d_PSN ||
                  event.first == PartitionFSM::Event::e_PRIMARY_STATE_RQST) {
-            it->second.d_seqNum = seqNum;
-            it->second.d_firstSyncPointAfterRolloverSeqNum =
-                cit->firstSyncPointAfterRolloverSequenceNumber();
+            it->second.d_PSN = PSN;
+            it->second.d_firstSyncPointAfterRolloverPSN =
+                cit->firstSyncPointAfterRolloverPSN();
             hasNew = true;
         }
 
         if (hasNew) {
-            BALL_LOG_INFO
-                << d_clusterData_p->identity().description()
-                << ": In Partition [" << partitionId << "]'s FSM, "
-                << "storing the PSN of " << cit->source()->nodeDescription()
-                << " as " << mqbs::printPSN(seqNum)
-                << ", first sync point after rollover PSN: "
-                << mqbs::printPSN(
-                       cit->firstSyncPointAfterRolloverSequenceNumber());
+            BALL_LOG_INFO << d_clusterData_p->identity().description()
+                          << ": In Partition [" << partitionId << "]'s FSM, "
+                          << "storing the PSN of "
+                          << cit->source()->nodeDescription() << " as "
+                          << mqbs::printPSN(PSN)
+                          << ", first sync point after rollover PSN: "
+                          << mqbs::printPSN(
+                                 cit->firstSyncPointAfterRolloverPSN());
         }
     }
 }
@@ -2047,15 +2041,15 @@ void StorageManager::do_replicaStateRequest(const EventWithData& event)
     replicaStateRequest.partitionId() = partitionId;
 
     mqbnet::ClusterNode* selfNode = d_clusterData_p->membership().selfNode();
-    BSLS_ASSERT_SAFE(d_nodeToSeqNumCtxMapVec[partitionId].find(selfNode) !=
-                     d_nodeToSeqNumCtxMapVec[partitionId].end());
+    BSLS_ASSERT_SAFE(d_nodeToPSNCtxMapVec[partitionId].find(selfNode) !=
+                     d_nodeToPSNCtxMapVec[partitionId].end());
 
     replicaStateRequest.latestSequenceNumber() =
-        d_nodeToSeqNumCtxMapVec[partitionId][selfNode].d_seqNum;
+        d_nodeToPSNCtxMapVec[partitionId][selfNode].d_PSN;
 
     // Get own first sync point after rollover PSN
     replicaStateRequest.firstSyncPointAfterRolloverSequenceNumber() =
-        getSelfFirstSyncPointAfterRolloverSequenceNumber(partitionId);
+        getSelfFirstSyncPointAfterRolloverPSN(partitionId);
 
     contextSp->setDestinationNodes(replicas);
     contextSp->setResponseCb(
@@ -2081,6 +2075,7 @@ void StorageManager::do_replicaStateResponse(const EventWithData& event)
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
     BSLS_ASSERT_SAFE(eventData.source());
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(eventData.source()->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
 
@@ -2096,13 +2091,13 @@ void StorageManager::do_replicaStateResponse(const EventWithData& event)
 
     response.partitionId() = partitionId;
     response.latestSequenceNumber() =
-        d_nodeToSeqNumCtxMapVec[partitionId]
-                               [d_clusterData_p->membership().selfNode()]
-                                   .d_seqNum;
+        d_nodeToPSNCtxMapVec[partitionId]
+                            [d_clusterData_p->membership().selfNode()]
+                                .d_PSN;
 
     // Get own first sync point after rollover PSN
     response.firstSyncPointAfterRolloverSequenceNumber() =
-        getSelfFirstSyncPointAfterRolloverSequenceNumber(partitionId);
+        getSelfFirstSyncPointAfterRolloverPSN(partitionId);
 
     fileStore(partitionId).sendMessage(controlMsg, eventData.source());
 
@@ -2146,6 +2141,7 @@ void StorageManager::do_failureReplicaStateResponse(const EventWithData& event)
     else {
         BSLS_ASSERT_SAFE(partitionHealthState(partitionId) ==
                          PartitionFSM::State::e_REPLICA_WAITING);
+        BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
         BSLS_ASSERT_SAFE(eventData.source()->nodeId() ==
                          d_partitionInfoVec[partitionId].primary()->nodeId());
 
@@ -2283,6 +2279,7 @@ void StorageManager::do_primaryStateRequest(const EventWithData& event)
 
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(primary->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
     BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfReplica());
@@ -2303,13 +2300,13 @@ void StorageManager::do_primaryStateRequest(const EventWithData& event)
 
     primaryStateRequest.partitionId() = partitionId;
     primaryStateRequest.latestSequenceNumber() =
-        d_nodeToSeqNumCtxMapVec[partitionId]
-                               [d_clusterData_p->membership().selfNode()]
-                                   .d_seqNum;
+        d_nodeToPSNCtxMapVec[partitionId]
+                            [d_clusterData_p->membership().selfNode()]
+                                .d_PSN;
 
     // Get own first sync point after rollover PSN
     primaryStateRequest.firstSyncPointAfterRolloverSequenceNumber() =
-        getSelfFirstSyncPointAfterRolloverSequenceNumber(partitionId);
+        getSelfFirstSyncPointAfterRolloverPSN(partitionId);
 
     request->setResponseCb(
         bdlf::BindUtil::bind(&StorageManager::processPrimaryStateResponse,
@@ -2361,13 +2358,13 @@ void StorageManager::do_primaryStateResponse(const EventWithData& event)
 
     response.partitionId() = partitionId;
     response.latestSequenceNumber() =
-        d_nodeToSeqNumCtxMapVec[partitionId]
-                               [d_clusterData_p->membership().selfNode()]
-                                   .d_seqNum;
+        d_nodeToPSNCtxMapVec[partitionId]
+                            [d_clusterData_p->membership().selfNode()]
+                                .d_PSN;
 
     // Get own first sync point after rollover PSN
     response.firstSyncPointAfterRolloverSequenceNumber() =
-        getSelfFirstSyncPointAfterRolloverSequenceNumber(partitionId);
+        getSelfFirstSyncPointAfterRolloverPSN(partitionId);
 
     fileStore(partitionId).sendMessage(controlMsg, eventData.source());
 
@@ -2431,6 +2428,7 @@ void StorageManager::do_replicaDataResponsePush(const EventWithData& event)
     BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfReplica());
 
     BSLS_ASSERT_SAFE(destNode);
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(destNode->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
 
@@ -2507,11 +2505,11 @@ void StorageManager::do_replicaDataRequestPull(const EventWithData& event)
         bmqp_ctrlmsg::ReplicaDataType::E_PULL;
     replicaDataRequest.partitionId() = partitionId;
     replicaDataRequest.beginSequenceNumber() =
-        d_nodeToSeqNumCtxMapVec[partitionId]
-                               [d_clusterData_p->membership().selfNode()]
-                                   .d_seqNum;
+        d_nodeToPSNCtxMapVec[partitionId]
+                            [d_clusterData_p->membership().selfNode()]
+                                .d_PSN;
     replicaDataRequest.endSequenceNumber() =
-        d_nodeToSeqNumCtxMapVec[partitionId][destNode].d_seqNum;
+        d_nodeToPSNCtxMapVec[partitionId][destNode].d_PSN;
 
     request->setResponseCb(
         bdlf::BindUtil::bind(&StorageManager::processReplicaDataResponse,
@@ -2553,6 +2551,7 @@ void StorageManager::do_replicaDataResponsePull(const EventWithData& event)
 
     mqbnet::ClusterNode* destNode = eventData.source();
     BSLS_ASSERT_SAFE(destNode);
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(destNode->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
 
@@ -2600,6 +2599,7 @@ void StorageManager::do_failureReplicaDataResponsePull(
     mqbnet::ClusterNode* destNode = eventData.source();
 
     BSLS_ASSERT_SAFE(destNode);
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(destNode->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
     // TODO Continue verifying here
@@ -2698,6 +2698,7 @@ void StorageManager::do_sendDataToPrimary(const EventWithData& event)
 
     mqbnet::ClusterNode* const destNode = eventData.source();
     BSLS_ASSERT_SAFE(destNode->nodeId() != selfNode->nodeId());
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(destNode->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
 
@@ -2706,7 +2707,7 @@ void StorageManager::do_sendDataToPrimary(const EventWithData& event)
     const bmqp_ctrlmsg::PartitionSequenceNumber endSeqNum =
         eventData.partitionSeqNumDataRange().second;
     BSLS_ASSERT_SAFE(endSeqNum ==
-                     d_nodeToSeqNumCtxMapVec[partitionId][selfNode].d_seqNum);
+                     d_nodeToPSNCtxMapVec[partitionId][selfNode].d_PSN);
 
     const int status = d_recoveryManager_mp->processSendDataChunks(partitionId,
                                                                    destNode,
@@ -2763,7 +2764,6 @@ void StorageManager::do_bufferLiveData(const EventWithData& event)
     BSLS_ASSERT_SAFE(rawEvent.isStorageEvent());
 
     const PartitionInfo& pinfo = d_partitionInfoVec[partitionId];
-    BSLS_ASSERT_SAFE(pinfo.primary() == source);
 
     bool skipAlarm = partitionHealthState(partitionId) ==
                      PartitionFSM::State::e_UNKNOWN;
@@ -3010,7 +3010,7 @@ void StorageManager::do_cleanupMetadata(const EventWithData& event)
         d_clusterData_p->identity().description(),
         partitionId);
 
-    d_nodeToSeqNumCtxMapVec[partitionId].clear();
+    d_nodeToPSNCtxMapVec[partitionId].clear();
     d_numReplicaDataResponsesReceivedVec[partitionId] = 0;
     d_recoveryManager_mp->resetReceiveDataCtx(partitionId);
 }
@@ -3033,9 +3033,9 @@ void StorageManager::do_setExpectedDataChunkRange(const EventWithData& event)
         // Self Primary is expecting data from highest seq num replica.
 
         const bmqp_ctrlmsg::PartitionSequenceNumber selfSeqNum =
-            d_nodeToSeqNumCtxMapVec.at(partitionId)
+            d_nodeToPSNCtxMapVec.at(partitionId)
                 .at(d_clusterData_p->membership().selfNode())
-                .d_seqNum;
+                .d_PSN;
 
         d_recoveryManager_mp->setExpectedDataChunkRange(
             partitionId,
@@ -3140,13 +3140,14 @@ void StorageManager::do_updateStorage(const EventWithData& event)
     const PartitionFSMEventData& eventData   = eventDataVec[0];
     const int                    partitionId = eventData.partitionId();
     mqbnet::ClusterNode*         source      = eventData.source();
+    BSLS_ASSERT_SAFE(source);
 
     bmqp::Event rawEvent(eventData.storageEvent(), d_allocator_p);
     BSLS_ASSERT_SAFE(rawEvent.isPartitionSyncEvent());
 
     // A partition-sync event is received in one of the following
-    // scenarios: 1) The chosen syncing peer ('source') sends missing
-    // storage events to
+    // scenarios:
+    // 1) The chosen syncing peer ('source') sends missing storage events to
     //    the newly chosen primary (self).
     // 2) A newly chosen primary ('source') sends missing storage events to
     //    replica (self).
@@ -3188,11 +3189,10 @@ void StorageManager::do_updateStorage(const EventWithData& event)
                      static_cast<unsigned int>(partitionId));
 
     // Get first sync point after rollover PSN from source node.
-    NodeToSeqNumCtxMapIter it = d_nodeToSeqNumCtxMapVec[partitionId].find(
-        source);
-    BSLS_ASSERT_SAFE(it != d_nodeToSeqNumCtxMapVec[partitionId].end());
+    NodeToPSNCtxMapIter it = d_nodeToPSNCtxMapVec[partitionId].find(source);
+    BSLS_ASSERT_SAFE(it != d_nodeToPSNCtxMapVec[partitionId].end());
     bmqp_ctrlmsg::PartitionSequenceNumber firstSyncPointAfterRolloverSeqNum =
-        it->second.d_firstSyncPointAfterRolloverSeqNum;
+        it->second.d_firstSyncPointAfterRolloverPSN;
 
     mqbs::FileStore* fs =
         d_fileStores[static_cast<unsigned int>(partitionId)].get();
@@ -3249,17 +3249,17 @@ void StorageManager::do_primaryRemoveStorageIfNeeded(
     const int                    partitionId = eventData.partitionId();
     mqbnet::ClusterNode* highestSeqNumNode   = eventData.highestSeqNumNode();
 
-    NodeSeqNumContext& selfNodeContext =
-        d_nodeToSeqNumCtxMapVec.at(partitionId)
+    NodePSNContext& selfNodeContext =
+        d_nodeToPSNCtxMapVec.at(partitionId)
             .at(d_clusterData_p->membership().selfNode());
 
     const bmqp_ctrlmsg::PartitionSequenceNumber&
         selfFirstSyncAfterRolloverSeqNum =
-            selfNodeContext.d_firstSyncPointAfterRolloverSeqNum;
+            selfNodeContext.d_firstSyncPointAfterRolloverPSN;
 
     // Check if self primary missed rollover
     if (selfFirstSyncAfterRolloverSeqNum !=
-        eventData.firstSyncPointAfterRolloverSequenceNumber()) {
+        eventData.firstSyncPointAfterRolloverPSN()) {
         BALL_LOG_WARN
             << d_clusterData_p->identity().description() << " Partition ["
             << partitionId << "]: "
@@ -3275,14 +3275,24 @@ void StorageManager::do_primaryRemoveStorageIfNeeded(
         BSLS_ASSERT_SAFE(!fs->isOpen());
 
         // Remove file set.
-        d_recoveryManager_mp->deprecateFileSet(partitionId);
+        int rc = d_recoveryManager_mp->deprecateFileSet(partitionId);
+        if (rc != 0) {
+            BMQTSK_ALARMLOG_ALARM("FILE_IO")
+                << d_clusterData_p->identity().description() << " Partition ["
+                << partitionId
+                << "]: " << "Error while deprecating file set, rc: " << rc
+                << BMQTSK_ALARMLOG_END;
+
+            mqbu::ExitUtil::terminate(
+                mqbu::ExitCode::e_RECOVERY_FAILURE);  // EXIT
+        }
 
         // Creating new file set will populate the file headers.  We need to do
         // this before receiving data chunks from the recovery peer.
         bmqu::MemOutStream errorDesc;
-        int rc = d_recoveryManager_mp->createRecoveryFileSet(errorDesc,
-                                                             fs,
-                                                             partitionId);
+        rc = d_recoveryManager_mp->createRecoveryFileSet(errorDesc,
+                                                         fs,
+                                                         partitionId);
         if (rc != 0) {
             BMQTSK_ALARMLOG_ALARM("FILE_IO")
                 << d_clusterData_p->identity().description() << " Partition ["
@@ -3295,7 +3305,7 @@ void StorageManager::do_primaryRemoveStorageIfNeeded(
         }
         // Reset self PSN to request whole storage data from
         // the recovery peer.
-        selfNodeContext.d_seqNum = bmqp_ctrlmsg::PartitionSequenceNumber();
+        selfNodeContext.d_PSN = bmqp_ctrlmsg::PartitionSequenceNumber();
     }
 }
 
@@ -3315,6 +3325,7 @@ void StorageManager::do_removeStorageAndSendReplicaDataDropResponse(
     BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfReplica());
     mqbnet::ClusterNode* destNode = eventData.source();
     BSLS_ASSERT_SAFE(destNode);
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(destNode->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
 
@@ -3330,8 +3341,9 @@ void StorageManager::do_removeStorageAndSendReplicaDataDropResponse(
 
     bool deprecateSuccess = false;
     if (fs->isOpen()) {
-        fs->close(false, true);  // flush, archive
-        deprecateSuccess = true;
+        if (0 == fs->close(false, true)) {  // flush, archive
+            deprecateSuccess = true;
+        }
     }
     else {
         if (0 == d_recoveryManager_mp->deprecateFileSet(partitionId)) {
@@ -3470,13 +3482,13 @@ void StorageManager::do_checkQuorumSeq(const EventWithData& event)
 
     BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfPrimary());
 
-    if (d_nodeToSeqNumCtxMapVec[partitionId].size() >= getSeqNumQuorum()) {
+    if (d_nodeToPSNCtxMapVec[partitionId].size() >= getSeqNumQuorum()) {
         // If we have a quorum of Replica PSNs (including self PSN)
 
         BALL_LOG_INFO << d_clusterData_p->identity().description()
                       << " Partition [" << partitionId
                       << "]: " << "Achieved a quorum of PSNs with a count of "
-                      << d_nodeToSeqNumCtxMapVec[partitionId].size();
+                      << d_nodeToPSNCtxMapVec[partitionId].size();
 
         enqueuePartitionFSMEvent(PartitionFSM::Event::e_QUORUM_REPLICA_SEQ,
                                  event.second);
@@ -3497,31 +3509,31 @@ void StorageManager::do_findHighestSeq(const EventWithData& event)
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
     BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfPrimary());
-    BSLS_ASSERT_SAFE(d_nodeToSeqNumCtxMapVec[partitionId].size() >=
+    BSLS_ASSERT_SAFE(d_nodeToPSNCtxMapVec[partitionId].size() >=
                      getSeqNumQuorum());
 
-    const NodeToSeqNumCtxMap& nodeToSeqNumCtxMap = d_nodeToSeqNumCtxMapVec.at(
+    const NodeToPSNCtxMap& nodeToPSNCtxMap = d_nodeToPSNCtxMapVec.at(
         partitionId);
 
     // Initialize highest PSN with self/primary PSN.
     mqbnet::ClusterNode* highestPSNNode =
         d_clusterData_p->membership().selfNode();
     bmqp_ctrlmsg::PartitionSequenceNumber highestPSN(
-        nodeToSeqNumCtxMap.at(highestPSNNode).d_seqNum);
+        nodeToPSNCtxMap.at(highestPSNNode).d_PSN);
     bmqp_ctrlmsg::PartitionSequenceNumber
-        highestPartitionFirstSyncPointAfterRolloverSeqNum(
-            nodeToSeqNumCtxMap.at(highestPSNNode)
-                .d_firstSyncPointAfterRolloverSeqNum);
+        highestPartitionFirstSyncPointAfterRolloverPSN(
+            nodeToPSNCtxMap.at(highestPSNNode)
+                .d_firstSyncPointAfterRolloverPSN);
 
     // Find out highest PSN and number of up-to-date nodes.
-    for (NodeToSeqNumCtxMapCIter cit = nodeToSeqNumCtxMap.cbegin();
-         cit != nodeToSeqNumCtxMap.cend();
+    for (NodeToPSNCtxMapCIter cit = nodeToPSNCtxMap.cbegin();
+         cit != nodeToPSNCtxMap.cend();
          cit++) {
-        if (cit->second.d_seqNum > highestPSN) {
+        if (cit->second.d_PSN > highestPSN) {
             highestPSNNode = cit->first;
-            highestPSN     = cit->second.d_seqNum;
-            highestPartitionFirstSyncPointAfterRolloverSeqNum =
-                cit->second.d_firstSyncPointAfterRolloverSeqNum;
+            highestPSN     = cit->second.d_PSN;
+            highestPartitionFirstSyncPointAfterRolloverPSN =
+                cit->second.d_firstSyncPointAfterRolloverPSN;
         }
     }
 
@@ -3539,7 +3551,7 @@ void StorageManager::do_findHighestSeq(const EventWithData& event)
         d_clusterData_p->membership().selfNode(),
         primaryLeaseId,
         highestPSN,
-        highestPartitionFirstSyncPointAfterRolloverSeqNum,
+        highestPartitionFirstSyncPointAfterRolloverPSN,
         highestPSNNode);
 
     if (selfHighestPSN) {
@@ -3565,12 +3577,13 @@ void StorageManager::do_flagFailedReplicaSeq(const EventWithData& event)
 
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
+    BSLS_ASSERT_SAFE(d_partitionInfoVec[partitionId].primary());
     BSLS_ASSERT_SAFE(d_clusterData_p->membership().selfNode()->nodeId() ==
                      d_partitionInfoVec[partitionId].primary()->nodeId());
     BSLS_ASSERT_SAFE(d_clusterData_p->membership().selfNode()->nodeId() !=
                      eventData.source()->nodeId());
 
-    d_nodeToSeqNumCtxMapVec[partitionId].erase(eventData.source());
+    d_nodeToPSNCtxMapVec[partitionId].erase(eventData.source());
 }
 
 void StorageManager::do_transitionToActivePrimary(const EventWithData& event)
@@ -3731,7 +3744,7 @@ StorageManager::StorageManager(
 , d_numPartitionsRecoveredFully(0)
 , d_numPartitionsRecoveredQueues(0)
 , d_recoveryStartTimes(allocator)
-, d_nodeToSeqNumCtxMapVec(allocator)
+, d_nodeToPSNCtxMapVec(allocator)
 , d_numReplicaDataResponsesReceivedVec(allocator)
 , d_isQueueKeyInfoMapVecInitialized(false)
 , d_queueKeyInfoMapVec(allocator)
@@ -3766,7 +3779,7 @@ StorageManager::StorageManager(
     d_partitionInfoVec.resize(partitionCfg.numPartitions());
 
     d_recoveryStartTimes.resize(partitionCfg.numPartitions());
-    d_nodeToSeqNumCtxMapVec.resize(partitionCfg.numPartitions());
+    d_nodeToPSNCtxMapVec.resize(partitionCfg.numPartitions());
     d_numReplicaDataResponsesReceivedVec.resize(partitionCfg.numPartitions());
     d_queueKeyInfoMapVec.resize(partitionCfg.numPartitions());
 
@@ -3899,18 +3912,6 @@ int StorageManager::start(bsl::ostream& errorDescription)
         return rc * 10 + rc_NOT_ENOUGH_DISK_SPACE;  // RETURN
     }
 
-    // Schedule a periodic event (every minute) which monitors storage
-    // (disk space, archive clean up, etc).
-    d_clusterData_p->scheduler().scheduleRecurringEvent(
-        &d_storageMonitorEventHandle,
-        bsls::TimeInterval(bdlt::TimeUnitRatio::k_SECONDS_PER_MINUTE),
-        bdlf::BindUtil::bind(&StorageUtil::storageMonitorCb,
-                             &d_lowDiskspaceWarning,
-                             &d_isStarted,
-                             d_minimumRequiredDiskSpace,
-                             d_clusterData_p->identity().description(),
-                             d_clusterConfig.partitionConfig()));
-
     rc = StorageUtil::assignPartitionDispatcherThreads(
         &d_miscWorkThreadPool,
         d_clusterData_p,
@@ -3980,6 +3981,18 @@ int StorageManager::start(bsl::ostream& errorDescription)
                                          this,
                                          static_cast<int>(i)));  // partitionId
     }
+
+    // Schedule a periodic event (every minute) which monitors storage
+    // (disk space, archive clean up, etc).
+    d_clusterData_p->scheduler().scheduleRecurringEvent(
+        &d_storageMonitorEventHandle,
+        bsls::TimeInterval(bdlt::TimeUnitRatio::k_SECONDS_PER_MINUTE),
+        bdlf::BindUtil::bind(&StorageUtil::storageMonitorCb,
+                             &d_lowDiskspaceWarning,
+                             &d_isStarted,
+                             d_minimumRequiredDiskSpace,
+                             d_clusterData_p->identity().description(),
+                             d_clusterConfig.partitionConfig()));
 
     d_isStarted = true;
     return rc_SUCCESS;
@@ -4063,13 +4076,13 @@ void StorageManager::initializeQueueKeyInfoMap(
             BSLS_ASSERT_SAFE(cit->second);
             const ClusterStateQueueInfo& csQinfo = *(cit->second);
 
-            mqbs::DataStoreConfigQueueInfo qinfo(true);
+            mqbs::DataStoreConfigQueueInfo qinfo;
             qinfo.setCanonicalQueueUri(csQinfo.uri().asString());
             qinfo.setPartitionId(csQinfo.partitionId());
             for (AppInfosCIter appIdCit = csQinfo.appInfos().cbegin();
                  appIdCit != csQinfo.appInfos().cend();
                  ++appIdCit) {
-                qinfo.addAppInfo(appIdCit->first, appIdCit->second);
+                qinfo.addAppInfo(appIdCit->first, appIdCit->second, true);
             }
 
             d_queueKeyInfoMapVec.at(csQinfo.partitionId())
@@ -4169,7 +4182,7 @@ void StorageManager::resetQueue(const bmqt::Uri& uri,
         bdlf::BindUtil::bind(&StorageUtil::resetQueueDispatched,
                              &d_storages[partitionId],
                              d_storageLockVec[partitionId].get(),
-                             fs->description(),
+                             bsl::string(fs->description(), d_allocator_p),
                              uri,
                              queue_sp));
 
@@ -4738,8 +4751,8 @@ void StorageManager::applyForEachQueue(int                 partitionId,
     fs.applyForEachQueue(functor);
 }
 
-int StorageManager::processCommand(mqbcmd::StorageResult*        result,
-                                   const mqbcmd::StorageCommand& command)
+void StorageManager::processCommand(mqbcmd::StorageResult*        result,
+                                    const mqbcmd::StorageCommand& command)
 {
     // executed by cluster *DISPATCHER* thread
 
@@ -4750,19 +4763,18 @@ int StorageManager::processCommand(mqbcmd::StorageResult*        result,
         result->makeError();
         result->error().message() = "StorageManager not yet started or is "
                                     "stopping.\n\n";
-        return -1;  // RETURN
+        return;  // RETURN
     }
 
-    return StorageUtil::processCommand(
-        result,
-        &d_fileStores,
-        &d_storages,
-        &d_storageLockVec,
-        d_domainFactory_p,
-        &d_replicationFactor,
-        command,
-        d_clusterConfig.partitionConfig().location(),
-        d_allocator_p);
+    StorageUtil::processCommand(result,
+                                &d_fileStores,
+                                &d_storages,
+                                &d_storageLockVec,
+                                d_domainFactory_p,
+                                &d_replicationFactor,
+                                command,
+                                d_clusterConfig.partitionConfig().location(),
+                                d_allocator_p);
 }
 
 void StorageManager::gcUnrecognizedDomainQueues()
@@ -4831,8 +4843,7 @@ mqbs::FileStore& StorageManager::fileStore(int partitionId) const
 }
 
 const bmqp_ctrlmsg::PartitionSequenceNumber
-StorageManager::getSelfFirstSyncPointAfterRolloverSequenceNumber(
-    int partitionId) const
+StorageManager::getSelfFirstSyncPointAfterRolloverPSN(int partitionId) const
 {
     // executed by the *QUEUE DISPATCHER* thread associated with the
     // paritionId

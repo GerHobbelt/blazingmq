@@ -415,9 +415,9 @@ int StorageUtil::updateQueuePrimaryRaw(mqbs::ReplicatedStorage* storage,
 }
 
 int StorageUtil::addVirtualStoragesInternal(mqbs::ReplicatedStorage* storage,
-                                            const AppInfos&    appIdKeyPairs,
-                                            const bsl::string& partitionDesc,
-                                            bool               isFanout)
+                                            const AppInfos&  appIdKeyPairs,
+                                            bsl::string_view partitionDesc,
+                                            bool             isFanout)
 {
     // executed by *QUEUE_DISPATCHER* thread with the specified 'partitionId'
 
@@ -582,9 +582,7 @@ void StorageUtil::loadStorages(bsl::vector<mqbcmd::StorageQueueInfo>* storages,
 void StorageUtil::doRollover(mqbcmd::StorageResult* result,
                              FileStores*            fileStores,
                              int                    partitionId,
-                             bslma::Allocator*      allocator
-
-)
+                             bslma::Allocator*      allocator)
 {
     // executed by cluster *DISPATCHER* thread
 
@@ -1263,7 +1261,7 @@ bool StorageUtil::validatePartitionSyncEvent(
                 << clusterData.identity().description()
                 << ": Received partition-sync event from node with "
                 << source->nodeDescription()
-                << " with different partitionIds: " << partitionId << "vs "
+                << " with different partitionIds: " << partitionId << " vs "
                 << header.partitionId() << ". Ignoring this entire event."
                 << BMQTSK_ALARMLOG_END;
             return false;  // RETURN
@@ -1658,7 +1656,7 @@ void StorageUtil::recoveredQueuesCb(
                                  bdlf::PlaceHolders::_2,  // domain*
                                  &(dit->second),
                                  &latch,
-                                 fs->description(),
+                                 fs,
                                  dit->first));
     }
 
@@ -1854,6 +1852,16 @@ void StorageUtil::recoveredQueuesCb(
                 << BMQTSK_ALARMLOG_END;
             mqbu::ExitUtil::terminate(mqbu::ExitCode::e_RECOVERY_FAILURE);
             // EXIT
+        }
+
+        if (!qit->second.isRecorded()) {
+            BALL_LOG_INFO << clusterDescription << " Partition ["
+                          << partitionId
+                          << "]: did not recover QueueCreationRecord and "
+                             "skips creating storage(s) for queueUri ["
+                          << queueUri << "], queueKey [" << queueKey << "].";
+
+            continue;  // CONTINUE
         }
 
         StorageSp rs_sp;
@@ -2315,7 +2323,7 @@ void StorageUtil::stop(FileStores*        fileStores,
                   << ": Enqueuing event to close FileStores.";
 
     bslmt::Latch       latch(fileStores->size());
-    bsls::Types::Int64 shutdownStartTime = bmqsys::Time::highResolutionTimer();
+    bsls::Types::Int64 shutdownStartTime = bmqu::Time::highResolutionTimer();
     for (unsigned int i = 0; i < fileStores->size(); ++i) {
         const bsl::shared_ptr<mqbs::FileStore>& fs = (*fileStores)[i];
         // 'fs' could be null because partition might not have been created at
@@ -2334,7 +2342,7 @@ void StorageUtil::stop(FileStores*        fileStores,
     BALL_LOG_INFO << clusterDescription
                   << ": About to wait for partition shutdown to complete.";
     latch.wait();
-    bsls::Types::Int64 shutdownEndTime = bmqsys::Time::highResolutionTimer();
+    bsls::Types::Int64 shutdownEndTime = bmqu::Time::highResolutionTimer();
 
     BALL_LOG_INFO
         << clusterDescription
@@ -2848,7 +2856,7 @@ void StorageUtil::createQueueStorageAsReplica(
                                  bdlf::PlaceHolders::_2,  // domain*
                                  &domain,
                                  &latch,
-                                 fs->description(),
+                                 fs,
                                  uri.qualifiedDomain()));
         latch.wait();
 
@@ -3040,7 +3048,7 @@ void StorageUtil::updateQueueStorageDispatched(
     StorageSpMap*           storageMap,
     bslmt::Mutex*           storagesLock,
     mqbi::DomainFactory*    domainFactory,
-    const bsl::string&      description,
+    bsl::string_view        description,
     const bmqt::Uri&        uri,
     const mqbu::StorageKey& queueKey,
     const AppInfos&         appIdKeyPairs,
@@ -3577,7 +3585,7 @@ void StorageUtil::purgeQueueDispatched(
     queueDetails.numBytesPurged()    = numBytes;
 }
 
-int StorageUtil::processCommand(
+void StorageUtil::processCommand(
     mqbcmd::StorageResult*                       result,
     FileStores*                                  fileStores,
     StorageSpMapVec*                             storageMapVec,
@@ -3600,7 +3608,7 @@ int StorageUtil::processCommand(
 
     if (command.isSummaryValue()) {
         loadStorageSummary(result, *fileStores, partitionLocation);
-        return 0;  // RETURN
+        return;  // RETURN
     }
     else if (command.isPartitionValue()) {
         const int partitionId = command.partition().partitionId();
@@ -3610,7 +3618,7 @@ int StorageUtil::processCommand(
             bmqu::MemOutStream                   os(&localAllocator);
             os << "Too high partitionId value: '" << partitionId << "'";
             result->makeError().message() = os.str();
-            return -1;  // RETURN
+            return;  // RETURN
         }
 
         if (partitionId < -1) {
@@ -3618,14 +3626,14 @@ int StorageUtil::processCommand(
             bmqu::MemOutStream                   os(&localAllocator);
             os << "Too low partitionId value: '" << partitionId << "'";
             result->makeError().message() = os.str();
-            return -1;  // RETURN
+            return;  // RETURN
         }
 
         // PartitionId = -1 is only allowed for rollover command.
         // In this case rollover is performed on all partitions.
         if (command.partition().command().isRolloverValue()) {
             doRollover(result, fileStores, partitionId, allocator);
-            return 0;  // RETURN
+            return;  // RETURN
         }
 
         if (partitionId < 0) {
@@ -3633,7 +3641,7 @@ int StorageUtil::processCommand(
             bmqu::MemOutStream                   os(&localAllocator);
             os << "Too low partitionId value: '" << partitionId << "'";
             result->makeError().message() = os.str();
-            return -1;  // RETURN
+            return;  // RETURN
         }
 
         if (command.partition().command().isSummaryValue()) {
@@ -3641,7 +3649,7 @@ int StorageUtil::processCommand(
                                         fileStores,
                                         partitionId,
                                         partitionLocation);
-            return 0;  // RETURN
+            return;  // RETURN
         }
 
         const bool isAvailable = command.partition().command().isEnableValue();
@@ -3655,7 +3663,7 @@ int StorageUtil::processCommand(
                                  isAvailable));
         // We don't need to wait for the completion of above command.
         result->makeSuccess();
-        return 0;  // RETURN
+        return;  // RETURN
     }
     else if (command.isDomainValue()) {
         if (!domainFactory->getDomain(command.domain().name())) {
@@ -3663,7 +3671,7 @@ int StorageUtil::processCommand(
             bmqu::MemOutStream                   os(&localAllocator);
             os << "Unknown domain '" << command.domain().name() << "'";
             result->makeError().message() = os.str();
-            return -1;  // RETURN
+            return;  // RETURN
         }
         if (command.domain().command().isQueueStatusValue()) {
             mqbcmd::StorageContent& storageContent =
@@ -3671,7 +3679,7 @@ int StorageUtil::processCommand(
             loadStorages(&storageContent.storages(),
                          command.domain().name(),
                          *fileStores);
-            return 0;  // RETURN
+            return;  // RETURN
         }
         else if (command.domain().command().isPurgeValue()) {
             bsl::vector<bsl::vector<mqbcmd::PurgeQueueResult> >
@@ -3704,7 +3712,7 @@ int StorageUtil::processCommand(
                                              purgedQs.end());
             }
 
-            return 0;  // RETURN
+            return;  // RETURN
         }
     }
     else if (command.isQueueValue()) {
@@ -3730,7 +3738,7 @@ int StorageUtil::processCommand(
             bmqu::MemOutStream                   os(&localAllocator);
             os << "Queue was not found in a storage '" << uri << "'";
             result->makeError().message() = os.str();
-            return -1;  // RETURN
+            return;  // RETURN
         }
 
         // Empty string means all appIds, however, for the command, we require
@@ -3756,35 +3764,34 @@ int StorageUtil::processCommand(
         result->makePurgedQueues();
         result->purgedQueues().queues().push_back(purgedQueueResult);
 
-        return 0;  // RETURN
+        return;  // RETURN
     }
     else if (command.isReplicationValue()) {
         mqbcmd::ReplicationResult replicationResult;
-        const int rc = processReplicationCommand(&replicationResult,
-                                                 replicationFactor,
-                                                 fileStores,
-                                                 command.replication());
+        processReplicationCommand(&replicationResult,
+                                  replicationFactor,
+                                  fileStores,
+                                  command.replication());
         if (replicationResult.isErrorValue()) {
             result->makeError(replicationResult.error());
         }
         else {
             result->makeReplicationResult(replicationResult);
         }
-        return rc;  // RETURN
+        return;  // RETURN
     }
 
     bdlma::LocalSequentialAllocator<256> localAllocator(allocator);
     bmqu::MemOutStream                   os(&localAllocator);
     os << "Unknown command '" << command << "'";
     result->makeError().message() = os.str();
-    return -1;
 }
 
 void StorageUtil::onDomain(const bmqp_ctrlmsg::Status& status,
                            mqbi::Domain*               domain,
                            mqbi::Domain**              out,
                            bslmt::Latch*               latch,
-                           const bsl::string&          description,
+                           const mqbs::FileStore*      fs,
                            const bsl::string&          domainName)
 {
     // executed by *ANY* thread
@@ -3792,13 +3799,15 @@ void StorageUtil::onDomain(const bmqp_ctrlmsg::Status& status,
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(latch);
     BSLS_ASSERT_SAFE(out);
+    BSLS_ASSERT_SAFE(fs);
 
     if (bmqp_ctrlmsg::StatusCategory::E_SUCCESS != status.category()) {
         BSLS_ASSERT_SAFE(0 == domain);
         *out = 0;
 
-        BALL_LOG_ERROR << description << ": Failed to create domain for ["
-                       << domainName << "], reason: " << status;
+        BALL_LOG_ERROR << fs->description()
+                       << ": Failed to create domain for [" << domainName
+                       << "], reason: " << status;
     }
     else {
         BSLS_ASSERT_SAFE(domain);

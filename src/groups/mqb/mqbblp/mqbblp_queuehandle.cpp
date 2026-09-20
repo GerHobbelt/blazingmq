@@ -35,10 +35,10 @@
 #include <bmqt_uri.h>
 
 #include <bmqc_orderedhashmap.h>
-#include <bmqsys_time.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_outstreamformatsaver.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <ball_logthrottle.h>
@@ -437,7 +437,7 @@ mqbu::ResourceUsageMonitorStateTransition::Enum QueueHandle::updateMonitor(
     //       overflow and the update actually increments by a very large
     //       value
 
-    const bsls::Types::Int64 timeDelta = bmqsys::Time::highResolutionTimer() -
+    const bsls::Types::Int64 timeDelta = bmqu::Time::highResolutionTimer() -
                                          it->second.d_timeStamp;
     BSLS_ASSERT_SAFE(timeDelta >= 0);
 
@@ -961,7 +961,7 @@ void QueueHandle::deliverMessage(
 
     const unsigned int msgSize = iter.attributes().appDataLen();
     bmqp::Protocol::SubQueueInfosArray targetSubscriptions;
-    bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
+    bsls::Types::Int64                 now = bmqu::Time::highResolutionTimer();
     for (size_t i = 0; i < subscriptions.size(); ++i) {
         unsigned int          subscriptionId = subscriptions[i].id();
         const SubscriptionSp& subscription   = d_subscriptions[subscriptionId];
@@ -1110,7 +1110,6 @@ void QueueHandle::configureDispatched(
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_queue_sp->inDispatcherThread());
-    BSLS_ASSERT_SAFE(d_haveClient);
 
     BALL_LOG_INFO << "Client [" << d_clientContext_sp->description()
                   << "] requested to configure queue [" << d_queue_sp->uri()
@@ -1118,7 +1117,24 @@ void QueueHandle::configureDispatched(
                   << ", appId: " << streamParameters.appId()
                   << "] with streamParameters: " << streamParameters;
 
-    d_queue_sp->configureHandle(this, streamParameters, configuredCb);
+    if (BSLS_PERFORMANCEHINT_PREDICT_LIKELY(d_haveClient)) {
+        d_queue_sp->configureHandle(this, streamParameters, configuredCb);
+    }
+    else {
+        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
+
+        BALL_LOG_ERROR << "#CLIENT_IMPROPER_BEHAVIOR "
+                       << "Attempting to configure handle [" << this
+                       << "] without a client, queue '" << d_queue_sp->uri()
+                       << "', stream params: [" << streamParameters << "].";
+
+        bmqp_ctrlmsg::Status status(d_allocator_p);
+        status.category() = bmqp_ctrlmsg::StatusCategory::E_UNKNOWN;
+        status.code()     = -1;
+        status.message()  = "Attempting to configure handle without a client";
+
+        configuredCb(status, streamParameters);
+    }
 }
 
 void QueueHandle::deconfigureAll(

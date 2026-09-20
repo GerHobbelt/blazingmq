@@ -154,261 +154,26 @@ int RecoveryManager::deprecateFileSet(int partitionId)
     // PRECONDITIONS
     validatePartitionId(partitionId);
 
-    enum rcEnum { rc_SUCCESS = 0, rc_FAILURE = 1 };
+    enum rcEnum {
+        rc_SUCCESS          = 0,
+        rc_FD_CLOSE_FAILURE = -1,
+        rc_MOVE_FAILURE     = -2
+    };
 
-    int rcFinal = rc_SUCCESS;
-
-    RecoveryContext&   recoveryCtx = d_recoveryContextVec[partitionId];
-    bmqu::MemOutStream errorDesc;
-    int                rc = -1;
-    if (recoveryCtx.d_mappedJournalFd.isValid()) {
-        rc = mqbs::FileSystemUtil::truncate(&recoveryCtx.d_mappedJournalFd,
-                                            recoveryCtx.d_journalFilePosition,
-                                            errorDesc);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to truncate journal file ["
-                << recoveryCtx.d_recoveryFileSet.journalFile()
-                << "], rc: " << rc << ", error: " << errorDesc.str()
-                << BMQTSK_ALARMLOG_END;
-            errorDesc.reset();
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Truncated journal file ["
-                          << recoveryCtx.d_recoveryFileSet.journalFile()
-                          << "] to position ["
-                          << recoveryCtx.d_journalFilePosition << "].";
-        }
-
-        rc = mqbs::FileSystemUtil::flush(
-            recoveryCtx.d_mappedJournalFd.mapping(),
-            recoveryCtx.d_journalFilePosition,
-            errorDesc);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to flush journal file ["
-                << recoveryCtx.d_recoveryFileSet.journalFile()
-                << "], rc: " << rc << ", error: " << errorDesc.str()
-                << BMQTSK_ALARMLOG_END;
-            errorDesc.reset();
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Flushed journal file ["
-                          << recoveryCtx.d_recoveryFileSet.journalFile()
-                          << "] up to position ["
-                          << recoveryCtx.d_journalFilePosition << "].";
-        }
-
-        rc = mqbs::FileSystemUtil::close(&recoveryCtx.d_mappedJournalFd);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to close journal file ["
-                << recoveryCtx.d_recoveryFileSet.journalFile()
-                << "], rc: " << rc << BMQTSK_ALARMLOG_END;
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Closed journal file ["
-                          << recoveryCtx.d_recoveryFileSet.journalFile()
-                          << "].";
-        }
+    int rc = closeRecoveryFileSet(partitionId);
+    if (rc != 0) {
+        return rc * 10 + rc_FD_CLOSE_FAILURE;  // RETURN
     }
-    rc = mqbs::FileSystemUtil::move(
-        recoveryCtx.d_recoveryFileSet.journalFile(),
+
+    RecoveryContext& recoveryCtx = d_recoveryContextVec[partitionId];
+    rc                           = mqbs::FileStoreUtil::archiveFileSet(
+        recoveryCtx.d_recoveryFileSet,
         d_dataStoreConfig.archiveLocation());
-    if (0 != rc) {
-        BMQTSK_ALARMLOG_ALARM("FILE_IO")
-            << d_clusterData.identity().description() << " Partition ["
-            << partitionId << "]: " << "Failed to move file ["
-            << recoveryCtx.d_recoveryFileSet.journalFile() << "] "
-            << "to location [" << d_dataStoreConfig.archiveLocation()
-            << "] rc: " << rc << BMQTSK_ALARMLOG_END;
-        rcFinal = rc_FAILURE;
+    if (rc != 0) {
+        return rc * 10 + rc_MOVE_FAILURE;  // RETURN
     }
-    else {
-        BALL_LOG_INFO << d_clusterData.identity().description()
-                      << " Partition [" << partitionId
-                      << "]: " << "Moved journal file ["
-                      << recoveryCtx.d_recoveryFileSet.journalFile()
-                      << "] to location ["
-                      << d_dataStoreConfig.archiveLocation() << "].";
-    }
-    recoveryCtx.d_journalFilePosition = 0;
 
-    if (recoveryCtx.d_mappedDataFd.isValid()) {
-        rc = mqbs::FileSystemUtil::truncate(&recoveryCtx.d_mappedDataFd,
-                                            recoveryCtx.d_dataFilePosition,
-                                            errorDesc);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to truncate data file ["
-                << recoveryCtx.d_recoveryFileSet.dataFile() << "], rc: " << rc
-                << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
-            errorDesc.reset();
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Truncated data file ["
-                          << recoveryCtx.d_recoveryFileSet.dataFile()
-                          << "] to position ["
-                          << recoveryCtx.d_dataFilePosition << "].";
-        }
-
-        rc = mqbs::FileSystemUtil::flush(recoveryCtx.d_mappedDataFd.mapping(),
-                                         recoveryCtx.d_dataFilePosition,
-                                         errorDesc);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to flush data file ["
-                << recoveryCtx.d_recoveryFileSet.dataFile() << "], rc: " << rc
-                << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
-            errorDesc.reset();
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Flushed data file ["
-                          << recoveryCtx.d_recoveryFileSet.dataFile()
-                          << "] up to position ["
-                          << recoveryCtx.d_dataFilePosition << "].";
-        }
-
-        rc = mqbs::FileSystemUtil::close(&recoveryCtx.d_mappedDataFd);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to close data file ["
-                << recoveryCtx.d_recoveryFileSet.dataFile() << "], rc: " << rc
-                << BMQTSK_ALARMLOG_END;
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Closed data file ["
-                          << recoveryCtx.d_recoveryFileSet.dataFile() << "].";
-        }
-    }
-    rc = mqbs::FileSystemUtil::move(recoveryCtx.d_recoveryFileSet.dataFile(),
-                                    d_dataStoreConfig.archiveLocation());
-    if (0 != rc) {
-        BMQTSK_ALARMLOG_ALARM("FILE_IO")
-            << d_clusterData.identity().description() << " Partition ["
-            << partitionId << "]: " << "Failed to move file ["
-            << recoveryCtx.d_recoveryFileSet.dataFile() << "] "
-            << "to location [" << d_dataStoreConfig.archiveLocation()
-            << "] rc: " << rc << BMQTSK_ALARMLOG_END;
-        rcFinal = rc_FAILURE;
-    }
-    else {
-        BALL_LOG_INFO << d_clusterData.identity().description()
-                      << " Partition [" << partitionId
-                      << "]: " << "Moved data file ["
-                      << recoveryCtx.d_recoveryFileSet.dataFile()
-                      << "] to location ["
-                      << d_dataStoreConfig.archiveLocation() << "].";
-    }
-    recoveryCtx.d_dataFilePosition = 0;
-
-    if (recoveryCtx.d_mappedQlistFd.isValid()) {
-        rc = mqbs::FileSystemUtil::truncate(&recoveryCtx.d_mappedQlistFd,
-                                            recoveryCtx.d_qlistFilePosition,
-                                            errorDesc);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to truncate QList file ["
-                << recoveryCtx.d_recoveryFileSet.qlistFile() << "], rc: " << rc
-                << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
-            errorDesc.reset();
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Truncated QList file ["
-                          << recoveryCtx.d_recoveryFileSet.qlistFile()
-                          << "] to position ["
-                          << recoveryCtx.d_qlistFilePosition << "].";
-        }
-
-        rc = mqbs::FileSystemUtil::flush(recoveryCtx.d_mappedQlistFd.mapping(),
-                                         recoveryCtx.d_qlistFilePosition,
-                                         errorDesc);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to flush QList file ["
-                << recoveryCtx.d_recoveryFileSet.qlistFile() << "], rc: " << rc
-                << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
-            errorDesc.reset();
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Flushed QList file ["
-                          << recoveryCtx.d_recoveryFileSet.qlistFile()
-                          << "] up to position ["
-                          << recoveryCtx.d_qlistFilePosition << "].";
-        }
-
-        rc = mqbs::FileSystemUtil::close(&recoveryCtx.d_mappedQlistFd);
-        if (rc != 0) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << d_clusterData.identity().description() << " Partition ["
-                << partitionId << "]: " << "Failed to close QList file ["
-                << recoveryCtx.d_recoveryFileSet.qlistFile() << "], rc: " << rc
-                << BMQTSK_ALARMLOG_END;
-            rcFinal = rc_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << d_clusterData.identity().description()
-                          << " Partition [" << partitionId
-                          << "]: " << "Closed QList file ["
-                          << recoveryCtx.d_recoveryFileSet.qlistFile() << "].";
-        }
-    }
-    rc = mqbs::FileSystemUtil::move(recoveryCtx.d_recoveryFileSet.qlistFile(),
-                                    d_dataStoreConfig.archiveLocation());
-    if (0 != rc) {
-        BMQTSK_ALARMLOG_ALARM("FILE_IO")
-            << d_clusterData.identity().description() << " Partition ["
-            << partitionId << "]: " << "Failed to move file ["
-            << recoveryCtx.d_recoveryFileSet.qlistFile() << "] "
-            << "to location [" << d_dataStoreConfig.archiveLocation()
-            << "] rc: " << rc << BMQTSK_ALARMLOG_END;
-        rcFinal = rc_FAILURE;
-    }
-    else {
-        BALL_LOG_INFO << d_clusterData.identity().description()
-                      << " Partition [" << partitionId
-                      << "]: " << "Moved QList file ["
-                      << recoveryCtx.d_recoveryFileSet.qlistFile()
-                      << "] to location ["
-                      << d_dataStoreConfig.archiveLocation() << "].";
-    }
-    recoveryCtx.d_qlistFilePosition = 0;
-
-    recoveryCtx.d_firstSyncPointAfterRolloverSeqNum.reset();
-
-    return rcFinal;
+    return rc_SUCCESS;
 }
 
 void RecoveryManager::setExpectedDataChunkRange(
@@ -1268,7 +1033,7 @@ int RecoveryManager::openRecoveryFileSet(bsl::ostream& errorDescription,
                       << " from journal file ["
                       << recoveryCtx.d_recoveryFileSet.journalFile() << "].";
 
-        recoveryCtx.d_firstSyncPointAfterRolloverSeqNum =
+        recoveryCtx.d_firstSyncPointAfterRolloverPSN =
             recHeader.partitionSequenceNumber();
     }
 
@@ -1565,6 +1330,14 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
                 << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
         }
+        else {
+            BALL_LOG_INFO << d_clusterData.identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Truncated journal file ["
+                          << recoveryCtx.d_recoveryFileSet.journalFile()
+                          << "] to position ["
+                          << recoveryCtx.d_journalFilePosition << "].";
+        }
 
         rc = mqbs::FileSystemUtil::flush(
             recoveryCtx.d_mappedJournalFd.mapping(),
@@ -1578,6 +1351,14 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
                 << "], rc: " << rc << ", error: " << errorDesc.str()
                 << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
+        }
+        else {
+            BALL_LOG_INFO << d_clusterData.identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Flushed journal file ["
+                          << recoveryCtx.d_recoveryFileSet.journalFile()
+                          << "] up to position ["
+                          << recoveryCtx.d_journalFilePosition << "].";
         }
 
         rc = mqbs::FileSystemUtil::close(&recoveryCtx.d_mappedJournalFd);
@@ -1610,6 +1391,14 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
                 << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
         }
+        else {
+            BALL_LOG_INFO << d_clusterData.identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Truncated data file ["
+                          << recoveryCtx.d_recoveryFileSet.dataFile()
+                          << "] to position ["
+                          << recoveryCtx.d_dataFilePosition << "].";
+        }
 
         rc = mqbs::FileSystemUtil::flush(recoveryCtx.d_mappedDataFd.mapping(),
                                          recoveryCtx.d_dataFilePosition,
@@ -1621,6 +1410,14 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
                 << recoveryCtx.d_recoveryFileSet.dataFile() << "], rc: " << rc
                 << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
+        }
+        else {
+            BALL_LOG_INFO << d_clusterData.identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Flushed data file ["
+                          << recoveryCtx.d_recoveryFileSet.dataFile()
+                          << "] up to position ["
+                          << recoveryCtx.d_dataFilePosition << "].";
         }
 
         rc = mqbs::FileSystemUtil::close(&recoveryCtx.d_mappedDataFd);
@@ -1653,6 +1450,14 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
                 << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
         }
+        else {
+            BALL_LOG_INFO << d_clusterData.identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Truncated QList file ["
+                          << recoveryCtx.d_recoveryFileSet.qlistFile()
+                          << "] to position ["
+                          << recoveryCtx.d_qlistFilePosition << "].";
+        }
 
         rc = mqbs::FileSystemUtil::flush(recoveryCtx.d_mappedQlistFd.mapping(),
                                          recoveryCtx.d_qlistFilePosition,
@@ -1664,6 +1469,14 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
                 << recoveryCtx.d_recoveryFileSet.qlistFile() << "], rc: " << rc
                 << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
+        }
+        else {
+            BALL_LOG_INFO << d_clusterData.identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Flushed QList file ["
+                          << recoveryCtx.d_recoveryFileSet.qlistFile()
+                          << "] up to position ["
+                          << recoveryCtx.d_qlistFilePosition << "].";
         }
 
         rc = mqbs::FileSystemUtil::close(&recoveryCtx.d_mappedQlistFd);
@@ -1684,7 +1497,7 @@ int RecoveryManager::closeRecoveryFileSet(int partitionId)
     }
     recoveryCtx.d_qlistFilePosition = 0;
 
-    recoveryCtx.d_firstSyncPointAfterRolloverSeqNum.reset();
+    recoveryCtx.d_firstSyncPointAfterRolloverPSN.reset();
 
     return rc_SUCCESS;
 }
@@ -1712,7 +1525,7 @@ int RecoveryManager::recoverPSN(bmqp_ctrlmsg::PartitionSequenceNumber* psn,
 
     // Retrieve first sync point after rolllover PSN.
     if (firstSyncPointAfterRolllover) {
-        *psn = recoveryCtx.d_firstSyncPointAfterRolloverSeqNum;
+        *psn = recoveryCtx.d_firstSyncPointAfterRolloverPSN;
         return rc_SUCCESS;  // RETURN
     }
 

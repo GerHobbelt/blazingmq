@@ -42,11 +42,11 @@
 #include <bmqp_storagemessageiterator.h>
 #include <bmqu_memoutstream.h>
 
-#include <bmqsys_time.h>
 #include <bmqtsk_alarmlog.h>
 #include <bmqu_blob.h>
 #include <bmqu_blobobjectproxy.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlf_bind.h>
@@ -78,8 +78,8 @@ namespace mqbblp {
 namespace {
 const int k_GC_MESSAGES_INTERVAL_SECONDS = 5;
 
-bsl::ostream& printRecoveryBanner(bsl::ostream&      out,
-                                  const bsl::string& lastLineSuffix)
+bsl::ostream& printRecoveryBanner(bsl::ostream&    out,
+                                  bsl::string_view lastLineSuffix)
 {
     out << "Starting"
         << "\n   _____"
@@ -162,7 +162,7 @@ void StorageManager::startRecoveryCb(int partitionId)
                              bdlf::PlaceHolders::_2,  // status
                              bdlf::PlaceHolders::_3,  // events
                              bdlf::PlaceHolders::_4,  // peer
-                             bmqsys::Time::highResolutionTimer()));
+                             bmqu::Time::highResolutionTimer()));
 }
 
 void StorageManager::onPartitionRecovery(
@@ -1128,7 +1128,7 @@ void StorageManager::resetQueue(const bmqt::Uri& uri,
         bdlf::BindUtil::bind(&mqbc::StorageUtil::resetQueueDispatched,
                              &d_storages[partitionId],
                              d_storageLockVec[partitionId].get(),
-                             fs->description(),
+                             bsl::string(fs->description(), d_allocator_p),
                              uri,
                              queue_sp));
 
@@ -1960,8 +1960,8 @@ void StorageManager::processShutdownEvent()
     }
 }
 
-int StorageManager::processCommand(mqbcmd::StorageResult*        result,
-                                   const mqbcmd::StorageCommand& command)
+void StorageManager::processCommand(mqbcmd::StorageResult*        result,
+                                    const mqbcmd::StorageCommand& command)
 {
     // executed by cluster *DISPATCHER* thread
 
@@ -1972,10 +1972,10 @@ int StorageManager::processCommand(mqbcmd::StorageResult*        result,
         result->makeError();
         result->error().message() = "StorageManager not yet started or is "
                                     "stopping.\n\n";
-        return -1;  // RETURN
+        return;  // RETURN
     }
 
-    return mqbc::StorageUtil::processCommand(
+    mqbc::StorageUtil::processCommand(
         result,
         &d_fileStores,
         &d_storages,

@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <bmqsys_mocktime.h>
+#include <bmqtst_mocktime.h>
 
 #include <bmqscm_version.h>
 
-#include <bmqsys_time.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlf_memfn.h>
 
 namespace BloombergLP {
-namespace bmqsys {
+namespace bmqtst {
 
 // --------------
 // class MockTime
@@ -34,7 +34,7 @@ MockTime::MockTime()
 , d_monotonicClock(0, 0)
 , d_highResTimer(0)
 {
-    bmqsys::Time::initialize(
+    bmqu::Time::initialize(
         bdlf::MemFnUtil::memFn(&MockTime::realtimeClock, this),
         bdlf::MemFnUtil::memFn(&MockTime::monotonicClock, this),
         bdlf::MemFnUtil::memFn(&MockTime::highResTimer, this));
@@ -42,7 +42,7 @@ MockTime::MockTime()
 
 MockTime::~MockTime()
 {
-    bmqsys::Time::shutdown();
+    bmqu::Time::shutdown();
 }
 
 MockTime& MockTime::setRealTimeClock(const bsls::TimeInterval& value)

@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <bmqsys_statmonitorsnapshotrecorder.h>
+#include <mqbstat_statmonitorsnapshotrecorder.h>
 
-#include <bmqsys_mocktime.h>
-#include <bmqsys_time.h>
+#include <bmqtst_mocktime.h>
 #include <bmqu_memoutstream.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlpcre_regex.h>
@@ -128,7 +128,7 @@ static void test1_usageExample()
 {
     bmqtst::TestHelper::printTestName("USAGE EXAMPLE");
 
-    bmqsys::Time::initialize(bmqtst::TestHelperUtil::allocator());
+    bmqu::Time::initialize(bmqtst::TestHelperUtil::allocator());
 
     const bsl::string k_HEADER("Cluster (testCluster): ",
                                bmqtst::TestHelperUtil::allocator());
@@ -136,7 +136,7 @@ static void test1_usageExample()
     // Begin testing
     PV("Valued constructor");
     {
-        bmqsys::StatMonitorSnapshotRecorder statRecorder(k_HEADER);
+        mqbstat::StatMonitorSnapshotRecorder statRecorder(k_HEADER);
 
         // Perform some intensive work - step 1
         doWork(7500,  // rate
@@ -187,8 +187,8 @@ static void test1_usageExample()
 
     PV("Copy constructor");
     {
-        bmqsys::StatMonitorSnapshotRecorder statRecorderTemp(k_HEADER);
-        bmqsys::StatMonitorSnapshotRecorder statRecorder(
+        mqbstat::StatMonitorSnapshotRecorder statRecorderTemp(k_HEADER);
+        mqbstat::StatMonitorSnapshotRecorder statRecorder(
             statRecorderTemp,
             bmqtst::TestHelperUtil::allocator());
 
@@ -238,7 +238,7 @@ static void test1_usageExample()
         BMQTST_ASSERT_NE(os1.str(), os2.str());
     }
 
-    bmqsys::Time::shutdown();
+    bmqu::Time::shutdown();
 }
 
 static void test2_totalElapsed()
@@ -249,7 +249,7 @@ static void test2_totalElapsed()
 //   Ensure that the totalElapsed accessor returns the right value.
 //
 // Plan:
-//   1 Manipulate the time by using custom time accessor with bmqsys::Time
+//   1 Manipulate the time by using custom time accessor with bmqu::Time
 //
 // Testing:
 //   'bsls::Types::Int64 totalElapsed() const'
@@ -257,9 +257,9 @@ static void test2_totalElapsed()
 {
     bmqtst::TestHelper::printTestName("TOTAL ELAPSED");
 
-    bmqsys::MockTime mockTime;
+    bmqtst::MockTime mockTime;
 
-    bmqsys::StatMonitorSnapshotRecorder obj("HEADER");
+    mqbstat::StatMonitorSnapshotRecorder obj("HEADER");
 
     BMQTST_ASSERT_EQ(obj.totalElapsed(), 0);
 
@@ -278,7 +278,7 @@ int main(int argc, char* argv[])
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
 
     bmqtst::TestHelperUtil::ignoreCheckDefAlloc() = true;
-    // 'snapshot' in 'bmqsys::StatMonitor' passes a string using default
+    // 'snapshot' in 'mqbstat::StatMonitor' passes a string using default
     // alloc.
 
     switch (_testCase) {

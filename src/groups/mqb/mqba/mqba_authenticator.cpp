@@ -41,9 +41,9 @@
 #include <bmqp_ctrlmsg_messages.h>
 #include <bmqp_protocol.h>
 #include <bmqp_schemaeventbuilder.h>
-#include <bmqsys_time.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <ball_log.h>
@@ -54,6 +54,7 @@
 #include <bsl_ostream.h>
 #include <bsl_vector.h>
 #include <bsla_annotations.h>
+#include <bslmt_threadattributes.h>
 #include <bslmt_threadutil.h>
 #include <bsls_timeinterval.h>
 
@@ -264,14 +265,14 @@ void Authenticator::authenticate(
             ? bsl::vector<char>()
             : authenticationRequest.data().value(),
         channel->peerUri());
-    const bsls::Types::Int64 start   = bmqsys::Time::highResolutionTimer();
+    const bsls::Types::Int64 start   = bmqu::Time::highResolutionTimer();
     const int                authnRc = d_authnController_p->authenticate(
         authnErrStream,
         &result,
         authenticationRequest.mechanism(),
         authenticationData,
         d_allocator_p);
-    const bsls::Types::Int64 elapsed = bmqsys::Time::highResolutionTimer() -
+    const bsls::Types::Int64 elapsed = bmqu::Time::highResolutionTimer() -
                                        start;
 
     if (authnRc == 0) {
@@ -401,7 +402,7 @@ Authenticator::Authenticator(
     bslma::Allocator*                   allocator)
 : d_allocator_p(allocator)
 , d_authnController_p(authnController)
-, d_threadPool(bmqsys::ThreadUtil::defaultAttributes(),
+, d_threadPool(bslmt::ThreadAttributes(),
                mqbcfg::BrokerConfig::get().authentication().minThreads(),
                mqbcfg::BrokerConfig::get().authentication().maxThreads(),
                bsls::TimeInterval(120).totalMilliseconds(),  // idle time

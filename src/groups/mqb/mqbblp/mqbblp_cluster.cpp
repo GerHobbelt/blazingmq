@@ -37,6 +37,7 @@
 #include <mqbs_datastore.h>
 #include <mqbs_replicatedstorage.h>
 #include <mqbstat_queuestats.h>
+#include <mqbstat_statmonitorsnapshotrecorder.h>
 
 // BMQ
 #include <bmqp_ackmessageiterator.h>
@@ -57,12 +58,12 @@
 
 #include <bmqex_systemexecutor.h>
 #include <bmqst_statcontext.h>
-#include <bmqsys_time.h>
 #include <bmqtsk_alarmlog.h>
 #include <bmqu_blob.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_outstreamformatsaver.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlb_print.h>
@@ -175,8 +176,9 @@ void Cluster::startDispatched(bsl::ostream* errorDescription, int* rc)
 
     // Start a StatMonitorSnapshotRecorder to track system stats during
     // recovery
-    bmqsys::StatMonitorSnapshotRecorder statRecorder(description() + ": ",
-                                                     d_allocator_p);
+    mqbstat::StatMonitorSnapshotRecorder statRecorder(
+        bsl::string(description(), d_allocator_p) + ": ",
+        d_allocator_p);
 
     // Get named allocator from associated bmqma::CountingAllocatorStore
     bslma::Allocator* storageManagerAllocator = d_allocators.get(
@@ -586,7 +588,7 @@ void Cluster::initiateShutdownDispatched(const VoidFunctor& callback)
     d_shutdownChain.appendInplace(
         bdlf::BindUtil::bind(&Cluster::continueShutdown,
                              this,
-                             bmqsys::Time::highResolutionTimer(),  // startTime
+                             bmqu::Time::highResolutionTimer(),  // startTime
                              bdlf::PlaceHolders::_1),  // completionCb
         callback);
 
@@ -619,7 +621,7 @@ void Cluster::continueShutdownDispatched(
 
     BALL_LOG_INFO_BLOCK
     {
-        bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
+        bsls::Types::Int64 now = bmqu::Time::highResolutionTimer();
         BALL_LOG_OUTPUT_STREAM
             << "Continuing shutting down Cluster: [name: '" << name()
             << "', elapsed time: "
@@ -1603,9 +1605,9 @@ void Cluster::onRelayPushEvent(const mqbevt::PushEvent& event)
 }
 
 void Cluster::onRecoveryStatus(
-    int                                        status,
-    const bsl::vector<unsigned int>&           primaryLeaseIds,
-    const bmqsys::StatMonitorSnapshotRecorder& statRecorder)
+    int                                         status,
+    const bsl::vector<unsigned int>&            primaryLeaseIds,
+    const mqbstat::StatMonitorSnapshotRecorder& statRecorder)
 
 {
     // exected by *ANY* thread
@@ -1620,9 +1622,9 @@ void Cluster::onRecoveryStatus(
 }
 
 void Cluster::onRecoveryStatusDispatched(
-    int                                        status,
-    const bsl::vector<unsigned int>&           primaryLeaseIds,
-    const bmqsys::StatMonitorSnapshotRecorder& statRecorder)
+    int                                         status,
+    const bsl::vector<unsigned int>&            primaryLeaseIds,
+    const mqbstat::StatMonitorSnapshotRecorder& statRecorder)
 {
     // executed by the *DISPATCHER* thread
 
@@ -2953,7 +2955,7 @@ void Cluster::onNodeStateChange(mqbnet::ClusterNode* node, bool isAvailable)
 void Cluster::onProxyConnectionUp(
     const bsl::shared_ptr<bmqio::Channel>& channel,
     const bmqp_ctrlmsg::ClientIdentity&    identity,
-    const bsl::string&                     description)
+    bsl::string_view                       description)
 {
     // executed by the *IO* thread
 
@@ -2962,7 +2964,7 @@ void Cluster::onProxyConnectionUp(
                              this,
                              channel,
                              identity,
-                             description),
+                             bsl::string(description, d_allocator_p)),
         this);
 }
 
@@ -3119,7 +3121,7 @@ void Cluster::loadClusterStatus(mqbcmd::ClusterResult* result)
     mqbcmd::ClusterStatus& clusterStatus = result->makeClusterStatus();
 
     clusterStatus.name()        = d_clusterData.identity().name();
-    clusterStatus.description() = description();
+    clusterStatus.description() = bsl::string(description(), d_allocator_p);
     clusterStatus.selfNodeDescription() =
         d_clusterData.membership().selfNode()->nodeDescription();
     clusterStatus.isHealthy() = d_clusterMonitor.isHealthy();
@@ -3375,6 +3377,10 @@ void Cluster::getPartitionPrimaryNode(int*                  rc,
     BSLS_ASSERT_SAFE(node);
     BSLS_ASSERT_SAFE(isSelfPrimary);
     BSLS_ASSERT_SAFE(inDispatcherThread());
+
+    // Reset if uninitialized
+    *node          = NULL;
+    *isSelfPrimary = false;
 
     enum RcEnum {
         rc_SUCCESS = 0,

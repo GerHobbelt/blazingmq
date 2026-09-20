@@ -386,14 +386,14 @@ class MockDataStore : public mqbs::DataStore {
         return d_dispatcherClientData;
     }
 
-    const bsl::string& description() const BSLS_KEYWORD_OVERRIDE
+    bsl::string_view description() const BSLS_KEYWORD_OVERRIDE
     {
         return d_description;
     }
 
     int open(QueueKeyInfoMap*) BSLS_KEYWORD_OVERRIDE { return 0; }
 
-    void close(bool, bool) BSLS_KEYWORD_OVERRIDE {}
+    int close(bool, bool) BSLS_KEYWORD_OVERRIDE { return 0; }
 
     void createStorage(bsl::shared_ptr<mqbs::ReplicatedStorage>*,
                        const bmqt::Uri&,
@@ -2157,7 +2157,7 @@ int main(int argc, char* argv[])
 
     TEST_PROLOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
 
-    bmqsys::Time::initialize(bmqtst::TestHelperUtil::allocator());
+    bmqu::Time::initialize(bmqtst::TestHelperUtil::allocator());
 
     {
         mqbcfg::AppConfig brokerConfig(bmqtst::TestHelperUtil::allocator());
@@ -2171,7 +2171,7 @@ int main(int argc, char* argv[])
         bmqtst::runTest(_testCase);
     }
 
-    bmqsys::Time::shutdown();
+    bmqu::Time::shutdown();
 
     TEST_EPILOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
 }

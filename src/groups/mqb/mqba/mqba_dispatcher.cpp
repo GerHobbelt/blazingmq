@@ -23,9 +23,8 @@
 #include <mqbevt_dispatcherevent.h>
 
 // BMQ
-#include <bmqsys_threadutil.h>
-#include <bmqsys_time.h>
 #include <bmqu_memoutstream.h>
+#include <bmqu_time.h>
 
 // MQB
 #include <mqbstat_dispatcherstats.h>
@@ -42,6 +41,8 @@
 #include <bsla_annotations.h>
 #include <bslma_managedptr.h>
 #include <bslmt_semaphore.h>
+#include <bslmt_threadattributes.h>
+#include <bslmt_threadutil.h>
 #include <bsls_systemclocktype.h>
 #include <bsls_timeinterval.h>
 
@@ -100,7 +101,7 @@ void Dispatcher_Executor::post(const bsl::function<void()>& f) const
     // create an event containing the function to be invoked on the processor
     bsl::shared_ptr<mqbevt::DispatcherEvent> event_sp =
         d_eventSource_sp->getEvent<mqbevt::DispatcherEvent>();
-    event_sp->setEnqueueTime(bmqsys::Time::highResolutionTimer());
+    event_sp->setEnqueueTime(bmqu::Time::highResolutionTimer());
     (*event_sp).callback().set(f);
 
     // C++03 compatibility:
@@ -194,7 +195,7 @@ int Dispatcher::startContext(bsl::ostream&                    errorDescription,
     // Create and start the threadPool
     context->d_threadPool_mp.load(
         new (*d_allocator_p)
-            bdlmt::ThreadPool(bmqsys::ThreadUtil::defaultAttributes(),
+            bdlmt::ThreadPool(bslmt::ThreadAttributes(),
                               config.numProcessors(),           // min threads
                               config.numProcessors(),           // max threads
                               bsl::numeric_limits<int>::max(),  // idle time
@@ -358,18 +359,15 @@ int Dispatcher::start(bsl::ostream& errorDescription)
         return rc;  // RETURN
     }
 
-    executeOnAllQueues(
-        bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
-                             "bmqDispSession"),
-        mqbi::DispatcherClientType::e_SESSION);
-    executeOnAllQueues(
-        bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
-                             "bmqDispQueue"),
-        mqbi::DispatcherClientType::e_QUEUE);
-    executeOnAllQueues(
-        bdlf::BindUtil::bind(&bmqsys::ThreadUtil::setCurrentThreadName,
-                             "bmqDispCluster"),
-        mqbi::DispatcherClientType::e_CLUSTER);
+    executeOnAllQueues(bdlf::BindUtil::bind(&bslmt::ThreadUtil::setThreadName,
+                                            "bmqDispSession"),
+                       mqbi::DispatcherClientType::e_SESSION);
+    executeOnAllQueues(bdlf::BindUtil::bind(&bslmt::ThreadUtil::setThreadName,
+                                            "bmqDispQueue"),
+                       mqbi::DispatcherClientType::e_QUEUE);
+    executeOnAllQueues(bdlf::BindUtil::bind(&bslmt::ThreadUtil::setThreadName,
+                                            "bmqDispCluster"),
+                       mqbi::DispatcherClientType::e_CLUSTER);
 
     d_isStarted = true;
 
@@ -535,7 +533,7 @@ void Dispatcher::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
         BSLS_ASSERT_SAFE(dispatcherContext->d_processorPool_mp);
 
         bslmf::MovableRefUtil::access(event)->setEnqueueTime(
-            bmqsys::Time::highResolutionTimer());
+            bmqu::Time::highResolutionTimer());
 
         dispatcherContext->d_processorPool_mp->enqueueEvent(
             bslmf::MovableRefUtil::move(event),
@@ -573,7 +571,7 @@ void Dispatcher::executeOnAllQueues(
 
     bsl::shared_ptr<mqbevt::DispatcherEvent> event_sp =
         d_defaultEventSource_sp->getEvent<mqbevt::DispatcherEvent>();
-    event_sp->setEnqueueTime(bmqsys::Time::highResolutionTimer());
+    event_sp->setEnqueueTime(bmqu::Time::highResolutionTimer());
     event_sp->callback().set(functor);
     event_sp->finalizeCallback().set(doneCallback);
 
@@ -604,14 +602,14 @@ void Dispatcher::execute(const mqbi::Dispatcher::VoidFunction& functor,
     if (type == mqbi::DispatcherEventType::e_CALLBACK) {
         bsl::shared_ptr<mqbevt::CallbackEvent> event_sp =
             d_defaultEventSource_sp->getEvent<mqbevt::CallbackEvent>();
-        event_sp->setEnqueueTime(bmqsys::Time::highResolutionTimer());
+        event_sp->setEnqueueTime(bmqu::Time::highResolutionTimer());
         event_sp->callback().set(functor);
         dispatchEvent(bslmf::MovableRefUtil::move(event_sp), client);
     }
     else {
         bsl::shared_ptr<mqbevt::DispatcherEvent> event_sp =
             d_defaultEventSource_sp->getEvent<mqbevt::DispatcherEvent>();
-        event_sp->setEnqueueTime(bmqsys::Time::highResolutionTimer());
+        event_sp->setEnqueueTime(bmqu::Time::highResolutionTimer());
         event_sp->callback().set(functor);
         dispatchEvent(bslmf::MovableRefUtil::move(event_sp), client);
     }
@@ -625,7 +623,7 @@ void Dispatcher::execute(const mqbi::Dispatcher::VoidFunction& functor,
 
     bsl::shared_ptr<mqbevt::DispatcherEvent> event_sp =
         d_defaultEventSource_sp->getEvent<mqbevt::DispatcherEvent>();
-    event_sp->setEnqueueTime(bmqsys::Time::highResolutionTimer());
+    event_sp->setEnqueueTime(bmqu::Time::highResolutionTimer());
     event_sp->callback().set(functor);
 
     dispatchEvent(bslmf::MovableRefUtil::move(event_sp),
@@ -652,7 +650,7 @@ void Dispatcher::synchronize(mqbi::DispatcherClientType::Enum  type,
     bslmt::Semaphore                         semaphore;
     bsl::shared_ptr<mqbevt::DispatcherEvent> event_sp =
         d_defaultEventSource_sp->getEvent<mqbevt::DispatcherEvent>();
-    (*event_sp).setEnqueueTime(bmqsys::Time::highResolutionTimer());
+    (*event_sp).setEnqueueTime(bmqu::Time::highResolutionTimer());
     (*event_sp).setCallback(
         bdlf::BindUtil::bind(static_cast<PostFn>(&bslmt::Semaphore::post),
                              &semaphore));
@@ -732,7 +730,7 @@ void mqba::Dispatcher::EventCallback::operator()(
                        << d_type << " dispatcher: " << *event;
 
         const bsls::Types::Int64 processingStartTime =
-            bmqsys::Time::highResolutionTimer();
+            bmqu::Time::highResolutionTimer();
         d_lastProcessingStartTime_p->store(processingStartTime);
 
         const bsls::Types::Int64 queuedTime = processingStartTime -
@@ -769,7 +767,7 @@ void mqba::Dispatcher::EventCallback::operator()(
         }
 
         const bsls::Types::Int64 processingTime =
-            bmqsys::Time::highResolutionTimer() - processingStartTime;
+            bmqu::Time::highResolutionTimer() - processingStartTime;
 
         // Update stats
         mqbstat::DispatcherStats::onDequeue(d_stats_sp.get(), queuedTime);

@@ -50,11 +50,10 @@
 #include <bmqp_event.h>
 #include <bmqp_protocol.h>
 #include <bmqp_protocolutil.h>
-#include <bmqsys_threadutil.h>
-#include <bmqsys_time.h>
 #include <bmqu_blob.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 #include <bmqu_weakmemfn.h>
 
 // BDE
@@ -76,6 +75,9 @@
 #include <bslmf_movableref.h>
 #include <bslmt_lockguard.h>
 #include <bslmt_once.h>
+#include <bslmt_threadattributes.h>
+#include <bslmt_threadutil.h>
+#include <bsls_keyword.h>
 #include <bsls_performancehint.h>
 #include <bsls_platform.h>
 #include <bsls_systemclocktype.h>
@@ -102,6 +104,19 @@ const char* TCPSessionFactory::k_CHANNEL_STATUS_CLOSE_REASON =
 namespace {
 
 BALL_LOG_SET_NAMESPACE_CATEGORY("MQBNET.TCPSESSIONFACTORY");
+
+// UTILITY FUNCTIONS
+
+void setCurrentThreadNameOnce(const bsl::string& value)
+{
+    static BSLS_KEYWORD_THREAD_LOCAL bool s_named = false;
+
+    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(!s_named)) {
+        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
+        bslmt::ThreadUtil::setThreadName(value);
+        s_named = true;
+    }
+}
 
 const int k_CONNECT_INTERVAL     = 2;
 const int k_SESSION_DESTROY_WAIT = 20;
@@ -205,7 +220,7 @@ ntcCreateInterfaceConfig(const mqbcfg::TcpInterfaceConfig& tcpConfig)
 void monitoredDNSResolution(bsl::string*          resolvedUri,
                             const bmqio::Channel& baseChannel)
 {
-    const bsls::Types::Int64 start = bmqsys::Time::highResolutionTimer();
+    const bsls::Types::Int64 start = bmqu::Time::highResolutionTimer();
 
     bmqio::ResolvingChannelFactoryUtil::defaultResolutionFn(
         resolvedUri,
@@ -213,7 +228,7 @@ void monitoredDNSResolution(bsl::string*          resolvedUri,
         &bmqio::ResolveUtil::getDomainName,
         true);
 
-    const bsls::Types::Int64 end = bmqsys::Time::highResolutionTimer();
+    const bsls::Types::Int64 end = bmqu::Time::highResolutionTimer();
 
     BALL_LOG_INFO << "Channel " << static_cast<const void*>(&baseChannel)
                   << " with remote peer " << baseChannel.peerUri()
@@ -712,7 +727,7 @@ void TCPSessionFactory::channelStateCallback(
     // This is an infrequent enough operation (compared to a 'readCb') that it
     // is fine to do this here (since we have no other ways to
     // proactively-execute code in the IO threads created by the channelPool).
-    bmqsys::ThreadUtil::setCurrentThreadNameOnce(d_threadName);
+    setCurrentThreadNameOnce(d_threadName);
 
     BALL_LOG_TRACE << "TCPSessionFactory '" << d_config.name()
                    << "': channelStateCallback [event: " << event
@@ -741,7 +756,7 @@ void TCPSessionFactory::channelStateCallback(
                // mutex synchronization for them at all.
                 bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // LOCK
                 d_timestampMap[channel.get()] =
-                    bmqsys::Time::highResolutionTimer();
+                    bmqu::Time::highResolutionTimer();
             }  // close mutex lock guard // UNLOCK
 
             // Keep track of active channels, for logging purposes
@@ -935,7 +950,7 @@ void TCPSessionFactory::disableHeartbeat(const bmqio::Channel* channel_p)
 }
 
 void TCPSessionFactory::logOpenSessionTime(
-    const bsl::string&                     sessionDescription,
+    bsl::string_view                       sessionDescription,
     const bsl::shared_ptr<bmqio::Channel>& channel)
 {
     bsls::Types::Int64 begin = 0;
@@ -954,7 +969,7 @@ void TCPSessionFactory::logOpenSessionTime(
         BALL_LOG_INFO_BLOCK
         {
             const bsls::Types::Int64 elapsed =
-                bmqsys::Time::highResolutionTimer() - begin;
+                bmqu::Time::highResolutionTimer() - begin;
             BALL_LOG_OUTPUT_STREAM
                 << "Open session '" << sessionDescription << "' for channel '"
                 << channel.get()
@@ -988,7 +1003,8 @@ void TCPSessionFactory::reauthnOnAuthenticationEvent(
 
     const bsl::shared_ptr<AuthenticationContext>& context =
         channelInfo->d_authenticationCtx_sp;
-    const bsl::string& description = channelInfo->d_session_sp->description();
+    const bsl::string_view description =
+        channelInfo->d_session_sp->description();
     bmqu::MemOutStream errStream(d_allocator_p);
 
     bmqp_ctrlmsg::AuthenticationMessage authenticationMessage;
@@ -1166,8 +1182,7 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
 
     d_tcpChannelFactory_mp = channelFactory;
 
-    bslmt::ThreadAttributes attributes =
-        bmqsys::ThreadUtil::defaultAttributes();
+    bslmt::ThreadAttributes attributes;
     attributes.setThreadName("bmqDNSResolver");
     rc = d_resolutionContext.start(attributes);
     BSLS_ASSERT_SAFE(rc == 0);

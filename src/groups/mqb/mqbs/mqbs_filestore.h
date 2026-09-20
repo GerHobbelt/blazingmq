@@ -390,11 +390,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // Whether the broker still reads and writes to the to-be-deprecated Qlist
     // file.
 
-    bool d_ignoreCrc32c;
-    // Whether to ignore Crc32
-    // calculations.  We should only set
-    // this to true during testing.
-
     bmqp::StorageEventBuilder d_storageEventBuilder;
     // Storage event builder to use.
 
@@ -656,6 +651,10 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// using the specified `nodeContext`.
     void sendReceipt(mqbnet::ClusterNode* node, NodeContext* nodeContext);
 
+    /// Generate and send Replication Receipt for the
+    /// `d_lastRecoveredStrongConsistency`, if any, to the current primary.
+    void sendImplicitReceipt();
+
     /// Insert the specified `record` value by the specified `key` into the
     /// list of outstanding records, and assign to the specified `handle` an
     /// iterator to the inserted record.
@@ -782,8 +781,9 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
 
     /// Close this instance.  If the optional `flush` flag is true, flush
     /// the data store to disk.  If the optional `archive` flag is true,
-    /// archive the data store.
-    void close(bool flush = false, bool archive = false) BSLS_KEYWORD_OVERRIDE;
+    /// archive the data store.  Return zero on success, non-zero value
+    /// otherwise.
+    int close(bool flush = false, bool archive = false) BSLS_KEYWORD_OVERRIDE;
 
     /// Create and load into the specified `storageSp` an instance of
     /// ReplicatedStorage for the queue having the specified `queueUri` and
@@ -944,10 +944,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// Set the replication factor for strong consistency to `factor`.
     void setReplicationFactor(int factor);
 
-    /// Set the ignore Crc32c flag to the specified `value`.  We should only
-    /// set this to true during testing.
-    void setIgnoreCrc32c(bool value);
-
     /// This will be used as Implicit Receipt
     void setLastStrongConsistency(unsigned int        primaryLeaseId,
                                   bsls::Types::Uint64 sequenceNum);
@@ -1027,7 +1023,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     dispatcherClientData() const BSLS_KEYWORD_OVERRIDE;
 
     /// Return a printable description of the client (e.g. for logging).
-    const bsl::string& description() const BSLS_KEYWORD_OVERRIDE;
+    bsl::string_view description() const BSLS_KEYWORD_OVERRIDE;
 
     /// Load into the specified `fileStoreSet` the active (current) file
     /// set.  The behavior is undefined unless there is a fileSet in current
@@ -1240,17 +1236,14 @@ inline void FileStore::execute(const mqbi::Dispatcher::VoidFunction& functor)
 }
 
 // MANIPULATORS
-inline void FileStore::setIgnoreCrc32c(bool value)
-{
-    d_ignoreCrc32c = value;
-}
-
 inline void
 FileStore::setLastStrongConsistency(unsigned int        primaryLeaseId,
                                     bsls::Types::Uint64 sequenceNum)
 {
     d_lastRecoveredStrongConsistency.d_primaryLeaseId = primaryLeaseId;
     d_lastRecoveredStrongConsistency.d_sequenceNum    = sequenceNum;
+
+    sendImplicitReceipt();
 }
 
 inline void
@@ -1295,7 +1288,7 @@ inline mqbi::DispatcherClientData& FileStore::dispatcherClientData()
     return d_dispatcherClientData;
 }
 
-inline const bsl::string& FileStore::description() const
+inline bsl::string_view FileStore::description() const
 {
     return partitionDesc();
 }

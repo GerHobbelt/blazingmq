@@ -194,6 +194,8 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
         /// state (restoreStateHelper) flaps.
         bsls::Types::Uint64 d_generationCount;
 
+        bdlmt::EventScheduler::EventHandle d_reopenRetryHandle;
+
         SubQueueContext(
             const bmqt::Uri&                                         uri,
             const bdlb::NullableValue<bmqp_ctrlmsg::SubQueueIdInfo>& info,
@@ -891,6 +893,8 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
                const mqbc::ClusterStateQueueInfo& state,
                const mqbconfm::QueueMode&         domainConfig) const;
 
+    bsls::Types::Uint64 currentGenCount(int pid) const;
+
     /// Respond to all pending OpenQueue requests with the specified
     /// `status`.
     void finishAllOpening(const QueueContextSp&       queueContext,
@@ -904,6 +908,8 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
         const mqbi::OpenQueueConfirmationCookieSp& confirmationCookie);
 
     void setAsClosed(const QueueContextSp& queueContextSp);
+
+    void setAsClosed(SubQueueContext* subQueueContext);
 
     // PRIVATE MANIPULATORS
     //   (virtual: mqbc::ClusterMembershipObserver)
@@ -1400,6 +1406,16 @@ inline bool ClusterQueueHelper::isFailoverInProgress() const
 inline bool ClusterQueueHelper::isShutdownLogicOn() const
 {
     return d_isShutdownLogicOn;
+}
+
+inline bsls::Types::Uint64 ClusterQueueHelper::currentGenCount(int pid) const
+{
+    if (d_cluster_p->isRemote()) {
+        return d_clusterData_p->electorInfo().electorTerm();
+    }
+    else {
+        return d_clusterState_p->partition(pid).primaryLeaseId();
+    }
 }
 
 }  // close package namespace

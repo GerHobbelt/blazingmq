@@ -46,10 +46,10 @@
 
 #include <bmqio_channel.h>
 #include <bmqio_channelfactory.h>
-#include <bmqsys_operationlogger.h>
-#include <bmqsys_time.h>
 #include <bmqu_operationchain.h>
+#include <bmqu_operationlogger.h>
 #include <bmqu_sharedresource.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlb_nullablevalue.h>
@@ -424,20 +424,20 @@ class ClientSession : public mqbnet::Session,
     /// control when it gets destroyed.
     void tearDownAllQueuesDone(const bsl::shared_ptr<void>& session);
 
-    void onHandleConfigured(
-        const bmqp_ctrlmsg::Status&                     status,
-        const bmqp_ctrlmsg::StreamParameters&           streamParameters,
-        const bmqp_ctrlmsg::ControlMessage&             streamParamsCtrlMsg,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+    void
+    onHandleConfigured(const bmqp_ctrlmsg::Status&           status,
+                       const bmqp_ctrlmsg::StreamParameters& streamParameters,
+                       const bmqp_ctrlmsg::ControlMessage& streamParamsCtrlMsg,
+                       const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     /// Called when handle configure response comes to the client session
     /// with the specified `status`, `streamParameters` and
     /// `streamParamsCtrlMsg`.
     void onHandleConfiguredDispatched(
-        const bmqp_ctrlmsg::Status&                     status,
-        const bmqp_ctrlmsg::StreamParameters&           streamParameters,
-        const bmqp_ctrlmsg::ControlMessage&             streamParamsCtrlMsg,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+        const bmqp_ctrlmsg::Status&                   status,
+        const bmqp_ctrlmsg::StreamParameters&         streamParameters,
+        const bmqp_ctrlmsg::ControlMessage&           streamParamsCtrlMsg,
+        const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     /// Initiate the shutdown of the session.
     void initiateShutdownDispatched();
@@ -461,8 +461,8 @@ class ClientSession : public mqbnet::Session,
 
     // Step 1/3.
     void processDisconnectAllQueues(
-        const bmqp_ctrlmsg::ControlMessage&             controlMessage,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+        const bmqp_ctrlmsg::ControlMessage&           controlMessage,
+        const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     // Step 2/3.
     /// Process the disconnect request in the specified `controlMessage`.
@@ -479,25 +479,25 @@ class ClientSession : public mqbnet::Session,
     /// round trip to the queue dispatcher thread, we must ensure the close
     /// queue response will be delivered before the disconnect response.
     void processDisconnectAllQueuesDone(
-        const bmqp_ctrlmsg::ControlMessage&             controlMessage,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+        const bmqp_ctrlmsg::ControlMessage&           controlMessage,
+        const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     // Step 3/3.
-    void processDisconnect(
-        const bmqp_ctrlmsg::ControlMessage&             controlMessage,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+    void
+    processDisconnect(const bmqp_ctrlmsg::ControlMessage& controlMessage,
+                      const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     void
     processOpenQueue(const bmqp_ctrlmsg::ControlMessage& handleParamsCtrlMsg,
-                     const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+                     const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
-    void processCloseQueue(
-        const bmqp_ctrlmsg::ControlMessage&             handleParamsCtrlMsg,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+    void
+    processCloseQueue(const bmqp_ctrlmsg::ControlMessage& handleParamsCtrlMsg,
+                      const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     void processConfigureStream(
-        const bmqp_ctrlmsg::ControlMessage&             streamParamsCtrlMsg,
-        const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+        const bmqp_ctrlmsg::ControlMessage&           streamParamsCtrlMsg,
+        const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     /// Process the specified ack `event`.
     void onAckEvent(const mqbevt::AckEvent& event);
@@ -528,12 +528,11 @@ class ClientSession : public mqbnet::Session,
                      mqbi::QueueHandle*                     handle,
                      const bmqp_ctrlmsg::OpenQueueResponse& openQueueResponse,
                      const bmqp_ctrlmsg::ControlMessage& handleParamsCtrlMsg,
-                     const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+                     const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
-    void
-    closeQueueCb(const bsl::shared_ptr<mqbi::QueueHandle>& handle,
-                 const bmqp_ctrlmsg::ControlMessage&       handleParamsCtrlMsg,
-                 const bsl::shared_ptr<bmqsys::OperationLogger>& opLogger);
+    void closeQueueCb(const bsl::shared_ptr<mqbi::QueueHandle>& handle,
+                      const bmqp_ctrlmsg::ControlMessage& handleParamsCtrlMsg,
+                      const bsl::shared_ptr<bmqu::OperationLogger>& opLogger);
 
     /// Return a pointer to the stats associated with an unknown queue.
     /// Note that these stats are lazily created in the first invocation of
@@ -669,7 +668,7 @@ class ClientSession : public mqbnet::Session,
     // negotiation phase.
 
     /// Return a printable description of the client (e.g. for logging).
-    const bsl::string& description() const BSLS_KEYWORD_OVERRIDE;
+    bsl::string_view description() const BSLS_KEYWORD_OVERRIDE;
 
     // MANIPULATORS
     //   (virtual: mqbi::DispatcherClient)
@@ -724,7 +723,7 @@ inline ClientSession::ShutdownContext::ShutdownContext(
     const ShutdownCb&         callback,
     const bsls::TimeInterval& timeout)
 : d_callback(callback)
-, d_stopTime(bmqsys::Time::nowMonotonicClock())
+, d_stopTime(bmqu::Time::nowMonotonicClock())
 , d_numUnconfirmedTotal(0)
 {
     BSLS_ASSERT_SAFE(d_callback);
@@ -781,7 +780,7 @@ ClientSession::negotiationMessage() const
     return d_negotiationMessage;
 }
 
-inline const bsl::string& ClientSession::description() const
+inline bsl::string_view ClientSession::description() const
 {
     return d_description;
 }

@@ -1,4 +1,4 @@
-// Copyright 2014-2025 Bloomberg Finance L.P.
+// Copyright 2026 Bloomberg Finance L.P.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,30 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <bmqsys_operationlogger.h>
+#include <mqbplug_authncredential.h>
 
-#include <bmqscm_version.h>
+#include <mqbscm_version.h>
 
 namespace BloombergLP {
-namespace bmqsys {
-
-// ---------------------
-// class OperationLogger
-// ---------------------
-
-OperationLogger::OperationLogger(bslma::Allocator* allocator)
-: d_beginTimestamp(0)
-, d_currentOpDescription(allocator)
-{
-    // NOTHING
-}
-
-OperationLogger::~OperationLogger()
-{
-    if (d_beginTimestamp != 0) {
-        stop();
-    }
-}
+namespace mqbplug {
 
 }  // close package namespace
 }  // close enterprise namespace

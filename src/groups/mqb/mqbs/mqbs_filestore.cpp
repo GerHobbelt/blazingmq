@@ -39,6 +39,7 @@
 #include <mqbs_replicatedstorage.h>
 #include <mqbs_storageutil.h>
 #include <mqbstat_clusterstats.h>
+#include <mqbstat_statmonitorsnapshotrecorder.h>
 #include <mqbu_exit.h>
 
 // BMQ
@@ -49,13 +50,12 @@
 #include <bmqp_storagemessageiterator.h>
 #include <bmqt_resultcode.h>
 
-#include <bmqsys_statmonitorsnapshotrecorder.h>
-#include <bmqsys_time.h>
 #include <bmqtsk_alarmlog.h>
 #include <bmqu_blobobjectproxy.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_outstreamformatsaver.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlb_bigendian.h>
@@ -1440,7 +1440,7 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                 // 'QueueOpType::e_ADDITION' as well).
 
                 QueueKeyInfoMapInsertRc insertRc = queueKeyInfoMap->insert(
-                    bsl::make_pair(queueKey, DataStoreConfigQueueInfo(false)));
+                    bsl::make_pair(queueKey, DataStoreConfigQueueInfo()));
                 insertRc.first->second.setPartitionId(d_config.partitionId());
 
                 if (false == insertRc.second) {
@@ -2069,6 +2069,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                     return rc_INVALID_PARTITION_ID;  // RETURN
                 }
 
+                iter->second.setAsRecorded();
+
                 if (d_qListAware) {
                     // Retrieve QueueUri from QueueUriRecord.
 
@@ -2216,7 +2218,9 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                                 // done in StorageMgr because we have recovered
                                 // all appId/appKey pairs by that time.
 
-                                qinfo.addAppInfo(cit->first, cit->second);
+                                qinfo.addAppInfo(cit->first,
+                                                 cit->second,
+                                                 withCSL);
                             }
                             BALL_LOG_INFO << partitionDesc()
                                           << "Recovered appId/appKey pair ['"
@@ -2623,26 +2627,23 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             unsigned int appDataLen = totalLen - headerSize - optionsSize -
                                       lastByte;
 
-            if (!d_ignoreCrc32c) {
-                // Check CRC32C
-                unsigned int checksum = bmqp::Crc32c::calculate(
-                    dataFd->block().base() + appDataOffset,
-                    appDataLen);
+            // Check CRC32C
+            unsigned int checksum = bmqp::Crc32c::calculate(
+                dataFd->block().base() + appDataOffset,
+                appDataLen);
 
-                if (rec.crc32c() != checksum) {
-                    BMQTSK_ALARMLOG_ALARM("RECOVERY")
-                        << partitionDesc()
-                        << "Recovery: CRC mismatch for guid ["
-                        << rec.messageGUID() << "] for queueKey ["
-                        << rec.queueKey() << "] in journal file ["
-                        << activeFileSet->d_journalFileName
-                        << "], offset: " << jit->recordOffset()
-                        << ", index: " << jit->recordIndex()
-                        << ". CRC32-C in JOURNAL record: " << rec.crc32c()
-                        << ". CRC32-C of payload in DATA file: " << checksum
-                        << ". Payload offset in DATA file: " << appDataOffset
-                        << BMQTSK_ALARMLOG_END;
-                }
+            if (rec.crc32c() != checksum) {
+                BMQTSK_ALARMLOG_ALARM("RECOVERY")
+                    << partitionDesc() << "Recovery: CRC mismatch for guid ["
+                    << rec.messageGUID() << "] for queueKey ["
+                    << rec.queueKey() << "] in journal file ["
+                    << activeFileSet->d_journalFileName
+                    << "], offset: " << jit->recordOffset()
+                    << ", index: " << jit->recordIndex()
+                    << ". CRC32-C in JOURNAL record: " << rec.crc32c()
+                    << ". CRC32-C of payload in DATA file: " << checksum
+                    << ". Payload offset in DATA file: " << appDataOffset
+                    << BMQTSK_ALARMLOG_END;
             }
 
             DataStoreRecordKey key(sequenceNum, primaryLeaseId);
@@ -2725,8 +2726,8 @@ int FileStore::rolloverImpl(bsls::Types::Uint64 timestamp)
 
     // Start a StatMonitorSnapshotRecorder to track system stats during
     // rollover
-    bmqsys::StatMonitorSnapshotRecorder statRecorder(partitionDesc(),
-                                                     d_allocator_p);
+    mqbstat::StatMonitorSnapshotRecorder statRecorder(partitionDesc(),
+                                                      d_allocator_p);
 
     // Create new files, add header etc.
     FileSetSp newActiveFileSetSp;
@@ -3016,7 +3017,7 @@ int FileStore::rolloverImpl(bsls::Types::Uint64 timestamp)
     // to avoid any race while deleting archived files.
 
     d_config.scheduler()->scheduleEvent(
-        bmqsys::Time::nowMonotonicClock(),
+        bmqu::Time::nowMonotonicClock(),
         bdlf::BindUtil::bind(&FileStore::deleteArchiveFilesCb, this));
 
     BALL_LOG_INFO_BLOCK
@@ -3266,8 +3267,16 @@ int FileStore::rollover()
         rc_SUCCESS                        = 0,
         rc_SYNC_POINT_FAILURE             = -1,
         rc_ROLLOVER_FAILURE               = -2,
-        rc_SYNC_POINT_FORCE_ISSUE_FAILURE = -3
+        rc_SYNC_POINT_FORCE_ISSUE_FAILURE = -3,
+        rc_NOT_PRIMARY                    = -4
     };
+
+    if (!d_isPrimary) {
+        BALL_LOG_ERROR << partitionDesc()
+                       << "Rollover rejected: node is not primary for this "
+                       << "partition.";
+        return rc_NOT_PRIMARY;  // RETURN
+    }
 
     int rc = rc_SUCCESS;
 
@@ -3365,10 +3374,10 @@ void FileStore::truncate(FileSet* fileSet)
 int FileStore::close(FileSet& fileSetRef, bool flush)
 {
     enum RcEnum {
-        rc_SUCCESS                  = 0,
-        rc_FLUSH_FAILURE            = -1,
-        rc_CLOSE_FAILURE            = -2,
-        rc_FLUSH_AND_CLOSE_FAILURES = -3
+        rc_SUCCESS               = 0,
+        rc_DATA_CLOSE_FAILURE    = -1,
+        rc_JOURNAL_CLOSE_FAILURE = -2,
+        rc_QLIST_CLOSE_FAILURE   = -3,
     };
 
     BALL_LOG_INFO_BLOCK
@@ -3378,9 +3387,11 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
         d_config.print(BALL_LOG_OUTPUT_STREAM);
     }
 
-    int rcFinal = rc_SUCCESS;
-
     if (flush) {
+        // NOTE: Even if flush fails, we still want to continue to close the
+        // files.  Otherwise, we may end up with file descriptors getting
+        // leaked.
+
         BALL_LOG_INFO << partitionDesc() << "Flushing partition to disk.";
 
         bmqu::MemOutStream errorDesc;
@@ -3393,7 +3404,6 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
                 << fileSetRef.d_dataFileName << "], error: " << errorDesc.str()
                 << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
-            rcFinal = rc_FLUSH_FAILURE;
         }
 
         rc = FileSystemUtil::flush(fileSetRef.d_journalFile.mapping(),
@@ -3405,7 +3415,6 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
                 << fileSetRef.d_journalFileName
                 << "], error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
             errorDesc.reset();
-            rcFinal = rc_FLUSH_FAILURE;
         }
 
         if (d_qListAware) {
@@ -3418,7 +3427,6 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
                     << fileSetRef.d_qlistFileName
                     << "], error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
                 errorDesc.reset();
-                rcFinal = rc_FLUSH_FAILURE;
             }
         }
 
@@ -3431,8 +3439,7 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
             << partitionDesc() << "Failed to close data file ["
             << fileSetRef.d_dataFileName << "], rc: " << rc
             << BMQTSK_ALARMLOG_END;
-        rcFinal = (rcFinal == rc_FLUSH_FAILURE) ? rc_FLUSH_AND_CLOSE_FAILURES
-                                                : rc_CLOSE_FAILURE;
+        return rc * 10 + rc_DATA_CLOSE_FAILURE;  // RETURN
     }
 
     rc = FileSystemUtil::close(&fileSetRef.d_journalFile);
@@ -3441,8 +3448,7 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
             << partitionDesc() << "Failed to close journal file ["
             << fileSetRef.d_journalFileName << "], rc: " << rc
             << BMQTSK_ALARMLOG_END;
-        rcFinal = (rcFinal == rc_FLUSH_FAILURE) ? rc_FLUSH_AND_CLOSE_FAILURES
-                                                : rc_CLOSE_FAILURE;
+        return rc * 10 + rc_JOURNAL_CLOSE_FAILURE;  // RETURN
     }
 
     if (d_qListAware) {
@@ -3452,72 +3458,34 @@ int FileStore::close(FileSet& fileSetRef, bool flush)
                 << partitionDesc() << "Failed to close qlist file ["
                 << fileSetRef.d_qlistFileName << "], rc: " << rc
                 << BMQTSK_ALARMLOG_END;
-            rcFinal = (rcFinal == rc_FLUSH_FAILURE)
-                          ? rc_FLUSH_AND_CLOSE_FAILURES
-                          : rc_CLOSE_FAILURE;
+            return rc * 10 + rc_QLIST_CLOSE_FAILURE;  // RETURN
         }
     }
 
-    return rcFinal;
+    return rc_SUCCESS;
 }
 
 int FileStore::archive(FileSet* fileSet)
 {
     enum rcEnum { rc_SUCCESS = 0, rc_FILE_MOVE_FAILURE = -1 };
 
-    int rcFinal = rc_SUCCESS;
-
-    int rc = FileSystemUtil::move(fileSet->d_dataFileName,
-                                  d_config.archiveLocation());
+    int rc = FileStoreUtil::archiveFileSet(fileSet->d_dataFileName,
+                                           fileSet->d_journalFileName,
+                                           fileSet->d_qlistFileName,
+                                           d_config.archiveLocation(),
+                                           d_qListAware);
     if (0 != rc) {
         BMQTSK_ALARMLOG_ALARM("FILE_IO")
-            << partitionDesc() << "Failed to move data file ["
-            << fileSet->d_dataFileName << "] " << "to location ["
-            << d_config.archiveLocation() << "] rc: " << rc
+            << partitionDesc() << "Failed to archive file set to location ["
+            << d_config.archiveLocation() << "], rc: " << rc
             << BMQTSK_ALARMLOG_END;
-        rcFinal = rc_FILE_MOVE_FAILURE;
-    }
-    else {
-        BALL_LOG_INFO << partitionDesc() << "Moved data file ["
-                      << fileSet->d_dataFileName << "] to location ["
-                      << d_config.archiveLocation() << "].";
+        return rc_FILE_MOVE_FAILURE;  // RETURN
     }
 
-    rc = FileSystemUtil::move(fileSet->d_journalFileName,
-                              d_config.archiveLocation());
-    if (0 != rc) {
-        BMQTSK_ALARMLOG_ALARM("FILE_IO")
-            << partitionDesc() << "Failed to move journal file ["
-            << fileSet->d_journalFileName << "] " << "to location ["
-            << d_config.archiveLocation() << "] rc: " << rc
-            << BMQTSK_ALARMLOG_END;
-        rcFinal = rc_FILE_MOVE_FAILURE;
-    }
-    else {
-        BALL_LOG_INFO << partitionDesc() << "Moved journal file ["
-                      << fileSet->d_journalFileName << "] to location ["
-                      << d_config.archiveLocation() << "].";
-    }
+    BALL_LOG_INFO << partitionDesc() << "Archived file set to location ["
+                  << d_config.archiveLocation() << "].";
 
-    if (d_qListAware) {
-        rc = FileSystemUtil::move(fileSet->d_qlistFileName,
-                                  d_config.archiveLocation());
-        if (0 != rc) {
-            BMQTSK_ALARMLOG_ALARM("FILE_IO")
-                << partitionDesc() << "Failed to move qlistfile ["
-                << fileSet->d_qlistFileName << "] " << "to location ["
-                << d_config.archiveLocation() << "] rc: " << rc
-                << BMQTSK_ALARMLOG_END;
-            rcFinal = rc_FILE_MOVE_FAILURE;
-        }
-        else {
-            BALL_LOG_INFO << partitionDesc() << "Moved qlist file ["
-                          << fileSet->d_qlistFileName << "] to location ["
-                          << d_config.archiveLocation() << "].";
-        }
-    }
-
-    return rcFinal;
+    return rc_SUCCESS;
 }
 
 void FileStore::gc(FileSet* fileSet)
@@ -3618,9 +3586,9 @@ void FileStore::gcWorkerDispatched(const bsl::shared_ptr<FileSet>& fileSet)
         BALL_LOG_OUTPUT_STREAM << " as it can be gc'd.";
     }
 
-    bsls::Types::Int64 startTime = bmqsys::Time::highResolutionTimer();
+    bsls::Types::Int64 startTime = bmqu::Time::highResolutionTimer();
     int                rc        = close(*fileSet, false);
-    bsls::Types::Int64 closeTime = bmqsys::Time::highResolutionTimer();
+    bsls::Types::Int64 closeTime = bmqu::Time::highResolutionTimer();
     if (rc != 0) {
         BALL_LOG_ERROR << partitionDesc()
                        << "Failed to closed file set. Time taken: "
@@ -3632,9 +3600,13 @@ void FileStore::gcWorkerDispatched(const bsl::shared_ptr<FileSet>& fileSet)
                   << bmqu::PrintUtil::prettyTimeInterval(closeTime -
                                                          startTime);
 
-    bsls::Types::Int64 archiveStartTime = bmqsys::Time::highResolutionTimer();
-    rc                                  = archive(fileSet.get());
-    bsls::Types::Int64 archiveEndTime   = bmqsys::Time::highResolutionTimer();
+    bsls::Types::Int64 archiveStartTime = bmqu::Time::highResolutionTimer();
+    rc = FileStoreUtil::archiveFileSet(fileSet->d_dataFileName,
+                                       fileSet->d_journalFileName,
+                                       fileSet->d_qlistFileName,
+                                       d_config.archiveLocation(),
+                                       d_qListAware);
+    bsls::Types::Int64 archiveEndTime = bmqu::Time::highResolutionTimer();
     if (rc != 0) {
         BALL_LOG_ERROR << partitionDesc()
                        << "Failed to archive file set. Time taken: "
@@ -4205,7 +4177,7 @@ void FileStore::processReceiptEvent(unsigned int         primaryLeaseId,
             // Calculate time it took for the message to be stored and
             // replicated.
             const bsls::Types::Int64 timeDelta =
-                bmqsys::Time::highResolutionTimer() -
+                bmqu::Time::highResolutionTimer() -
                 from->second.d_handle->second.d_arrivalTimepoint;
             d_partitionStats_sp->setReplicationTime(timeDelta);
 
@@ -5282,7 +5254,6 @@ FileStore::FileStore(
 , d_storages(allocator)
 , d_isFSMWorkflow(isFSMWorkflow)
 , d_qListAware(!d_isFSMWorkflow || doesFSMwriteQLIST)
-, d_ignoreCrc32c(false)
 , d_storageEventBuilder(FileStoreProtocol::k_VERSION,
                         bmqp::EventType::e_STORAGE,
                         d_blobSpPool_p,
@@ -5386,13 +5357,19 @@ int FileStore::open(QueueKeyInfoMap* queueKeyInfoMap)
     return rc_SUCCESS;
 }
 
-void FileStore::close(bool flush, bool archive)
+int FileStore::close(bool flush, bool archive)
 {
+    enum RcEnum {
+        rc_SUCCESS         = 0,
+        rc_CLOSE_FAILURE   = -1,
+        rc_ARCHIVE_FAILURE = -2,
+    };
+
     // The FileStore might be not opened by the time we call `close()`
     cancelTimersAndWait();
 
     if (!d_isOpen) {
-        return;  // RETURN
+        return rc_SUCCESS;  // RETURN
     }
 
     d_isOpen             = false;
@@ -5413,6 +5390,8 @@ void FileStore::close(bool flush, bool archive)
     // remaining in 'd_fileSets' (the active one).  Truncate and close it out.
     BSLS_ASSERT_SAFE(1 == d_fileSets.size());
     FileSet* activeFileSet = d_fileSets[0].get();
+
+    // Failure to truncate is non-fatal.  No need to check rc.
     truncate(activeFileSet);
 
     if (0 == --activeFileSet->d_aliasedBlobBufferCount) {
@@ -5431,19 +5410,34 @@ void FileStore::close(bool flush, bool archive)
         }
 
         // TBD Revisit: handle non-zero rc from close()
-        bsls::Types::Int64 startTime = bmqsys::Time::highResolutionTimer();
-        close(*activeFileSet, flush);
-        bsls::Types::Int64 closeTime = bmqsys::Time::highResolutionTimer();
+        bsls::Types::Int64 startTime = bmqu::Time::highResolutionTimer();
+        int                rc        = close(*activeFileSet, flush);
+        if (rc != 0) {
+            BALL_LOG_ERROR << partitionDesc()
+                           << "Failed to close file set, rc: " << rc;
+            return rc * 10 + rc_CLOSE_FAILURE;  // RETURN
+        }
+        bsls::Types::Int64 closeTime = bmqu::Time::highResolutionTimer();
         BALL_LOG_INFO << partitionDesc() << "File set closed. Time taken: "
                       << bmqu::PrintUtil::prettyTimeInterval(closeTime -
                                                              startTime);
 
         if (archive) {
             bsls::Types::Int64 archiveStartTime =
-                bmqsys::Time::highResolutionTimer();
-            FileStore::archive(activeFileSet);
+                bmqu::Time::highResolutionTimer();
+            rc = FileStoreUtil::archiveFileSet(
+                activeFileSet->d_dataFileName,
+                activeFileSet->d_journalFileName,
+                activeFileSet->d_qlistFileName,
+                d_config.archiveLocation(),
+                d_qListAware);
+            if (rc != 0) {
+                BALL_LOG_ERROR << partitionDesc()
+                               << "Failed to archive file set, rc: " << rc;
+                return rc * 10 + rc_ARCHIVE_FAILURE;  // RETURN
+            }
             bsls::Types::Int64 archiveEndTime =
-                bmqsys::Time::highResolutionTimer();
+                bmqu::Time::highResolutionTimer();
             BALL_LOG_INFO << partitionDesc()
                           << "File set archived. Time taken: "
                           << bmqu::PrintUtil::prettyTimeInterval(
@@ -5463,6 +5457,8 @@ void FileStore::close(bool flush, bool archive)
         }
         BSLS_ASSERT_SAFE(!archive);
     }
+
+    return rc_SUCCESS;
 }
 
 void FileStore::createStorage(bsl::shared_ptr<ReplicatedStorage>* storageSp,
@@ -6427,8 +6423,7 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
     rawEvent.loadStorageMessageIterator(&iter);
     BSLS_ASSERT_SAFE(iter.isValid());
 
-    FileStore::NodeContext* nodeContext           = 0;
-    bool                    hasValidLeaseIdSeqNum = false;
+    bool hasValidLeaseIdSeqNum = false;
 
     if (0 < d_primaryLeaseId) {
         // File store encountered valid PSN in 'open()'.
@@ -6547,14 +6542,6 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
 
         if (bmqp::StorageMessageType::e_DATA == header.messageType()) {
             rc = writeMessageRecord(header, *recHeader, blob, recordPosition);
-
-            if (0 == rc && (header.flags() &
-                            bmqp::StorageHeaderFlags::e_RECEIPT_REQUESTED)) {
-                nodeContext = generateReceipt(nodeContext,
-                                              d_primaryNode_p,
-                                              recHeader->primaryLeaseId(),
-                                              recHeader->sequenceNumber());
-            }
         }
         else if (bmqp::StorageMessageType::e_QLIST == header.messageType()) {
             rc = writeQueueCreationRecord(header,
@@ -6583,8 +6570,6 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
             return 10 * rc + rc_WRITE_FAILURE;  // RETURN
         }
     }
-
-    sendReceipt(d_primaryNode_p, nodeContext);
 
     return rc_SUCCESS;
 }
@@ -6674,6 +6659,28 @@ void FileStore::sendReceipt(mqbnet::ClusterNode* node,
 
         // Ignore the error and keep the blob
     }
+}
+
+void FileStore::sendImplicitReceipt()
+{
+    if (!d_primaryNode_p) {
+        return;  // RETURN
+    }
+
+    if (!d_lastRecoveredStrongConsistency.d_primaryLeaseId) {
+        return;  // RETURN
+    }
+    BALL_LOG_INFO << partitionDesc() << "Issuing Implicit Receipt ["
+                  << "primaryLeaseId = " << d_primaryLeaseId
+                  << ", d_sequenceNum = " << sequenceNumber() << "].";
+
+    FileStore::NodeContext* nodeContext = generateReceipt(
+        0,
+        d_primaryNode_p,
+        d_lastRecoveredStrongConsistency.d_primaryLeaseId,
+        d_lastRecoveredStrongConsistency.d_sequenceNum);
+
+    sendReceipt(d_primaryNode_p, nodeContext);
 }
 
 int FileStore::issueSyncPoint()
@@ -6790,20 +6797,8 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
             mqbstat::PartitionStats::PrimaryStatus::e_REPLICA);
         cancelTimersAndWait();
 
-        if (d_lastRecoveredStrongConsistency.d_primaryLeaseId ==
-            d_primaryLeaseId) {
-            BALL_LOG_INFO << partitionDesc()
-                          << "Issuing Implicit Receipt with PSN: "
-                          << printPSN(d_primaryLeaseId, sequenceNumber())
-                          << ".";
+        sendImplicitReceipt();
 
-            FileStore::NodeContext* nodeContext = generateReceipt(
-                0,
-                primaryNode,
-                d_lastRecoveredStrongConsistency.d_primaryLeaseId,
-                d_lastRecoveredStrongConsistency.d_sequenceNum);
-            sendReceipt(primaryNode, nodeContext);
-        }
         return;  // RETURN
     }
 
@@ -7166,7 +7161,7 @@ void FileStore::gcHistory()
     // we might lose a lot of time on allocations of new items to the history,
     // as well as get OOM due to uncontrollable history size increase.
 
-    const bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
+    const bsls::Types::Int64 now = bmqu::Time::highResolutionTimer();
     for (StorageMapIter it = d_storages.begin(); it != d_storages.end();
          ++it) {
         it->second->gcHistory(now);
@@ -7342,7 +7337,7 @@ void FileStore::setReplicationFactor(int value)
             // Calculate time it took for the message to be stored and
             // replicated.
             const bsls::Types::Int64 timeDelta =
-                bmqsys::Time::highResolutionTimer() -
+                bmqu::Time::highResolutionTimer() -
                 it->second.d_handle->second.d_arrivalTimepoint;
             d_partitionStats_sp->setReplicationTime(timeDelta);
 

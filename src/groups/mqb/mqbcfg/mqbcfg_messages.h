@@ -1,4 +1,4 @@
-// Copyright 2025-2026 Bloomberg Finance L.P.
+// Copyright 2026 Bloomberg Finance L.P.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -103,9 +103,6 @@ namespace mqbcfg {
 class ResolvedDomain;
 }
 namespace mqbcfg {
-class StatsPrinterConfig;
-}
-namespace mqbcfg {
 class StorageSyncConfig;
 }
 namespace mqbcfg {
@@ -145,6 +142,9 @@ namespace mqbcfg {
 class StatPluginConfigPrometheus;
 }
 namespace mqbcfg {
+class StatsPrinterConfig;
+}
+namespace mqbcfg {
 class TcpInterfaceConfig;
 }
 namespace mqbcfg {
@@ -152,6 +152,9 @@ class AuthenticatorPluginConfig;
 }
 namespace mqbcfg {
 class ClusterNode;
+}
+namespace mqbcfg {
+class CredentialProviderConfig;
 }
 namespace mqbcfg {
 class DispatcherConfig;
@@ -195,9 +198,17 @@ namespace mqbcfg {
 struct AllocatorType {
   public:
     // TYPES
-    enum Value { NEWDELETE = 0, COUNTING = 1, STACKTRACETEST = 2 };
+    enum Value {
+        e_NEWDELETE      = 0,
+        e_COUNTING       = 1,
+        e_STACKTRACETEST = 2,
 
-    enum { NUM_ENUMERATORS = 3 };
+        NEWDELETE      = e_NEWDELETE,
+        COUNTING       = e_COUNTING,
+        STACKTRACETEST = e_STACKTRACETEST
+    };
+
+    enum { k_NUM_ENUMERATORS = 3, NUM_ENUMERATORS = k_NUM_ENUMERATORS };
 
     // CONSTANTS
     static const char CLASS_NAME[];
@@ -245,7 +256,7 @@ struct AllocatorType {
 
 // TRAITS
 
-BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::AllocatorType)
+BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::AllocatorType);
 
 namespace mqbcfg {
 
@@ -410,7 +421,7 @@ class BmqconfConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::BmqconfConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::BmqconfConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::BmqconfConfig> : bsl::true_type {};
 
@@ -422,22 +433,21 @@ namespace mqbcfg {
 
 class ClusterAttributes {
     // Type representing the attributes specific to a cluster.
-    // isCSLModeEnabled...............:  indicates if CSL is enabled for this
-    // cluster isFSMWorkflow..................:  indicates if CSL FSM workflow
+    // isCSLModeEnabled...............: indicates if CSL is enabled for this
+    // cluster isFSMWorkflow..................: indicates if CSL FSM workflow
     // is enabled for this cluster.  This flag *must* be false if
-    // 'isCSLModeEnabled' is false.  doesFSMwriteQLIST..............:
-    // indicates whether the broker still writes to the to-be-deprecated QLIST
-    // file when FSM workflow is enabled.  If above 'isFSMWorkflow' flag is
-    // false, this flag is ignored.  clusterFsmWatchdogTimeoutSec...:  timeout
-    // duration in seconds for Cluster FSM watchdog.  Only applies when
-    // 'isFSMWorkflow' is true.  clusterFsmWatchdogNumRetries...:  number of
-    // retries for Cluster FSM watchdog before we give up and  terminate the
+    // 'isCSLModeEnabled' is false.  doesFSMwriteQLIST..............: indicates
+    // whether the broker still writes to the to-be-deprecated QLIST file when
+    // FSM workflow is enabled.  If above 'isFSMWorkflow' flag is false, this
+    // flag is ignored.  clusterFsmWatchdogTimeoutSec...: timeout duration in
+    // seconds for Cluster FSM watchdog.  Only applies when 'isFSMWorkflow' is
+    // true.  clusterFsmWatchdogNumRetries...: number of retries for Cluster
+    // FSM watchdog before we give up and terminate the broker.  Only applies
+    // when 'isFSMWorkflow' is true.  partitionFsmWatchdogTimeoutSec.: timeout
+    // duration in seconds for Partition FSM watchdog.  Only applies when
+    // 'isFSMWorkflow' is true.  partitionFsmWatchdogNumRetries.: number of
+    // retries for Partition FSM watchdog before we give up and terminate the
     // broker.  Only applies when 'isFSMWorkflow' is true.
-    // partitionFsmWatchdogTimeoutSec.:  timeout duration in seconds for
-    // Partition FSM watchdog.  Only applies when 'isFSMWorkflow' is true.
-    // partitionFsmWatchdogNumRetries.:  number of retries for Partition FSM
-    // watchdog before we give up and terminate the broker.  Only applies when
-    // 'isFSMWorkflow' is true.
 
     // INSTANCE DATA
     int  d_clusterFsmWatchdogTimeoutSec;
@@ -686,7 +696,7 @@ class ClusterAttributes {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::ClusterAttributes)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::ClusterAttributes);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ClusterAttributes> : bsl::true_type {
 };
@@ -975,7 +985,7 @@ class ClusterMonitorConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::ClusterMonitorConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::ClusterMonitorConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ClusterMonitorConfig>
 : bsl::true_type {};
@@ -1198,7 +1208,7 @@ class Credential {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::Credential)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::Credential);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::Credential> : bsl::true_type {};
 
@@ -1349,7 +1359,7 @@ class Disallow {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::Disallow)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::Disallow);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::Disallow> : bsl::true_type {};
 
@@ -1551,7 +1561,7 @@ class DispatcherProcessorParameters {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::DispatcherProcessorParameters)
+    mqbcfg::DispatcherProcessorParameters);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::DispatcherProcessorParameters>
 : bsl::true_type {};
@@ -1861,7 +1871,7 @@ class ElectorConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::ElectorConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::ElectorConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ElectorConfig> : bsl::true_type {};
 
@@ -1874,9 +1884,15 @@ namespace mqbcfg {
 struct ExportMode {
   public:
     // TYPES
-    enum Value { E_PUSH = 0, E_PULL = 1 };
+    enum Value {
+        e_E_PUSH = 0,
+        e_E_PULL = 1,
 
-    enum { NUM_ENUMERATORS = 2 };
+        E_PUSH = e_E_PUSH,
+        E_PULL = e_E_PULL
+    };
+
+    enum { k_NUM_ENUMERATORS = 2, NUM_ENUMERATORS = k_NUM_ENUMERATORS };
 
     // CONSTANTS
     static const char CLASS_NAME[];
@@ -1924,7 +1940,7 @@ struct ExportMode {
 
 // TRAITS
 
-BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::ExportMode)
+BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::ExportMode);
 
 namespace mqbcfg {
 
@@ -2147,7 +2163,7 @@ class Heartbeat {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::Heartbeat)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::Heartbeat);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::Heartbeat> : bsl::true_type {};
 
@@ -2392,7 +2408,7 @@ class LogDumpConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::LogDumpConfig)
+    mqbcfg::LogDumpConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::LogDumpConfig> : bsl::true_type {};
 
@@ -2410,9 +2426,15 @@ struct MasterAssignmentAlgorithm {
 
   public:
     // TYPES
-    enum Value { E_LEADER_IS_MASTER_ALL = 0, E_LEAST_ASSIGNED = 1 };
+    enum Value {
+        e_E_LEADER_IS_MASTER_ALL = 0,
+        e_E_LEAST_ASSIGNED       = 1,
 
-    enum { NUM_ENUMERATORS = 2 };
+        E_LEADER_IS_MASTER_ALL = e_E_LEADER_IS_MASTER_ALL,
+        E_LEAST_ASSIGNED       = e_E_LEAST_ASSIGNED
+    };
+
+    enum { k_NUM_ENUMERATORS = 2, NUM_ENUMERATORS = k_NUM_ENUMERATORS };
 
     // CONSTANTS
     static const char CLASS_NAME[];
@@ -2460,7 +2482,7 @@ struct MasterAssignmentAlgorithm {
 
 // TRAITS
 
-BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::MasterAssignmentAlgorithm)
+BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::MasterAssignmentAlgorithm);
 
 namespace mqbcfg {
 
@@ -2671,7 +2693,7 @@ class MessagePropertiesV2 {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::MessagePropertiesV2)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::MessagePropertiesV2);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::MessagePropertiesV2>
 : bsl::true_type {};
@@ -2899,7 +2921,7 @@ class MessageThrottleConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::MessageThrottleConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::MessageThrottleConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::MessageThrottleConfig>
 : bsl::true_type {};
@@ -3218,7 +3240,7 @@ class PluginSettingValue {
 // TRAITS
 
 BDLAT_DECL_CHOICE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::PluginSettingValue)
+    mqbcfg::PluginSettingValue);
 
 namespace mqbcfg {
 
@@ -3431,7 +3453,7 @@ class Plugins {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::Plugins)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::Plugins);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::Plugins> : bsl::true_type {};
 
@@ -3792,7 +3814,7 @@ class QueueOperationsConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::QueueOperationsConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::QueueOperationsConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::QueueOperationsConfig>
 : bsl::true_type {};
@@ -4024,265 +4046,77 @@ class ResolvedDomain {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::ResolvedDomain)
+    mqbcfg::ResolvedDomain);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ResolvedDomain> : bsl::true_type {};
 
 namespace mqbcfg {
 
-// ========================
-// class StatsPrinterConfig
-// ========================
+// ================================
+// class StatsPrinterEncodingFormat
+// ================================
 
-class StatsPrinterConfig {
-    // INSTANCE DATA
-    bsl::string d_file;
-    int         d_printInterval;
-    int         d_maxAgeDays;
-    int         d_rotateBytes;
-    int         d_rotateDays;
-
-    // PRIVATE ACCESSORS
-    template <typename t_HASH_ALGORITHM>
-    void hashAppendImpl(t_HASH_ALGORITHM& hashAlgorithm) const;
-
-    bool isEqualTo(const StatsPrinterConfig& rhs) const;
+struct StatsPrinterEncodingFormat {
+    // Bitmask of stats output encoding formats: - NONE:           no stats
+    // output (0) - TABLE:          human-readable table format (1) - JSON:
+    //       machine-readable JSON format (2) - TABLE_AND_JSON: both formats
+    // (TABLE | JSON = 3)
 
   public:
     // TYPES
-    enum {
-        ATTRIBUTE_ID_PRINT_INTERVAL = 0,
-        ATTRIBUTE_ID_FILE           = 1,
-        ATTRIBUTE_ID_MAX_AGE_DAYS   = 2,
-        ATTRIBUTE_ID_ROTATE_BYTES   = 3,
-        ATTRIBUTE_ID_ROTATE_DAYS    = 4
+    enum Value {
+        e_NONE           = 0,
+        e_TABLE          = 1,
+        e_JSON           = 2,
+        e_TABLE_AND_JSON = 3,
+
+        NONE           = e_NONE,
+        TABLE          = e_TABLE,
+        JSON           = e_JSON,
+        TABLE_AND_JSON = e_TABLE_AND_JSON
     };
 
-    enum { NUM_ATTRIBUTES = 5 };
-
-    enum {
-        ATTRIBUTE_INDEX_PRINT_INTERVAL = 0,
-        ATTRIBUTE_INDEX_FILE           = 1,
-        ATTRIBUTE_INDEX_MAX_AGE_DAYS   = 2,
-        ATTRIBUTE_INDEX_ROTATE_BYTES   = 3,
-        ATTRIBUTE_INDEX_ROTATE_DAYS    = 4
-    };
+    enum { k_NUM_ENUMERATORS = 4, NUM_ENUMERATORS = k_NUM_ENUMERATORS };
 
     // CONSTANTS
     static const char CLASS_NAME[];
 
-    static const int DEFAULT_INITIALIZER_PRINT_INTERVAL;
+    static const bdlat_EnumeratorInfo ENUMERATOR_INFO_ARRAY[];
 
-    static const int DEFAULT_INITIALIZER_ROTATE_BYTES;
-
-    static const int DEFAULT_INITIALIZER_ROTATE_DAYS;
-
-    static const bdlat_AttributeInfo ATTRIBUTE_INFO_ARRAY[];
-
-  public:
     // CLASS METHODS
-    static const bdlat_AttributeInfo* lookupAttributeInfo(int id);
-    // Return attribute information for the attribute indicated by the
-    // specified 'id' if the attribute exists, and 0 otherwise.
+    static const char* toString(Value value);
+    // Return the string representation exactly matching the enumerator
+    // name corresponding to the specified enumeration 'value'.
 
-    static const bdlat_AttributeInfo* lookupAttributeInfo(const char* name,
-                                                          int nameLength);
-    // Return attribute information for the attribute indicated by the
-    // specified 'name' of the specified 'nameLength' if the attribute
-    // exists, and 0 otherwise.
+    static int fromString(Value* result, const char* string, int stringLength);
+    // Load into the specified 'result' the enumerator matching the
+    // specified 'string' of the specified 'stringLength'.  Return 0 on
+    // success, and a non-zero value with no effect on 'result' otherwise
+    // (i.e., 'string' does not match any enumerator).
 
-    // CREATORS
-    explicit StatsPrinterConfig(bslma::Allocator* basicAllocator = 0);
-    // Create an object of type 'StatsPrinterConfig' having the default
-    // value.  Use the optionally specified 'basicAllocator' to supply
-    // memory.  If 'basicAllocator' is 0, the currently installed default
-    // allocator is used.
+    static int fromString(Value* result, const bsl::string& string);
+    // Load into the specified 'result' the enumerator matching the
+    // specified 'string'.  Return 0 on success, and a non-zero value with
+    // no effect on 'result' otherwise (i.e., 'string' does not match any
+    // enumerator).
 
-    StatsPrinterConfig(const StatsPrinterConfig& original,
-                       bslma::Allocator*         basicAllocator = 0);
-    // Create an object of type 'StatsPrinterConfig' having the value of
-    // the specified 'original' object.  Use the optionally specified
-    // 'basicAllocator' to supply memory.  If 'basicAllocator' is 0, the
-    // currently installed default allocator is used.
+    static int fromInt(Value* result, int number);
+    // Load into the specified 'result' the enumerator matching the
+    // specified 'number'.  Return 0 on success, and a non-zero value with
+    // no effect on 'result' otherwise (i.e., 'number' does not match any
+    // enumerator).
 
-#if defined(BSLS_COMPILERFEATURES_SUPPORT_RVALUE_REFERENCES) &&               \
-    defined(BSLS_COMPILERFEATURES_SUPPORT_NOEXCEPT)
-    StatsPrinterConfig(StatsPrinterConfig&& original) noexcept;
-    // Create an object of type 'StatsPrinterConfig' having the value of
-    // the specified 'original' object.  After performing this action, the
-    // 'original' object will be left in a valid, but unspecified state.
-
-    StatsPrinterConfig(StatsPrinterConfig&& original,
-                       bslma::Allocator*    basicAllocator);
-    // Create an object of type 'StatsPrinterConfig' having the value of
-    // the specified 'original' object.  After performing this action, the
-    // 'original' object will be left in a valid, but unspecified state.
-    // Use the optionally specified 'basicAllocator' to supply memory.  If
-    // 'basicAllocator' is 0, the currently installed default allocator is
-    // used.
-#endif
-
-    ~StatsPrinterConfig();
-    // Destroy this object.
-
-    // MANIPULATORS
-    StatsPrinterConfig& operator=(const StatsPrinterConfig& rhs);
-    // Assign to this object the value of the specified 'rhs' object.
-
-#if defined(BSLS_COMPILERFEATURES_SUPPORT_RVALUE_REFERENCES) &&               \
-    defined(BSLS_COMPILERFEATURES_SUPPORT_NOEXCEPT)
-    StatsPrinterConfig& operator=(StatsPrinterConfig&& rhs);
-    // Assign to this object the value of the specified 'rhs' object.
-    // After performing this action, the 'rhs' object will be left in a
-    // valid, but unspecified state.
-#endif
-
-    void reset();
-    // Reset this object to the default value (i.e., its value upon
-    // default construction).
-
-    template <typename t_MANIPULATOR>
-    int manipulateAttributes(t_MANIPULATOR& manipulator);
-    // Invoke the specified 'manipulator' sequentially on the address of
-    // each (modifiable) attribute of this object, supplying 'manipulator'
-    // with the corresponding attribute information structure until such
-    // invocation returns a non-zero value.  Return the value from the
-    // last invocation of 'manipulator' (i.e., the invocation that
-    // terminated the sequence).
-
-    template <typename t_MANIPULATOR>
-    int manipulateAttribute(t_MANIPULATOR& manipulator, int id);
-    // Invoke the specified 'manipulator' on the address of
-    // the (modifiable) attribute indicated by the specified 'id',
-    // supplying 'manipulator' with the corresponding attribute
-    // information structure.  Return the value returned from the
-    // invocation of 'manipulator' if 'id' identifies an attribute of this
-    // class, and -1 otherwise.
-
-    template <typename t_MANIPULATOR>
-    int manipulateAttribute(t_MANIPULATOR& manipulator,
-                            const char*    name,
-                            int            nameLength);
-    // Invoke the specified 'manipulator' on the address of
-    // the (modifiable) attribute indicated by the specified 'name' of the
-    // specified 'nameLength', supplying 'manipulator' with the
-    // corresponding attribute information structure.  Return the value
-    // returned from the invocation of 'manipulator' if 'name' identifies
-    // an attribute of this class, and -1 otherwise.
-
-    int& printInterval();
-    // Return a reference to the modifiable "PrintInterval" attribute of
-    // this object.
-
-    bsl::string& file();
-    // Return a reference to the modifiable "File" attribute of this
-    // object.
-
-    int& maxAgeDays();
-    // Return a reference to the modifiable "MaxAgeDays" attribute of this
-    // object.
-
-    int& rotateBytes();
-    // Return a reference to the modifiable "RotateBytes" attribute of this
-    // object.
-
-    int& rotateDays();
-    // Return a reference to the modifiable "RotateDays" attribute of this
-    // object.
-
-    // ACCESSORS
-    bsl::ostream&
-    print(bsl::ostream& stream, int level = 0, int spacesPerLevel = 4) const;
-    // Format this object to the specified output 'stream' at the
-    // optionally specified indentation 'level' and return a reference to
-    // the modifiable 'stream'.  If 'level' is specified, optionally
-    // specify 'spacesPerLevel', the number of spaces per indentation level
-    // for this and all of its nested objects.  Each line is indented by
-    // the absolute value of 'level * spacesPerLevel'.  If 'level' is
-    // negative, suppress indentation of the first line.  If
-    // 'spacesPerLevel' is negative, suppress line breaks and format the
-    // entire output on one line.  If 'stream' is initially invalid, this
-    // operation has no effect.  Note that a trailing newline is provided
-    // in multiline mode only.
-
-    template <typename t_ACCESSOR>
-    int accessAttributes(t_ACCESSOR& accessor) const;
-    // Invoke the specified 'accessor' sequentially on each
-    // (non-modifiable) attribute of this object, supplying 'accessor'
-    // with the corresponding attribute information structure until such
-    // invocation returns a non-zero value.  Return the value from the
-    // last invocation of 'accessor' (i.e., the invocation that terminated
-    // the sequence).
-
-    template <typename t_ACCESSOR>
-    int accessAttribute(t_ACCESSOR& accessor, int id) const;
-    // Invoke the specified 'accessor' on the (non-modifiable) attribute
-    // of this object indicated by the specified 'id', supplying 'accessor'
-    // with the corresponding attribute information structure.  Return the
-    // value returned from the invocation of 'accessor' if 'id' identifies
-    // an attribute of this class, and -1 otherwise.
-
-    template <typename t_ACCESSOR>
-    int accessAttribute(t_ACCESSOR& accessor,
-                        const char* name,
-                        int         nameLength) const;
-    // Invoke the specified 'accessor' on the (non-modifiable) attribute
-    // of this object indicated by the specified 'name' of the specified
-    // 'nameLength', supplying 'accessor' with the corresponding attribute
-    // information structure.  Return the value returned from the
-    // invocation of 'accessor' if 'name' identifies an attribute of this
-    // class, and -1 otherwise.
-
-    int printInterval() const;
-    // Return the value of the "PrintInterval" attribute of this object.
-
-    const bsl::string& file() const;
-    // Return a reference offering non-modifiable access to the "File"
-    // attribute of this object.
-
-    int maxAgeDays() const;
-    // Return the value of the "MaxAgeDays" attribute of this object.
-
-    int rotateBytes() const;
-    // Return the value of the "RotateBytes" attribute of this object.
-
-    int rotateDays() const;
-    // Return the value of the "RotateDays" attribute of this object.
+    static bsl::ostream& print(bsl::ostream& stream, Value value);
+    // Write to the specified 'stream' the string representation of
+    // the specified enumeration 'value'.  Return a reference to
+    // the modifiable 'stream'.
 
     // HIDDEN FRIENDS
-    friend bool operator==(const StatsPrinterConfig& lhs,
-                           const StatsPrinterConfig& rhs)
-    // Return 'true' if the specified 'lhs' and 'rhs' attribute objects
-    // have the same value, and 'false' otherwise.  Two attribute objects
-    // have the same value if each respective attribute has the same value.
-    {
-        return lhs.isEqualTo(rhs);
-    }
-
-    friend bool operator!=(const StatsPrinterConfig& lhs,
-                           const StatsPrinterConfig& rhs)
-    // Returns '!(lhs == rhs)'
-    {
-        return !(lhs == rhs);
-    }
-
-    friend bsl::ostream& operator<<(bsl::ostream&             stream,
-                                    const StatsPrinterConfig& rhs)
+    friend bsl::ostream& operator<<(bsl::ostream& stream, Value rhs)
     // Format the specified 'rhs' to the specified output 'stream' and
     // return a reference to the modifiable 'stream'.
     {
-        return rhs.print(stream, 0, -1);
-    }
-
-    template <typename t_HASH_ALGORITHM>
-    friend void hashAppend(t_HASH_ALGORITHM&         hashAlg,
-                           const StatsPrinterConfig& object)
-    // Pass the specified 'object' to the specified 'hashAlg'.  This
-    // function integrates with the 'bslh' modular hashing system and
-    // effectively provides a 'bsl::hash' specialization for
-    // 'StatsPrinterConfig'.
-    {
-        object.hashAppendImpl(hashAlg);
+        return StatsPrinterEncodingFormat::print(stream, rhs);
     }
 };
 
@@ -4290,11 +4124,7 @@ class StatsPrinterConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::StatsPrinterConfig)
-template <>
-struct bdlat_UsesDefaultValueFlag<mqbcfg::StatsPrinterConfig>
-: bsl::true_type {};
+BDLAT_DECL_ENUMERATION_TRAITS(mqbcfg::StatsPrinterEncodingFormat);
 
 namespace mqbcfg {
 
@@ -4627,7 +4457,7 @@ class StorageSyncConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::StorageSyncConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::StorageSyncConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::StorageSyncConfig> : bsl::true_type {
 };
@@ -4879,7 +4709,8 @@ class SyslogConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::SyslogConfig)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
+    mqbcfg::SyslogConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::SyslogConfig> : bsl::true_type {};
 
@@ -5095,7 +4926,7 @@ class TcpClusterNodeConnection {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::TcpClusterNodeConnection)
+    mqbcfg::TcpClusterNodeConnection);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::TcpClusterNodeConnection>
 : bsl::true_type {};
@@ -5110,7 +4941,7 @@ class TcpInterfaceListener {
     // This type describes the information needed for the broker to open a TCP
     // listener.
     // name.................: A name to associate this listener to.
-    // address..............: The IP address this listener will accept
+    // address..............: The IPv4 address this listener will accept
     // connections on.  port.................: The port this listener will
     // accept connections on.  tls..................: Use TLS on this
     // interface.
@@ -5359,7 +5190,7 @@ class TcpInterfaceListener {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::TcpInterfaceListener)
+    mqbcfg::TcpInterfaceListener);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::TcpInterfaceListener>
 : bsl::true_type {};
@@ -5843,7 +5674,7 @@ class VirtualClusterInformation {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::VirtualClusterInformation)
+    mqbcfg::VirtualClusterInformation);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::VirtualClusterInformation>
 : bsl::true_type {};
@@ -6101,7 +5932,7 @@ class AnonymousCredential {
 // TRAITS
 
 BDLAT_DECL_CHOICE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::AnonymousCredential)
+    mqbcfg::AnonymousCredential);
 
 namespace mqbcfg {
 
@@ -6324,7 +6155,7 @@ class ClusterNodeConnection {
 // TRAITS
 
 BDLAT_DECL_CHOICE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::ClusterNodeConnection)
+    mqbcfg::ClusterNodeConnection);
 
 namespace mqbcfg {
 
@@ -6510,7 +6341,7 @@ class DispatcherProcessorConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::DispatcherProcessorConfig)
+    mqbcfg::DispatcherProcessorConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::DispatcherProcessorConfig>
 : bsl::true_type {};
@@ -6839,7 +6670,7 @@ class LogController {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::LogController)
+    mqbcfg::LogController);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::LogController> : bsl::true_type {};
 
@@ -7199,7 +7030,7 @@ class PartitionConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::PartitionConfig)
+    mqbcfg::PartitionConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::PartitionConfig> : bsl::true_type {};
 
@@ -7423,7 +7254,7 @@ class PluginSettingKeyValue {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::PluginSettingKeyValue)
+    mqbcfg::PluginSettingKeyValue);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::PluginSettingKeyValue>
 : bsl::true_type {};
@@ -7672,9 +7503,290 @@ class StatPluginConfigPrometheus {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::StatPluginConfigPrometheus)
+    mqbcfg::StatPluginConfigPrometheus);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::StatPluginConfigPrometheus>
+: bsl::true_type {};
+
+namespace mqbcfg {
+
+// ========================
+// class StatsPrinterConfig
+// ========================
+
+class StatsPrinterConfig {
+    // INSTANCE DATA
+    bsl::string                       d_file;
+    int                               d_printInterval;
+    int                               d_maxAgeDays;
+    int                               d_rotateBytes;
+    int                               d_rotateDays;
+    StatsPrinterEncodingFormat::Value d_encoding;
+
+    // PRIVATE ACCESSORS
+    template <typename t_HASH_ALGORITHM>
+    void hashAppendImpl(t_HASH_ALGORITHM& hashAlgorithm) const;
+
+    bool isEqualTo(const StatsPrinterConfig& rhs) const;
+
+  public:
+    // TYPES
+    enum {
+        ATTRIBUTE_ID_PRINT_INTERVAL = 0,
+        ATTRIBUTE_ID_FILE           = 1,
+        ATTRIBUTE_ID_MAX_AGE_DAYS   = 2,
+        ATTRIBUTE_ID_ROTATE_BYTES   = 3,
+        ATTRIBUTE_ID_ROTATE_DAYS    = 4,
+        ATTRIBUTE_ID_ENCODING       = 5
+    };
+
+    enum { NUM_ATTRIBUTES = 6 };
+
+    enum {
+        ATTRIBUTE_INDEX_PRINT_INTERVAL = 0,
+        ATTRIBUTE_INDEX_FILE           = 1,
+        ATTRIBUTE_INDEX_MAX_AGE_DAYS   = 2,
+        ATTRIBUTE_INDEX_ROTATE_BYTES   = 3,
+        ATTRIBUTE_INDEX_ROTATE_DAYS    = 4,
+        ATTRIBUTE_INDEX_ENCODING       = 5
+    };
+
+    // CONSTANTS
+    static const char CLASS_NAME[];
+
+    static const int DEFAULT_INITIALIZER_PRINT_INTERVAL;
+
+    static const int DEFAULT_INITIALIZER_ROTATE_BYTES;
+
+    static const int DEFAULT_INITIALIZER_ROTATE_DAYS;
+
+    static const StatsPrinterEncodingFormat::Value
+        DEFAULT_INITIALIZER_ENCODING;
+
+    static const bdlat_AttributeInfo ATTRIBUTE_INFO_ARRAY[];
+
+  public:
+    // CLASS METHODS
+    static const bdlat_AttributeInfo* lookupAttributeInfo(int id);
+    // Return attribute information for the attribute indicated by the
+    // specified 'id' if the attribute exists, and 0 otherwise.
+
+    static const bdlat_AttributeInfo* lookupAttributeInfo(const char* name,
+                                                          int nameLength);
+    // Return attribute information for the attribute indicated by the
+    // specified 'name' of the specified 'nameLength' if the attribute
+    // exists, and 0 otherwise.
+
+    // CREATORS
+    explicit StatsPrinterConfig(bslma::Allocator* basicAllocator = 0);
+    // Create an object of type 'StatsPrinterConfig' having the default
+    // value.  Use the optionally specified 'basicAllocator' to supply
+    // memory.  If 'basicAllocator' is 0, the currently installed default
+    // allocator is used.
+
+    StatsPrinterConfig(const StatsPrinterConfig& original,
+                       bslma::Allocator*         basicAllocator = 0);
+    // Create an object of type 'StatsPrinterConfig' having the value of
+    // the specified 'original' object.  Use the optionally specified
+    // 'basicAllocator' to supply memory.  If 'basicAllocator' is 0, the
+    // currently installed default allocator is used.
+
+#if defined(BSLS_COMPILERFEATURES_SUPPORT_RVALUE_REFERENCES) &&               \
+    defined(BSLS_COMPILERFEATURES_SUPPORT_NOEXCEPT)
+    StatsPrinterConfig(StatsPrinterConfig&& original) noexcept;
+    // Create an object of type 'StatsPrinterConfig' having the value of
+    // the specified 'original' object.  After performing this action, the
+    // 'original' object will be left in a valid, but unspecified state.
+
+    StatsPrinterConfig(StatsPrinterConfig&& original,
+                       bslma::Allocator*    basicAllocator);
+    // Create an object of type 'StatsPrinterConfig' having the value of
+    // the specified 'original' object.  After performing this action, the
+    // 'original' object will be left in a valid, but unspecified state.
+    // Use the optionally specified 'basicAllocator' to supply memory.  If
+    // 'basicAllocator' is 0, the currently installed default allocator is
+    // used.
+#endif
+
+    ~StatsPrinterConfig();
+    // Destroy this object.
+
+    // MANIPULATORS
+    StatsPrinterConfig& operator=(const StatsPrinterConfig& rhs);
+    // Assign to this object the value of the specified 'rhs' object.
+
+#if defined(BSLS_COMPILERFEATURES_SUPPORT_RVALUE_REFERENCES) &&               \
+    defined(BSLS_COMPILERFEATURES_SUPPORT_NOEXCEPT)
+    StatsPrinterConfig& operator=(StatsPrinterConfig&& rhs);
+    // Assign to this object the value of the specified 'rhs' object.
+    // After performing this action, the 'rhs' object will be left in a
+    // valid, but unspecified state.
+#endif
+
+    void reset();
+    // Reset this object to the default value (i.e., its value upon
+    // default construction).
+
+    template <typename t_MANIPULATOR>
+    int manipulateAttributes(t_MANIPULATOR& manipulator);
+    // Invoke the specified 'manipulator' sequentially on the address of
+    // each (modifiable) attribute of this object, supplying 'manipulator'
+    // with the corresponding attribute information structure until such
+    // invocation returns a non-zero value.  Return the value from the
+    // last invocation of 'manipulator' (i.e., the invocation that
+    // terminated the sequence).
+
+    template <typename t_MANIPULATOR>
+    int manipulateAttribute(t_MANIPULATOR& manipulator, int id);
+    // Invoke the specified 'manipulator' on the address of
+    // the (modifiable) attribute indicated by the specified 'id',
+    // supplying 'manipulator' with the corresponding attribute
+    // information structure.  Return the value returned from the
+    // invocation of 'manipulator' if 'id' identifies an attribute of this
+    // class, and -1 otherwise.
+
+    template <typename t_MANIPULATOR>
+    int manipulateAttribute(t_MANIPULATOR& manipulator,
+                            const char*    name,
+                            int            nameLength);
+    // Invoke the specified 'manipulator' on the address of
+    // the (modifiable) attribute indicated by the specified 'name' of the
+    // specified 'nameLength', supplying 'manipulator' with the
+    // corresponding attribute information structure.  Return the value
+    // returned from the invocation of 'manipulator' if 'name' identifies
+    // an attribute of this class, and -1 otherwise.
+
+    int& printInterval();
+    // Return a reference to the modifiable "PrintInterval" attribute of
+    // this object.
+
+    bsl::string& file();
+    // Return a reference to the modifiable "File" attribute of this
+    // object.
+
+    int& maxAgeDays();
+    // Return a reference to the modifiable "MaxAgeDays" attribute of this
+    // object.
+
+    int& rotateBytes();
+    // Return a reference to the modifiable "RotateBytes" attribute of this
+    // object.
+
+    int& rotateDays();
+    // Return a reference to the modifiable "RotateDays" attribute of this
+    // object.
+
+    StatsPrinterEncodingFormat::Value& encoding();
+    // Return a reference to the modifiable "Encoding" attribute of this
+    // object.
+
+    // ACCESSORS
+    bsl::ostream&
+    print(bsl::ostream& stream, int level = 0, int spacesPerLevel = 4) const;
+    // Format this object to the specified output 'stream' at the
+    // optionally specified indentation 'level' and return a reference to
+    // the modifiable 'stream'.  If 'level' is specified, optionally
+    // specify 'spacesPerLevel', the number of spaces per indentation level
+    // for this and all of its nested objects.  Each line is indented by
+    // the absolute value of 'level * spacesPerLevel'.  If 'level' is
+    // negative, suppress indentation of the first line.  If
+    // 'spacesPerLevel' is negative, suppress line breaks and format the
+    // entire output on one line.  If 'stream' is initially invalid, this
+    // operation has no effect.  Note that a trailing newline is provided
+    // in multiline mode only.
+
+    template <typename t_ACCESSOR>
+    int accessAttributes(t_ACCESSOR& accessor) const;
+    // Invoke the specified 'accessor' sequentially on each
+    // (non-modifiable) attribute of this object, supplying 'accessor'
+    // with the corresponding attribute information structure until such
+    // invocation returns a non-zero value.  Return the value from the
+    // last invocation of 'accessor' (i.e., the invocation that terminated
+    // the sequence).
+
+    template <typename t_ACCESSOR>
+    int accessAttribute(t_ACCESSOR& accessor, int id) const;
+    // Invoke the specified 'accessor' on the (non-modifiable) attribute
+    // of this object indicated by the specified 'id', supplying 'accessor'
+    // with the corresponding attribute information structure.  Return the
+    // value returned from the invocation of 'accessor' if 'id' identifies
+    // an attribute of this class, and -1 otherwise.
+
+    template <typename t_ACCESSOR>
+    int accessAttribute(t_ACCESSOR& accessor,
+                        const char* name,
+                        int         nameLength) const;
+    // Invoke the specified 'accessor' on the (non-modifiable) attribute
+    // of this object indicated by the specified 'name' of the specified
+    // 'nameLength', supplying 'accessor' with the corresponding attribute
+    // information structure.  Return the value returned from the
+    // invocation of 'accessor' if 'name' identifies an attribute of this
+    // class, and -1 otherwise.
+
+    int printInterval() const;
+    // Return the value of the "PrintInterval" attribute of this object.
+
+    const bsl::string& file() const;
+    // Return a reference offering non-modifiable access to the "File"
+    // attribute of this object.
+
+    int maxAgeDays() const;
+    // Return the value of the "MaxAgeDays" attribute of this object.
+
+    int rotateBytes() const;
+    // Return the value of the "RotateBytes" attribute of this object.
+
+    int rotateDays() const;
+    // Return the value of the "RotateDays" attribute of this object.
+
+    StatsPrinterEncodingFormat::Value encoding() const;
+    // Return the value of the "Encoding" attribute of this object.
+
+    // HIDDEN FRIENDS
+    friend bool operator==(const StatsPrinterConfig& lhs,
+                           const StatsPrinterConfig& rhs)
+    // Return 'true' if the specified 'lhs' and 'rhs' attribute objects
+    // have the same value, and 'false' otherwise.  Two attribute objects
+    // have the same value if each respective attribute has the same value.
+    {
+        return lhs.isEqualTo(rhs);
+    }
+
+    friend bool operator!=(const StatsPrinterConfig& lhs,
+                           const StatsPrinterConfig& rhs)
+    // Returns '!(lhs == rhs)'
+    {
+        return !(lhs == rhs);
+    }
+
+    friend bsl::ostream& operator<<(bsl::ostream&             stream,
+                                    const StatsPrinterConfig& rhs)
+    // Format the specified 'rhs' to the specified output 'stream' and
+    // return a reference to the modifiable 'stream'.
+    {
+        return rhs.print(stream, 0, -1);
+    }
+
+    template <typename t_HASH_ALGORITHM>
+    friend void hashAppend(t_HASH_ALGORITHM&         hashAlg,
+                           const StatsPrinterConfig& object)
+    // Pass the specified 'object' to the specified 'hashAlg'.  This
+    // function integrates with the 'bslh' modular hashing system and
+    // effectively provides a 'bsl::hash' specialization for
+    // 'StatsPrinterConfig'.
+    {
+        object.hashAppendImpl(hashAlg);
+    }
+};
+
+}  // close package namespace
+
+// TRAITS
+
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
+    mqbcfg::StatsPrinterConfig);
+template <>
+struct bdlat_UsesDefaultValueFlag<mqbcfg::StatsPrinterConfig>
 : bsl::true_type {};
 
 namespace mqbcfg {
@@ -8007,7 +8119,7 @@ class TcpInterfaceConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::TcpInterfaceConfig)
+    mqbcfg::TcpInterfaceConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::TcpInterfaceConfig>
 : bsl::true_type {};
@@ -8235,7 +8347,7 @@ class AuthenticatorPluginConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::AuthenticatorPluginConfig)
+    mqbcfg::AuthenticatorPluginConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::AuthenticatorPluginConfig>
 : bsl::true_type {};
@@ -8489,9 +8601,237 @@ class ClusterNode {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::ClusterNode)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::ClusterNode);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ClusterNode> : bsl::true_type {};
+
+namespace mqbcfg {
+
+// ==============================
+// class CredentialProviderConfig
+// ==============================
+
+class CredentialProviderConfig {
+    // The configuration for the broker's credential provider.
+    // name.....: The name of the credential provider.  settings.:
+    // Plugin-specific settings.
+
+    // INSTANCE DATA
+    bsl::vector<PluginSettingKeyValue> d_settings;
+    bsl::string                        d_name;
+
+  public:
+    // TYPES
+    enum { ATTRIBUTE_ID_NAME = 0, ATTRIBUTE_ID_SETTINGS = 1 };
+
+    enum { NUM_ATTRIBUTES = 2 };
+
+    enum { ATTRIBUTE_INDEX_NAME = 0, ATTRIBUTE_INDEX_SETTINGS = 1 };
+
+    // CONSTANTS
+    static const char CLASS_NAME[];
+
+    static const bdlat_AttributeInfo ATTRIBUTE_INFO_ARRAY[];
+
+  public:
+    // CLASS METHODS
+    static const bdlat_AttributeInfo* lookupAttributeInfo(int id);
+    // Return attribute information for the attribute indicated by the
+    // specified 'id' if the attribute exists, and 0 otherwise.
+
+    static const bdlat_AttributeInfo* lookupAttributeInfo(const char* name,
+                                                          int nameLength);
+    // Return attribute information for the attribute indicated by the
+    // specified 'name' of the specified 'nameLength' if the attribute
+    // exists, and 0 otherwise.
+
+    // CREATORS
+    explicit CredentialProviderConfig(bslma::Allocator* basicAllocator = 0);
+    // Create an object of type 'CredentialProviderConfig' having the
+    // default value.  Use the optionally specified 'basicAllocator' to
+    // supply memory.  If 'basicAllocator' is 0, the currently installed
+    // default allocator is used.
+
+    CredentialProviderConfig(const CredentialProviderConfig& original,
+                             bslma::Allocator* basicAllocator = 0);
+    // Create an object of type 'CredentialProviderConfig' having the value
+    // of the specified 'original' object.  Use the optionally specified
+    // 'basicAllocator' to supply memory.  If 'basicAllocator' is 0, the
+    // currently installed default allocator is used.
+
+#if defined(BSLS_COMPILERFEATURES_SUPPORT_RVALUE_REFERENCES) &&               \
+    defined(BSLS_COMPILERFEATURES_SUPPORT_NOEXCEPT)
+    CredentialProviderConfig(CredentialProviderConfig&& original) noexcept;
+    // Create an object of type 'CredentialProviderConfig' having the value
+    // of the specified 'original' object.  After performing this action,
+    // the 'original' object will be left in a valid, but unspecified
+    // state.
+
+    CredentialProviderConfig(CredentialProviderConfig&& original,
+                             bslma::Allocator*          basicAllocator);
+    // Create an object of type 'CredentialProviderConfig' having the value
+    // of the specified 'original' object.  After performing this action,
+    // the 'original' object will be left in a valid, but unspecified
+    // state.  Use the optionally specified 'basicAllocator' to supply
+    // memory.  If 'basicAllocator' is 0, the currently installed default
+    // allocator is used.
+#endif
+
+    ~CredentialProviderConfig();
+    // Destroy this object.
+
+    // MANIPULATORS
+    CredentialProviderConfig& operator=(const CredentialProviderConfig& rhs);
+    // Assign to this object the value of the specified 'rhs' object.
+
+#if defined(BSLS_COMPILERFEATURES_SUPPORT_RVALUE_REFERENCES) &&               \
+    defined(BSLS_COMPILERFEATURES_SUPPORT_NOEXCEPT)
+    CredentialProviderConfig& operator=(CredentialProviderConfig&& rhs);
+    // Assign to this object the value of the specified 'rhs' object.
+    // After performing this action, the 'rhs' object will be left in a
+    // valid, but unspecified state.
+#endif
+
+    void reset();
+    // Reset this object to the default value (i.e., its value upon
+    // default construction).
+
+    template <typename t_MANIPULATOR>
+    int manipulateAttributes(t_MANIPULATOR& manipulator);
+    // Invoke the specified 'manipulator' sequentially on the address of
+    // each (modifiable) attribute of this object, supplying 'manipulator'
+    // with the corresponding attribute information structure until such
+    // invocation returns a non-zero value.  Return the value from the
+    // last invocation of 'manipulator' (i.e., the invocation that
+    // terminated the sequence).
+
+    template <typename t_MANIPULATOR>
+    int manipulateAttribute(t_MANIPULATOR& manipulator, int id);
+    // Invoke the specified 'manipulator' on the address of
+    // the (modifiable) attribute indicated by the specified 'id',
+    // supplying 'manipulator' with the corresponding attribute
+    // information structure.  Return the value returned from the
+    // invocation of 'manipulator' if 'id' identifies an attribute of this
+    // class, and -1 otherwise.
+
+    template <typename t_MANIPULATOR>
+    int manipulateAttribute(t_MANIPULATOR& manipulator,
+                            const char*    name,
+                            int            nameLength);
+    // Invoke the specified 'manipulator' on the address of
+    // the (modifiable) attribute indicated by the specified 'name' of the
+    // specified 'nameLength', supplying 'manipulator' with the
+    // corresponding attribute information structure.  Return the value
+    // returned from the invocation of 'manipulator' if 'name' identifies
+    // an attribute of this class, and -1 otherwise.
+
+    bsl::string& name();
+    // Return a reference to the modifiable "Name" attribute of this
+    // object.
+
+    bsl::vector<PluginSettingKeyValue>& settings();
+    // Return a reference to the modifiable "Settings" attribute of this
+    // object.
+
+    // ACCESSORS
+    bsl::ostream&
+    print(bsl::ostream& stream, int level = 0, int spacesPerLevel = 4) const;
+    // Format this object to the specified output 'stream' at the
+    // optionally specified indentation 'level' and return a reference to
+    // the modifiable 'stream'.  If 'level' is specified, optionally
+    // specify 'spacesPerLevel', the number of spaces per indentation level
+    // for this and all of its nested objects.  Each line is indented by
+    // the absolute value of 'level * spacesPerLevel'.  If 'level' is
+    // negative, suppress indentation of the first line.  If
+    // 'spacesPerLevel' is negative, suppress line breaks and format the
+    // entire output on one line.  If 'stream' is initially invalid, this
+    // operation has no effect.  Note that a trailing newline is provided
+    // in multiline mode only.
+
+    template <typename t_ACCESSOR>
+    int accessAttributes(t_ACCESSOR& accessor) const;
+    // Invoke the specified 'accessor' sequentially on each
+    // (non-modifiable) attribute of this object, supplying 'accessor'
+    // with the corresponding attribute information structure until such
+    // invocation returns a non-zero value.  Return the value from the
+    // last invocation of 'accessor' (i.e., the invocation that terminated
+    // the sequence).
+
+    template <typename t_ACCESSOR>
+    int accessAttribute(t_ACCESSOR& accessor, int id) const;
+    // Invoke the specified 'accessor' on the (non-modifiable) attribute
+    // of this object indicated by the specified 'id', supplying 'accessor'
+    // with the corresponding attribute information structure.  Return the
+    // value returned from the invocation of 'accessor' if 'id' identifies
+    // an attribute of this class, and -1 otherwise.
+
+    template <typename t_ACCESSOR>
+    int accessAttribute(t_ACCESSOR& accessor,
+                        const char* name,
+                        int         nameLength) const;
+    // Invoke the specified 'accessor' on the (non-modifiable) attribute
+    // of this object indicated by the specified 'name' of the specified
+    // 'nameLength', supplying 'accessor' with the corresponding attribute
+    // information structure.  Return the value returned from the
+    // invocation of 'accessor' if 'name' identifies an attribute of this
+    // class, and -1 otherwise.
+
+    const bsl::string& name() const;
+    // Return a reference offering non-modifiable access to the "Name"
+    // attribute of this object.
+
+    const bsl::vector<PluginSettingKeyValue>& settings() const;
+    // Return a reference offering non-modifiable access to the "Settings"
+    // attribute of this object.
+
+    // HIDDEN FRIENDS
+    friend bool operator==(const CredentialProviderConfig& lhs,
+                           const CredentialProviderConfig& rhs)
+    // Return 'true' if the specified 'lhs' and 'rhs' attribute objects
+    // have the same value, and 'false' otherwise.  Two attribute objects
+    // have the same value if each respective attribute has the same value.
+    {
+        return lhs.name() == rhs.name() && lhs.settings() == rhs.settings();
+    }
+
+    friend bool operator!=(const CredentialProviderConfig& lhs,
+                           const CredentialProviderConfig& rhs)
+    // Returns '!(lhs == rhs)'
+    {
+        return !(lhs == rhs);
+    }
+
+    friend bsl::ostream& operator<<(bsl::ostream&                   stream,
+                                    const CredentialProviderConfig& rhs)
+    // Format the specified 'rhs' to the specified output 'stream' and
+    // return a reference to the modifiable 'stream'.
+    {
+        return rhs.print(stream, 0, -1);
+    }
+
+    template <typename t_HASH_ALGORITHM>
+    friend void hashAppend(t_HASH_ALGORITHM&               hashAlg,
+                           const CredentialProviderConfig& object)
+    // Pass the specified 'object' to the specified 'hashAlg'.  This
+    // function integrates with the 'bslh' modular hashing system and
+    // effectively provides a 'bsl::hash' specialization for
+    // 'CredentialProviderConfig'.
+    {
+        using bslh::hashAppend;
+        hashAppend(hashAlg, object.name());
+        hashAppend(hashAlg, object.settings());
+    }
+};
+
+}  // close package namespace
+
+// TRAITS
+
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
+    mqbcfg::CredentialProviderConfig);
+template <>
+struct bdlat_UsesDefaultValueFlag<mqbcfg::CredentialProviderConfig>
+: bsl::true_type {};
 
 namespace mqbcfg {
 
@@ -8715,7 +9055,7 @@ class DispatcherConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::DispatcherConfig)
+BDLAT_DECL_SEQUENCE_WITH_BITWISEMOVEABLE_TRAITS(mqbcfg::DispatcherConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::DispatcherConfig> : bsl::true_type {
 };
@@ -8939,7 +9279,7 @@ class NetworkInterfaces {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::NetworkInterfaces)
+    mqbcfg::NetworkInterfaces);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::NetworkInterfaces> : bsl::true_type {
 };
@@ -9262,7 +9602,7 @@ class StatPluginConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::StatPluginConfig)
+    mqbcfg::StatPluginConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::StatPluginConfig> : bsl::true_type {
 };
@@ -9498,7 +9838,7 @@ class TaskConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::TaskConfig)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::TaskConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::TaskConfig> : bsl::true_type {};
 
@@ -9520,12 +9860,18 @@ class AuthenticatorConfig {
     // authentication.  minThreads..............: Minimum number of threads in
     // the authentication thread pool.  maxThreads..............: Maximum
     // number of threads in the authentication thread pool.
+    // credentialProvider...: Optional credential provider.  When specified,
+    // the broker uses credentials provided by the credential provider to
+    // authenticate with other brokers.  If not specified, the broker will
+    // attempt to directly negotiate sessions with other brokers without
+    // explicitly authenticating.
 
     // INSTANCE DATA
-    bsl::vector<AuthenticatorPluginConfig>   d_authenticators;
-    bdlb::NullableValue<AnonymousCredential> d_anonymousCredential;
-    int                                      d_minThreads;
-    int                                      d_maxThreads;
+    bsl::vector<AuthenticatorPluginConfig>        d_authenticators;
+    bdlb::NullableValue<CredentialProviderConfig> d_credentialProvider;
+    bdlb::NullableValue<AnonymousCredential>      d_anonymousCredential;
+    int                                           d_minThreads;
+    int                                           d_maxThreads;
 
     // PRIVATE ACCESSORS
     template <typename t_HASH_ALGORITHM>
@@ -9539,16 +9885,18 @@ class AuthenticatorConfig {
         ATTRIBUTE_ID_AUTHENTICATORS       = 0,
         ATTRIBUTE_ID_ANONYMOUS_CREDENTIAL = 1,
         ATTRIBUTE_ID_MIN_THREADS          = 2,
-        ATTRIBUTE_ID_MAX_THREADS          = 3
+        ATTRIBUTE_ID_MAX_THREADS          = 3,
+        ATTRIBUTE_ID_CREDENTIAL_PROVIDER  = 4
     };
 
-    enum { NUM_ATTRIBUTES = 4 };
+    enum { NUM_ATTRIBUTES = 5 };
 
     enum {
         ATTRIBUTE_INDEX_AUTHENTICATORS       = 0,
         ATTRIBUTE_INDEX_ANONYMOUS_CREDENTIAL = 1,
         ATTRIBUTE_INDEX_MIN_THREADS          = 2,
-        ATTRIBUTE_INDEX_MAX_THREADS          = 3
+        ATTRIBUTE_INDEX_MAX_THREADS          = 3,
+        ATTRIBUTE_INDEX_CREDENTIAL_PROVIDER  = 4
     };
 
     // CONSTANTS
@@ -9667,6 +10015,10 @@ class AuthenticatorConfig {
     // Return a reference to the modifiable "MaxThreads" attribute of this
     // object.
 
+    bdlb::NullableValue<CredentialProviderConfig>& credentialProvider();
+    // Return a reference to the modifiable "CredentialProvider" attribute
+    // of this object.
+
     // ACCESSORS
     bsl::ostream&
     print(bsl::ostream& stream, int level = 0, int spacesPerLevel = 4) const;
@@ -9725,6 +10077,11 @@ class AuthenticatorConfig {
     int maxThreads() const;
     // Return the value of the "MaxThreads" attribute of this object.
 
+    const bdlb::NullableValue<CredentialProviderConfig>&
+    credentialProvider() const;
+    // Return a reference offering non-modifiable access to the
+    // "CredentialProvider" attribute of this object.
+
     // HIDDEN FRIENDS
     friend bool operator==(const AuthenticatorConfig& lhs,
                            const AuthenticatorConfig& rhs)
@@ -9767,7 +10124,7 @@ class AuthenticatorConfig {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::AuthenticatorConfig)
+    mqbcfg::AuthenticatorConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::AuthenticatorConfig>
 : bsl::true_type {};
@@ -10087,7 +10444,7 @@ class ClusterDefinition {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::ClusterDefinition)
+    mqbcfg::ClusterDefinition);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ClusterDefinition> : bsl::true_type {
 };
@@ -10361,7 +10718,7 @@ class ClusterProxyDefinition {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::ClusterProxyDefinition)
+    mqbcfg::ClusterProxyDefinition);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ClusterProxyDefinition>
 : bsl::true_type {};
@@ -10601,7 +10958,7 @@ class StatsConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::StatsConfig)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::StatsConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::StatsConfig> : bsl::true_type {};
 
@@ -11050,7 +11407,7 @@ class AppConfig {
 
 // TRAITS
 
-BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::AppConfig)
+BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(mqbcfg::AppConfig);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::AppConfig> : bsl::true_type {};
 
@@ -11300,7 +11657,7 @@ class ClustersDefinition {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::ClustersDefinition)
+    mqbcfg::ClustersDefinition);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::ClustersDefinition>
 : bsl::true_type {};
@@ -11521,7 +11878,7 @@ class Configuration {
 // TRAITS
 
 BDLAT_DECL_SEQUENCE_WITH_ALLOCATOR_BITWISEMOVEABLE_TRAITS(
-    mqbcfg::Configuration)
+    mqbcfg::Configuration);
 template <>
 struct bdlat_UsesDefaultValueFlag<mqbcfg::Configuration> : bsl::true_type {};
 
@@ -14997,248 +15354,24 @@ inline const bsl::string& ResolvedDomain::clusterName() const
     return d_clusterName;
 }
 
-// ------------------------
-// class StatsPrinterConfig
-// ------------------------
-
-// PRIVATE ACCESSORS
-template <typename t_HASH_ALGORITHM>
-void StatsPrinterConfig::hashAppendImpl(t_HASH_ALGORITHM& hashAlgorithm) const
-{
-    using bslh::hashAppend;
-    hashAppend(hashAlgorithm, this->printInterval());
-    hashAppend(hashAlgorithm, this->file());
-    hashAppend(hashAlgorithm, this->maxAgeDays());
-    hashAppend(hashAlgorithm, this->rotateBytes());
-    hashAppend(hashAlgorithm, this->rotateDays());
-}
-
-inline bool StatsPrinterConfig::isEqualTo(const StatsPrinterConfig& rhs) const
-{
-    return this->printInterval() == rhs.printInterval() &&
-           this->file() == rhs.file() &&
-           this->maxAgeDays() == rhs.maxAgeDays() &&
-           this->rotateBytes() == rhs.rotateBytes() &&
-           this->rotateDays() == rhs.rotateDays();
-}
+// --------------------------------
+// class StatsPrinterEncodingFormat
+// --------------------------------
 
 // CLASS METHODS
-// MANIPULATORS
-template <typename t_MANIPULATOR>
-int StatsPrinterConfig::manipulateAttributes(t_MANIPULATOR& manipulator)
+inline int StatsPrinterEncodingFormat::fromString(Value*             result,
+                                                  const bsl::string& string)
 {
-    int ret;
-
-    ret = manipulator(&d_printInterval,
-                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = manipulator(&d_file, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = manipulator(&d_maxAgeDays,
-                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = manipulator(&d_rotateBytes,
-                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = manipulator(&d_rotateDays,
-                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
-    if (ret) {
-        return ret;
-    }
-
-    return 0;
+    return fromString(result,
+                      string.c_str(),
+                      static_cast<int>(string.length()));
 }
 
-template <typename t_MANIPULATOR>
-int StatsPrinterConfig::manipulateAttribute(t_MANIPULATOR& manipulator, int id)
+inline bsl::ostream&
+StatsPrinterEncodingFormat::print(bsl::ostream&                     stream,
+                                  StatsPrinterEncodingFormat::Value value)
 {
-    enum { NOT_FOUND = -1 };
-
-    switch (id) {
-    case ATTRIBUTE_ID_PRINT_INTERVAL: {
-        return manipulator(
-            &d_printInterval,
-            ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
-    }
-    case ATTRIBUTE_ID_FILE: {
-        return manipulator(&d_file,
-                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
-    }
-    case ATTRIBUTE_ID_MAX_AGE_DAYS: {
-        return manipulator(&d_maxAgeDays,
-                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
-    }
-    case ATTRIBUTE_ID_ROTATE_BYTES: {
-        return manipulator(&d_rotateBytes,
-                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
-    }
-    case ATTRIBUTE_ID_ROTATE_DAYS: {
-        return manipulator(&d_rotateDays,
-                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
-    }
-    default: return NOT_FOUND;
-    }
-}
-
-template <typename t_MANIPULATOR>
-int StatsPrinterConfig::manipulateAttribute(t_MANIPULATOR& manipulator,
-                                            const char*    name,
-                                            int            nameLength)
-{
-    enum { NOT_FOUND = -1 };
-
-    const bdlat_AttributeInfo* attributeInfo = lookupAttributeInfo(name,
-                                                                   nameLength);
-    if (0 == attributeInfo) {
-        return NOT_FOUND;
-    }
-
-    return manipulateAttribute(manipulator, attributeInfo->d_id);
-}
-
-inline int& StatsPrinterConfig::printInterval()
-{
-    return d_printInterval;
-}
-
-inline bsl::string& StatsPrinterConfig::file()
-{
-    return d_file;
-}
-
-inline int& StatsPrinterConfig::maxAgeDays()
-{
-    return d_maxAgeDays;
-}
-
-inline int& StatsPrinterConfig::rotateBytes()
-{
-    return d_rotateBytes;
-}
-
-inline int& StatsPrinterConfig::rotateDays()
-{
-    return d_rotateDays;
-}
-
-// ACCESSORS
-template <typename t_ACCESSOR>
-int StatsPrinterConfig::accessAttributes(t_ACCESSOR& accessor) const
-{
-    int ret;
-
-    ret = accessor(d_printInterval,
-                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = accessor(d_file, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = accessor(d_maxAgeDays,
-                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = accessor(d_rotateBytes,
-                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
-    if (ret) {
-        return ret;
-    }
-
-    ret = accessor(d_rotateDays,
-                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
-    if (ret) {
-        return ret;
-    }
-
-    return 0;
-}
-
-template <typename t_ACCESSOR>
-int StatsPrinterConfig::accessAttribute(t_ACCESSOR& accessor, int id) const
-{
-    enum { NOT_FOUND = -1 };
-
-    switch (id) {
-    case ATTRIBUTE_ID_PRINT_INTERVAL: {
-        return accessor(d_printInterval,
-                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
-    }
-    case ATTRIBUTE_ID_FILE: {
-        return accessor(d_file, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
-    }
-    case ATTRIBUTE_ID_MAX_AGE_DAYS: {
-        return accessor(d_maxAgeDays,
-                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
-    }
-    case ATTRIBUTE_ID_ROTATE_BYTES: {
-        return accessor(d_rotateBytes,
-                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
-    }
-    case ATTRIBUTE_ID_ROTATE_DAYS: {
-        return accessor(d_rotateDays,
-                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
-    }
-    default: return NOT_FOUND;
-    }
-}
-
-template <typename t_ACCESSOR>
-int StatsPrinterConfig::accessAttribute(t_ACCESSOR& accessor,
-                                        const char* name,
-                                        int         nameLength) const
-{
-    enum { NOT_FOUND = -1 };
-
-    const bdlat_AttributeInfo* attributeInfo = lookupAttributeInfo(name,
-                                                                   nameLength);
-    if (0 == attributeInfo) {
-        return NOT_FOUND;
-    }
-
-    return accessAttribute(accessor, attributeInfo->d_id);
-}
-
-inline int StatsPrinterConfig::printInterval() const
-{
-    return d_printInterval;
-}
-
-inline const bsl::string& StatsPrinterConfig::file() const
-{
-    return d_file;
-}
-
-inline int StatsPrinterConfig::maxAgeDays() const
-{
-    return d_maxAgeDays;
-}
-
-inline int StatsPrinterConfig::rotateBytes() const
-{
-    return d_rotateBytes;
-}
-
-inline int StatsPrinterConfig::rotateDays() const
-{
-    return d_rotateDays;
+    return stream << toString(value);
 }
 
 // -----------------------
@@ -18150,6 +18283,281 @@ inline int StatPluginConfigPrometheus::port() const
 }
 
 // ------------------------
+// class StatsPrinterConfig
+// ------------------------
+
+// PRIVATE ACCESSORS
+template <typename t_HASH_ALGORITHM>
+void StatsPrinterConfig::hashAppendImpl(t_HASH_ALGORITHM& hashAlgorithm) const
+{
+    using bslh::hashAppend;
+    hashAppend(hashAlgorithm, this->printInterval());
+    hashAppend(hashAlgorithm, this->file());
+    hashAppend(hashAlgorithm, this->maxAgeDays());
+    hashAppend(hashAlgorithm, this->rotateBytes());
+    hashAppend(hashAlgorithm, this->rotateDays());
+    hashAppend(hashAlgorithm, this->encoding());
+}
+
+inline bool StatsPrinterConfig::isEqualTo(const StatsPrinterConfig& rhs) const
+{
+    return this->printInterval() == rhs.printInterval() &&
+           this->file() == rhs.file() &&
+           this->maxAgeDays() == rhs.maxAgeDays() &&
+           this->rotateBytes() == rhs.rotateBytes() &&
+           this->rotateDays() == rhs.rotateDays() &&
+           this->encoding() == rhs.encoding();
+}
+
+// CLASS METHODS
+// MANIPULATORS
+template <typename t_MANIPULATOR>
+int StatsPrinterConfig::manipulateAttributes(t_MANIPULATOR& manipulator)
+{
+    int ret;
+
+    ret = manipulator(&d_printInterval,
+                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = manipulator(&d_file, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = manipulator(&d_maxAgeDays,
+                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = manipulator(&d_rotateBytes,
+                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = manipulator(&d_rotateDays,
+                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = manipulator(&d_encoding,
+                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ENCODING]);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
+}
+
+template <typename t_MANIPULATOR>
+int StatsPrinterConfig::manipulateAttribute(t_MANIPULATOR& manipulator, int id)
+{
+    enum { NOT_FOUND = -1 };
+
+    switch (id) {
+    case ATTRIBUTE_ID_PRINT_INTERVAL: {
+        return manipulator(
+            &d_printInterval,
+            ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
+    }
+    case ATTRIBUTE_ID_FILE: {
+        return manipulator(&d_file,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
+    }
+    case ATTRIBUTE_ID_MAX_AGE_DAYS: {
+        return manipulator(&d_maxAgeDays,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
+    }
+    case ATTRIBUTE_ID_ROTATE_BYTES: {
+        return manipulator(&d_rotateBytes,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
+    }
+    case ATTRIBUTE_ID_ROTATE_DAYS: {
+        return manipulator(&d_rotateDays,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
+    }
+    case ATTRIBUTE_ID_ENCODING: {
+        return manipulator(&d_encoding,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ENCODING]);
+    }
+    default: return NOT_FOUND;
+    }
+}
+
+template <typename t_MANIPULATOR>
+int StatsPrinterConfig::manipulateAttribute(t_MANIPULATOR& manipulator,
+                                            const char*    name,
+                                            int            nameLength)
+{
+    enum { NOT_FOUND = -1 };
+
+    const bdlat_AttributeInfo* attributeInfo = lookupAttributeInfo(name,
+                                                                   nameLength);
+    if (0 == attributeInfo) {
+        return NOT_FOUND;
+    }
+
+    return manipulateAttribute(manipulator, attributeInfo->d_id);
+}
+
+inline int& StatsPrinterConfig::printInterval()
+{
+    return d_printInterval;
+}
+
+inline bsl::string& StatsPrinterConfig::file()
+{
+    return d_file;
+}
+
+inline int& StatsPrinterConfig::maxAgeDays()
+{
+    return d_maxAgeDays;
+}
+
+inline int& StatsPrinterConfig::rotateBytes()
+{
+    return d_rotateBytes;
+}
+
+inline int& StatsPrinterConfig::rotateDays()
+{
+    return d_rotateDays;
+}
+
+inline StatsPrinterEncodingFormat::Value& StatsPrinterConfig::encoding()
+{
+    return d_encoding;
+}
+
+// ACCESSORS
+template <typename t_ACCESSOR>
+int StatsPrinterConfig::accessAttributes(t_ACCESSOR& accessor) const
+{
+    int ret;
+
+    ret = accessor(d_printInterval,
+                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = accessor(d_file, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = accessor(d_maxAgeDays,
+                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = accessor(d_rotateBytes,
+                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = accessor(d_rotateDays,
+                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = accessor(d_encoding, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ENCODING]);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
+}
+
+template <typename t_ACCESSOR>
+int StatsPrinterConfig::accessAttribute(t_ACCESSOR& accessor, int id) const
+{
+    enum { NOT_FOUND = -1 };
+
+    switch (id) {
+    case ATTRIBUTE_ID_PRINT_INTERVAL: {
+        return accessor(d_printInterval,
+                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_PRINT_INTERVAL]);
+    }
+    case ATTRIBUTE_ID_FILE: {
+        return accessor(d_file, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_FILE]);
+    }
+    case ATTRIBUTE_ID_MAX_AGE_DAYS: {
+        return accessor(d_maxAgeDays,
+                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_AGE_DAYS]);
+    }
+    case ATTRIBUTE_ID_ROTATE_BYTES: {
+        return accessor(d_rotateBytes,
+                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_BYTES]);
+    }
+    case ATTRIBUTE_ID_ROTATE_DAYS: {
+        return accessor(d_rotateDays,
+                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ROTATE_DAYS]);
+    }
+    case ATTRIBUTE_ID_ENCODING: {
+        return accessor(d_encoding,
+                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_ENCODING]);
+    }
+    default: return NOT_FOUND;
+    }
+}
+
+template <typename t_ACCESSOR>
+int StatsPrinterConfig::accessAttribute(t_ACCESSOR& accessor,
+                                        const char* name,
+                                        int         nameLength) const
+{
+    enum { NOT_FOUND = -1 };
+
+    const bdlat_AttributeInfo* attributeInfo = lookupAttributeInfo(name,
+                                                                   nameLength);
+    if (0 == attributeInfo) {
+        return NOT_FOUND;
+    }
+
+    return accessAttribute(accessor, attributeInfo->d_id);
+}
+
+inline int StatsPrinterConfig::printInterval() const
+{
+    return d_printInterval;
+}
+
+inline const bsl::string& StatsPrinterConfig::file() const
+{
+    return d_file;
+}
+
+inline int StatsPrinterConfig::maxAgeDays() const
+{
+    return d_maxAgeDays;
+}
+
+inline int StatsPrinterConfig::rotateBytes() const
+{
+    return d_rotateBytes;
+}
+
+inline int StatsPrinterConfig::rotateDays() const
+{
+    return d_rotateDays;
+}
+
+inline StatsPrinterEncodingFormat::Value StatsPrinterConfig::encoding() const
+{
+    return d_encoding;
+}
+
+// ------------------------
 // class TcpInterfaceConfig
 // ------------------------
 
@@ -18901,6 +19309,140 @@ inline const bsl::string& ClusterNode::dataCenter() const
 inline const ClusterNodeConnection& ClusterNode::transport() const
 {
     return d_transport;
+}
+
+// ------------------------------
+// class CredentialProviderConfig
+// ------------------------------
+
+// CLASS METHODS
+// MANIPULATORS
+template <typename t_MANIPULATOR>
+int CredentialProviderConfig::manipulateAttributes(t_MANIPULATOR& manipulator)
+{
+    int ret;
+
+    ret = manipulator(&d_name, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_NAME]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = manipulator(&d_settings,
+                      ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_SETTINGS]);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
+}
+
+template <typename t_MANIPULATOR>
+int CredentialProviderConfig::manipulateAttribute(t_MANIPULATOR& manipulator,
+                                                  int            id)
+{
+    enum { NOT_FOUND = -1 };
+
+    switch (id) {
+    case ATTRIBUTE_ID_NAME: {
+        return manipulator(&d_name,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_NAME]);
+    }
+    case ATTRIBUTE_ID_SETTINGS: {
+        return manipulator(&d_settings,
+                           ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_SETTINGS]);
+    }
+    default: return NOT_FOUND;
+    }
+}
+
+template <typename t_MANIPULATOR>
+int CredentialProviderConfig::manipulateAttribute(t_MANIPULATOR& manipulator,
+                                                  const char*    name,
+                                                  int            nameLength)
+{
+    enum { NOT_FOUND = -1 };
+
+    const bdlat_AttributeInfo* attributeInfo = lookupAttributeInfo(name,
+                                                                   nameLength);
+    if (0 == attributeInfo) {
+        return NOT_FOUND;
+    }
+
+    return manipulateAttribute(manipulator, attributeInfo->d_id);
+}
+
+inline bsl::string& CredentialProviderConfig::name()
+{
+    return d_name;
+}
+
+inline bsl::vector<PluginSettingKeyValue>& CredentialProviderConfig::settings()
+{
+    return d_settings;
+}
+
+// ACCESSORS
+template <typename t_ACCESSOR>
+int CredentialProviderConfig::accessAttributes(t_ACCESSOR& accessor) const
+{
+    int ret;
+
+    ret = accessor(d_name, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_NAME]);
+    if (ret) {
+        return ret;
+    }
+
+    ret = accessor(d_settings, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_SETTINGS]);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
+}
+
+template <typename t_ACCESSOR>
+int CredentialProviderConfig::accessAttribute(t_ACCESSOR& accessor,
+                                              int         id) const
+{
+    enum { NOT_FOUND = -1 };
+
+    switch (id) {
+    case ATTRIBUTE_ID_NAME: {
+        return accessor(d_name, ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_NAME]);
+    }
+    case ATTRIBUTE_ID_SETTINGS: {
+        return accessor(d_settings,
+                        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_SETTINGS]);
+    }
+    default: return NOT_FOUND;
+    }
+}
+
+template <typename t_ACCESSOR>
+int CredentialProviderConfig::accessAttribute(t_ACCESSOR& accessor,
+                                              const char* name,
+                                              int         nameLength) const
+{
+    enum { NOT_FOUND = -1 };
+
+    const bdlat_AttributeInfo* attributeInfo = lookupAttributeInfo(name,
+                                                                   nameLength);
+    if (0 == attributeInfo) {
+        return NOT_FOUND;
+    }
+
+    return accessAttribute(accessor, attributeInfo->d_id);
+}
+
+inline const bsl::string& CredentialProviderConfig::name() const
+{
+    return d_name;
+}
+
+inline const bsl::vector<PluginSettingKeyValue>&
+CredentialProviderConfig::settings() const
+{
+    return d_settings;
 }
 
 // ----------------------
@@ -19863,6 +20405,7 @@ void AuthenticatorConfig::hashAppendImpl(t_HASH_ALGORITHM& hashAlgorithm) const
     hashAppend(hashAlgorithm, this->anonymousCredential());
     hashAppend(hashAlgorithm, this->minThreads());
     hashAppend(hashAlgorithm, this->maxThreads());
+    hashAppend(hashAlgorithm, this->credentialProvider());
 }
 
 inline bool
@@ -19871,7 +20414,8 @@ AuthenticatorConfig::isEqualTo(const AuthenticatorConfig& rhs) const
     return this->authenticators() == rhs.authenticators() &&
            this->anonymousCredential() == rhs.anonymousCredential() &&
            this->minThreads() == rhs.minThreads() &&
-           this->maxThreads() == rhs.maxThreads();
+           this->maxThreads() == rhs.maxThreads() &&
+           this->credentialProvider() == rhs.credentialProvider();
 }
 
 // CLASS METHODS
@@ -19906,6 +20450,13 @@ int AuthenticatorConfig::manipulateAttributes(t_MANIPULATOR& manipulator)
         return ret;
     }
 
+    ret = manipulator(
+        &d_credentialProvider,
+        ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_CREDENTIAL_PROVIDER]);
+    if (ret) {
+        return ret;
+    }
+
     return 0;
 }
 
@@ -19933,6 +20484,11 @@ int AuthenticatorConfig::manipulateAttribute(t_MANIPULATOR& manipulator,
     case ATTRIBUTE_ID_MAX_THREADS: {
         return manipulator(&d_maxThreads,
                            ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_THREADS]);
+    }
+    case ATTRIBUTE_ID_CREDENTIAL_PROVIDER: {
+        return manipulator(
+            &d_credentialProvider,
+            ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_CREDENTIAL_PROVIDER]);
     }
     default: return NOT_FOUND;
     }
@@ -19976,6 +20532,12 @@ inline int& AuthenticatorConfig::maxThreads()
     return d_maxThreads;
 }
 
+inline bdlb::NullableValue<CredentialProviderConfig>&
+AuthenticatorConfig::credentialProvider()
+{
+    return d_credentialProvider;
+}
+
 // ACCESSORS
 template <typename t_ACCESSOR>
 int AuthenticatorConfig::accessAttributes(t_ACCESSOR& accessor) const
@@ -20006,6 +20568,12 @@ int AuthenticatorConfig::accessAttributes(t_ACCESSOR& accessor) const
         return ret;
     }
 
+    ret = accessor(d_credentialProvider,
+                   ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_CREDENTIAL_PROVIDER]);
+    if (ret) {
+        return ret;
+    }
+
     return 0;
 }
 
@@ -20031,6 +20599,11 @@ int AuthenticatorConfig::accessAttribute(t_ACCESSOR& accessor, int id) const
     case ATTRIBUTE_ID_MAX_THREADS: {
         return accessor(d_maxThreads,
                         ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_MAX_THREADS]);
+    }
+    case ATTRIBUTE_ID_CREDENTIAL_PROVIDER: {
+        return accessor(
+            d_credentialProvider,
+            ATTRIBUTE_INFO_ARRAY[ATTRIBUTE_INDEX_CREDENTIAL_PROVIDER]);
     }
     default: return NOT_FOUND;
     }
@@ -20072,6 +20645,12 @@ inline int AuthenticatorConfig::minThreads() const
 inline int AuthenticatorConfig::maxThreads() const
 {
     return d_maxThreads;
+}
+
+inline const bdlb::NullableValue<CredentialProviderConfig>&
+AuthenticatorConfig::credentialProvider() const
+{
+    return d_credentialProvider;
 }
 
 // -----------------------
@@ -21972,6 +22551,6 @@ inline const AppConfig& Configuration::appConfig() const
 }  // close enterprise namespace
 #endif
 
-// GENERATED BY BLP_BAS_CODEGEN_2026.02.26
+// GENERATED BY BLP_BAS_CODEGEN_2026.05.07
 // USING bas_codegen.pl -m msg --noAggregateConversion --noExternalization
 // --noIdent --package mqbcfg --msgComponent messages mqbcfg.xsd

@@ -30,13 +30,12 @@
 #include <bmqscm_version.h>
 #include <bmqst_statvalue.h>
 #include <bmqst_tableutil.h>
-#include <bmqsys_threadutil.h>
-#include <bmqsys_time.h>
 #include <bmqt_resultcode.h>
 #include <bmqt_uri.h>
 #include <bmqu_blob.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <bdlb_scopeexit.h>
@@ -482,11 +481,11 @@ void Application::printStats(bool isFinal)
         if (d_lastAllocatorSnapshot != 0) {
             os << " [Last snapshot was "
                << bmqu::PrintUtil::prettyTimeInterval(
-                      bmqsys::Time::highResolutionTimer() -
+                      bmqu::Time::highResolutionTimer() -
                       d_lastAllocatorSnapshot)
                << " ago.]";
         }
-        d_lastAllocatorSnapshot = bmqsys::Time::highResolutionTimer();
+        d_lastAllocatorSnapshot = bmqu::Time::highResolutionTimer();
 
         bmqma::CountingAllocatorUtil::printAllocations(os,
                                                        *d_allocator.context());
@@ -671,7 +670,7 @@ Application::Application(
         bsl::srand(unsigned(bsl::time(0)));
         // For calls to 'rand()' in the reconnecting channel factory
 
-        bmqsys::Time::initialize();
+        bmqu::Time::initialize();
     }
 
     // Start the EventScheduler.  We do this here in constructor and not in
@@ -681,7 +680,7 @@ Application::Application(
     // we can not call 'stop' on the scheduler from the 'finalizeCb', and
     // therefore have to let it stop in the application thread, i.e., from the
     // destructor of this object.
-    bslmt::ThreadAttributes attr = bmqsys::ThreadUtil::defaultAttributes();
+    bslmt::ThreadAttributes attr;
     attr.setThreadName("bmqScheduler");
     int rc = d_scheduler.start(attr);
     if (rc != 0) {
@@ -752,7 +751,7 @@ int Application::startAsync(const bsls::TimeInterval& timeout)
     // Schedule a timeout
     d_scheduler.scheduleEvent(
         &d_startTimeoutHandle,
-        bmqsys::Time::nowMonotonicClock() + timeout,
+        bmqu::Time::nowMonotonicClock() + timeout,
         bdlf::MemFnUtil::memFn(&Application::onStartTimeout, this));
 
     return bmqt::GenericResult::e_SUCCESS;

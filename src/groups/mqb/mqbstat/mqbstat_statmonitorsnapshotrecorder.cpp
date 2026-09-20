@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <bmqsys_statmonitorsnapshotrecorder.h>
+#include <mqbstat_statmonitorsnapshotrecorder.h>
 
-#include <bmqscm_version.h>
+#include <mqbscm_version.h>
 
-#include <bmqsys_statmonitor.h>
-#include <bmqsys_time.h>
 #include <bmqu_memoutstream.h>
 #include <bmqu_printutil.h>
+#include <bmqu_time.h>
+#include <mqbstat_statmonitor.h>
 
 // BDE
 #include <bdlma_localsequentialallocator.h>
@@ -28,12 +28,12 @@
 #include <bslma_default.h>
 
 namespace BloombergLP {
-namespace bmqsys {
+namespace mqbstat {
 
 namespace {
 
 /// Constant for the number of snapshots holding historical values in
-/// `bmqsys::StatMonitor`.  Only need to keep one snapshot back.
+/// `mqbstat::StatMonitor`.  Only need to keep one snapshot back.
 const bsls::Types::Int64 k_HISTORY_SIZE = 1;
 
 }  // close anonymous namespace
@@ -59,8 +59,8 @@ struct StatMonitorSnapshotRecorder::Impl {
     bsl::string d_header;  // Top-level header when printing
                            // statistics
 
-    bmqsys::StatMonitor d_statMonitor;  // Statistics monitor (for CPU,
-                                        // voluntary context switches)
+    mqbstat::StatMonitor d_statMonitor;  // Statistics monitor (for CPU,
+                                         // voluntary context switches)
 
     bslma::Allocator* d_allocator_p;  // Allocator used to supply memory
 
@@ -95,7 +95,7 @@ StatMonitorSnapshotRecorder::StatMonitorSnapshotRecorder(
 : d_impl_sp()
 {
     // Set the pimpl
-    const bsls::Types::Int64 now   = bmqsys::Time::highResolutionTimer();
+    const bsls::Types::Int64 now   = bmqu::Time::highResolutionTimer();
     bslma::Allocator*        alloc = bslma::Default::allocator(allocator);
 
     d_impl_sp.createInplace(alloc, now, now, header, alloc);
@@ -117,7 +117,7 @@ StatMonitorSnapshotRecorder::StatMonitorSnapshotRecorder(
 }
 
 StatMonitorSnapshotRecorder::StatMonitorSnapshotRecorder(
-    const bmqsys::StatMonitorSnapshotRecorder& other,
+    const mqbstat::StatMonitorSnapshotRecorder& other,
     BSLA_MAYBE_UNUSED bslma::Allocator* allocator)
 : d_impl_sp(other.d_impl_sp)
 {
@@ -131,7 +131,7 @@ void StatMonitorSnapshotRecorder::print(bsl::ostream&      os,
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_impl_sp);
 
-    const bsls::Types::Int64 now = bmqsys::Time::highResolutionTimer();
+    const bsls::Types::Int64 now = bmqu::Time::highResolutionTimer();
     const bsls::Types::Int64 totalWallTimeNs = now - d_impl_sp->d_startTimeNs;
     const bsls::Types::Int64 wallTimeNs      = now -
                                           d_impl_sp->d_lastSnapshotTimeNs;
@@ -182,7 +182,7 @@ void StatMonitorSnapshotRecorder::print(bsl::ostream&      os,
 // ACCESSORS
 bsls::Types::Int64 StatMonitorSnapshotRecorder::totalElapsed() const
 {
-    return bmqsys::Time::highResolutionTimer() - d_impl_sp->d_startTimeNs;
+    return bmqu::Time::highResolutionTimer() - d_impl_sp->d_startTimeNs;
 }
 
 }  // close package namespace

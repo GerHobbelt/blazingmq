@@ -13,6 +13,7 @@ bmqu_objectplaceholder
 bmqu_objectplaceholder_cpp03
 bmqu_operationchain
 bmqu_operationchain_cpp03
+bmqu_operationlogger
 bmqu_outstreamformatsaver
 bmqu_printutil
 bmqu_samethreadchecker
@@ -23,4 +24,5 @@ bmqu_tempdirectory
 bmqu_tempfile
 bmqu_temputil
 bmqu_throttledaction
+bmqu_time
 bmqu_weakmemfn

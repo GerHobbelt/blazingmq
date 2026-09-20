@@ -27,14 +27,13 @@
 // config) dumping the stats to a dedicated log file.
 
 // MQB
-
 #include <mqbcmd_messages.h>
 #include <mqbstat_jsonprinter.h>
-#include <mqbstat_printer.h>
+#include <mqbstat_statmonitor.h>
+#include <mqbstat_tableprinter.h>
 
 #include <bmqma_countingallocatorstore.h>
 #include <bmqst_statcontext.h>
-#include <bmqsys_statmonitor.h>
 
 // BDE
 #include <ball_log.h>
@@ -126,8 +125,8 @@ class StatController {
     typedef bslma::ManagedPtr<bdlmt::TimerEventScheduler> SchedulerMp;
     typedef bslma::ManagedPtr<bmqst::StatContext>         StatContextMp;
     typedef bsl::shared_ptr<bmqst::StatContext>           StatContextSp;
-    typedef bslma::ManagedPtr<bmqsys::StatMonitor>        SystemStatMonitorMp;
-    typedef bslma::ManagedPtr<Printer>                    PrinterMp;
+    typedef bslma::ManagedPtr<mqbstat::StatMonitor>       SystemStatMonitorMp;
+    typedef bslma::ManagedPtr<TablePrinter>               TablePrinterMp;
     typedef bslma::ManagedPtr<JsonPrinter>                JsonPrinterMp;
     typedef bslma::ManagedPtr<mqbplug::StatPublisher>     StatPublisherMp;
     typedef bslma::ManagedPtr<mqbplug::StatConsumer>      StatConsumerMp;
@@ -206,7 +205,7 @@ class StatController {
     CommandProcessorFn d_commandProcessorFn;
 
     /// Console and log file stats printer
-    PrinterMp d_printer_mp;
+    TablePrinterMp d_tablePrinter_mp;
 
     /// JsonPrinter used for admin commands processing
     JsonPrinterMp d_jsonPrinter_mp;
