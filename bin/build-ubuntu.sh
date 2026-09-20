@@ -6,7 +6,7 @@ echo -e "Before running this script, install the following prerequisites, if not
     "by executing the following commands:\n" \
     "sudo apt update && sudo apt -y install ca-certificates\n" \
     "sudo apt install -y --no-install-recommends" \
-    "autoconf automake build-essential gdb cmake ninja-build pkg-config bison libfl-dev libbenchmark-dev libgmock-dev libgtest-dev libtool libz-dev"
+    "autoconf automake build-essential gdb cmake ninja-build pkg-config bison libfl-dev libbenchmark-dev libgmock-dev libgtest-dev libtool libz-dev libssl-dev"
 
 # :: Parse and validate arguments :::::::::::::::::::::::::::::::::::::::::::::
 print_usage_and_exit_with_error() {
@@ -65,13 +65,13 @@ mkdir -p "${DIR_INSTALL}"
 # :: Clone dependencies :::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 if [ ! -d "${DIR_THIRDPARTY}/bde-tools" ]; then
-    git clone --depth 1 --branch 4.37.0.0 https://github.com/bloomberg/bde-tools "${DIR_THIRDPARTY}/bde-tools"
+    git clone --depth 1 --branch 4.38.0.0 https://github.com/bloomberg/bde-tools "${DIR_THIRDPARTY}/bde-tools"
 fi
 if [ ! -d "${DIR_THIRDPARTY}/bde" ]; then
-    git clone --depth 1 --branch 4.37.0.0 https://github.com/bloomberg/bde.git "${DIR_THIRDPARTY}/bde"
+    git clone --depth 1 --branch 4.38.0.0 https://github.com/bloomberg/bde.git "${DIR_THIRDPARTY}/bde"
 fi
 if [ ! -d "${DIR_THIRDPARTY}/ntf-core" ]; then
-    git clone --depth 1 --branch 2.6.11 https://github.com/bloomberg/ntf-core.git "${DIR_THIRDPARTY}/ntf-core"
+    git clone --depth 1 --branch 2.6.12 https://github.com/bloomberg/ntf-core.git "${DIR_THIRDPARTY}/ntf-core"
 fi
 # prometheus-cpp and its dependency for the plugin
 if [ "${BUILD_PROMETHEUS}" == true ]; then
@@ -165,28 +165,16 @@ if [ "${BUILD_PROMETHEUS}" == true ]; then
 fi
 
 # :: Build the BlazingMQ repo :::::::::::::::::::::::::::::::::::::::::::::::::
-CMAKE_OPTIONS=(
-    -DBDE_BUILD_TARGET_64=1
-    -DBDE_BUILD_TARGET_CPP23=1
-    -DCMAKE_BUILD_TYPE=Debug
-    -DCMAKE_INSTALL_LIBDIR="lib"
-    -DCMAKE_INSTALL_PREFIX="${DIR_INSTALL}"
-    -DCMAKE_MODULE_PATH="${DIR_THIRDPARTY}/bde-tools/cmake;${DIR_THIRDPARTY}/bde-tools/BdeBuildSystem"
-    -DCMAKE_PREFIX_PATH="${DIR_INSTALL}"
-    -DCMAKE_TOOLCHAIN_FILE="${DIR_THIRDPARTY}/bde-tools/BdeBuildSystem/toolchains/linux/gcc-default.cmake"
-    -DCMAKE_CXX_STANDARD=23
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-    -DFLEX_ROOT=/usr/lib/x86_64-linux-gnu)
+export DIR_THIRDPARTY DIR_BUILD DIR_INSTALL
 
 if [ "${BUILD_PROMETHEUS}" == true ]; then
-    CMAKE_OPTIONS+=(-DINSTALL_TARGETS=prometheus)
+    PRESET="ubuntu-x64-prometheus"
 else
-    CMAKE_OPTIONS+=(-UINSTALL_TARGETS)
+    PRESET="ubuntu-x64"
 fi
 
-PKG_CONFIG_PATH="${DIR_INSTALL}/lib64/pkgconfig:${DIR_INSTALL}/lib/pkgconfig:$(pkg-config --variable pc_path pkg-config)" \
-    cmake -B "${DIR_BUILD}/blazingmq" -S "${DIR_ROOT}" "${CMAKE_OPTIONS[@]}"
-make -C "${DIR_BUILD}/blazingmq" -j 16
+cmake --preset "${PRESET}"
+cmake --build --preset "${PRESET}"
 
 echo broker is here: "${DIR_BUILD}/blazingmq/src/applications/bmqbrkr/bmqbrkr.tsk"
 echo to run the broker: "${DIR_BUILD}/blazingmq/src/applications/bmqbrkr/run"

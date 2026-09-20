@@ -50,6 +50,7 @@
 
 // BMQ
 #include <bmqimp_queuemanager.h>
+#include <bmqp_conversionutil.h>
 #include <bmqp_protocol.h>
 #include <bmqp_protocolutil.h>
 #include <bmqp_queueid.h>
@@ -857,22 +858,26 @@ void ClusterQueueHelper::onQueueContextAssigned(
     }
 }
 
-void ClusterQueueHelper::finishReopening(QueueContext*        queueContext,
-                                         StreamsMap::iterator sqit)
+void ClusterQueueHelper::finishReopening(
+    QueueContext*                                queueContext,
+    StreamsMap::iterator                         sqit,
+    mqbnet::ClusterNode*                         activeNode,
+    const bsl::shared_ptr<PartitionReopenCycle>& cycle)
 {
     // executed by the cluster *DISPATCHER* thread
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
+    SubQueueContext&      subQueueContext    = sqit->value();
+    SubQueueContext::Enum state              = subQueueContext.d_state;
+    bool                  isValid            = true;
+    const unsigned int    upstreamSubQueueId = sqit->subId();
+
     bsl::vector<SubQueueContext::PendingClose> pendingClose(d_allocator_p);
-    pendingClose.swap(sqit->value().d_pendingCloseRequests);
-
-    const bool isOpen  = (sqit->value().d_state == SubQueueContext::k_OPEN);
-    bool       isValid = true;
-
+    pendingClose.swap(subQueueContext.d_pendingCloseRequests);
     for (size_t i = 0; i < pendingClose.size(); ++i) {
-        if (isOpen && isValid) {
+        if (state == SubQueueContext::k_OPEN && isValid) {
             BMQ_LOGTHROTTLE_INFO
                 << d_cluster_p->description()
                 << ": sending pending Close request with parameters ["
@@ -909,6 +914,95 @@ void ClusterQueueHelper::finishReopening(QueueContext*        queueContext,
                                        sqit);
             // 'false' means 'sqit' is deleted (all counters are zeroes)
         }
+    }
+    const bsls::Types::Uint64 generationCount = cycle->generationCount();
+
+    if (isValid && state == SubQueueContext::k_OPEN) {
+        // Remains valid if subQueueContext was not erased
+        // after processing all pending close requests.
+
+        QueueLiveState& qinfo = queueContext->d_liveQInfo;
+
+        mqbi::Queue*     queueptr = qinfo.d_queue_sp.get();
+        const bmqt::Uri& uri      = queueContext->uri();
+
+        BSLS_ASSERT_SAFE(queueptr);
+        BSLS_ASSERT_SAFE(isQueueAssigned(*queueContext));
+
+        // We have upstream node.  Send the configure-queue request.
+
+        // Make a copy of the stream parameters, and replace the upstreamSubId
+        // if needed.
+        bmqp_ctrlmsg::StreamParameters streamParamsCopy;
+
+        // TODO: remove this not thread-safe use of 'getUpstreamParameters'.
+        if (!queueptr->getUpstreamParameters(&streamParamsCopy,
+                                             upstreamSubQueueId)) {
+            ball::Severity::Level logSeverity = ball::Severity::e_WARN;
+
+            if (bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID == upstreamSubQueueId) {
+                // There is an optimization in
+                // RelayQueueEngine::configureHandle not to send producer
+                // parameters upstream if they are the same as default
+                // constructed.  In this case the UpstreamParameters cache does
+                // not have parameters for the k_DEFAULT_SUBQUEUE_ID.
+                logSeverity = ball::Severity::e_INFO;
+
+                // Consider this queue successfully reopen
+                notifyQueue(queueContext,
+                            bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID,
+                            generationCount,
+                            true);
+            }
+            BALL_LOGTHROTTLE_INFO_BLOCK(k_MAX_INSTANT_MESSAGES,
+                                        k_NS_PER_MESSAGE)
+            {
+                BALL_LOG_STREAM(logSeverity)
+                    << d_cluster_p->description()
+                    << ": not sending a configure-queue request in response to"
+                    << " ReopenQueue response, for queue [" << uri
+                    << "], as the queue is not configured for upstream "
+                       "subQueue "
+                    << bmqp::QueueId::SubQueueIdInt(upstreamSubQueueId);
+            }
+        }
+        else if (!sendConfigureQueueRequest(
+                     streamParamsCopy,
+                     queueptr->id(),
+                     queueptr->uri(),
+                     bdlf::BindUtil::bindS(
+                         d_allocator_p,
+                         &ClusterQueueHelper::reconfigureCallback,
+                         this,
+                         bdlf::PlaceHolders::_1,
+                         bdlf::PlaceHolders::_2,
+                         cycle),
+                     true,  // is a reconfigure-queue request
+                     activeNode,
+                     generationCount,
+                     sqit->subId())) {
+            // Assume sending has failed due to a disconnect, therefore, there
+            // is no need to roll back the result of ReOpen request. Decrement
+            // all counters. Do not report "state is restored"
+            state = SubQueueContext::k_CLOSED;
+            setStreamState(&subQueueContext, SubQueueContext::k_CLOSED);
+
+            // TBD: Note that invoking 'd_queue_p->streamParameters()' above is
+            // not thread safe as queue's parameteres are supposed to be
+            // read/written only from the queue-dispatcher thread.  This will
+            // be fixed eventually.
+
+            // Abort restore of the state: the channel is no longer valid,
+            // we'll wait for a new one to be active and will restart restoring
+            // the state from the beginning.
+        }
+    }
+    if (state == SubQueueContext::k_FAILED) {
+        notifyQueue(queueContext,
+                    upstreamSubQueueId,
+                    generationCount,
+                    false,
+                    false);  // isWriterOnly
     }
 
     if (0 == --queueContext->d_liveQInfo.d_numReopenQueueRequests) {
@@ -1391,7 +1485,7 @@ void ClusterQueueHelper::onOpenQueueResponse(
 
     bool                 retry     = false;  // retry immediately
     mqbnet::ClusterNode* otherThan = 0;      // retry if the upstream is new
-    const int subCode = requestContext->response().choice().status().code();
+    const int            subCode   = requestContext->statusCode();
 
     if (mainCode == bmqt::GenericResult::e_CANCELED) {
         if (subCode == mqbi::ClusterErrorCode::e_ACTIVE_LOST ||
@@ -1572,7 +1666,9 @@ void ClusterQueueHelper::onReopenQueueResponse(
                               &ClusterQueueHelper::finishReopening,
                               this,
                               queueContext,
-                              sqit));
+                              sqit,
+                              activeNode,
+                              cycle));
 
     // Same upstream node, which means num pending request counter must be
     // non-zero.
@@ -1613,12 +1709,6 @@ void ClusterQueueHelper::onReopenQueueResponse(
             BSLS_ASSERT_SAFE(sqit->appId() == appId);
 
             setStreamState(&subQueueContext, SubQueueContext::k_FAILED);
-
-            notifyQueue(queueContext,
-                        upstreamSubQueueId,
-                        generationCount,
-                        false,
-                        false);  // isWriterOnly
 
             // No need to send a configure-queue request for this queue.
             // Decrement the num pending reopen queue request counter though,
@@ -1672,14 +1762,6 @@ void ClusterQueueHelper::onReopenQueueResponse(
         return;  // RETURN
     }
 
-    // Queue has been successfully reopened;
-    // send configure-queue request now.
-
-    BSLS_ASSERT_SAFE(sqit != qinfo.d_subQueueIds.end());
-    BSLS_ASSERT_SAFE(appId == sqit->appId());
-
-    BSLS_ASSERT_SAFE(subQueueContext.d_state == SubQueueContext::k_REOPENING);
-
     if (d_cluster_p->isStopping()) {
         // Self is stopping.  Drop the response.
         BMQ_LOGTHROTTLE_WARN
@@ -1691,88 +1773,20 @@ void ClusterQueueHelper::onReopenQueueResponse(
         return;  // RETURN
     }
 
-    setStreamState(&subQueueContext, SubQueueContext::k_OPEN);
-
-    BMQ_LOGTHROTTLE_INFO
-        << d_cluster_p->description() << ": queue successfully reopened ["
-        << requestContext->request()
-        << "]. Attempting to send a configure-queue request now.";
-
-    mqbi::Queue* queueptr = qinfo.d_queue_sp.get();
-
-    BSLS_ASSERT_SAFE(queueptr);
-    BSLS_ASSERT_SAFE(isQueueAssigned(*queueContext));
-
-    // We have upstream node.  Send the configure-queue request.
-
+    // Queue has been successfully reopened;
+    // send configure-queue request now.
     BSLS_ASSERT_SAFE(
         requestContext->response().choice().isOpenQueueResponseValue());
+    BSLS_ASSERT_SAFE(sqit != qinfo.d_subQueueIds.end());
+    BSLS_ASSERT_SAFE(appId == sqit->appId());
 
-    // Make a copy of the stream parameters, and replace the upstreamSubId if
-    // needed.
-    bmqp_ctrlmsg::StreamParameters streamParamsCopy;
+    BSLS_ASSERT_SAFE(subQueueContext.d_state == SubQueueContext::k_REOPENING);
 
-    // TODO: remove this not thread-safe use of 'getUpstreamParameters'.
-    if (!queueptr->getUpstreamParameters(&streamParamsCopy,
-                                         upstreamSubQueueId)) {
-        ball::Severity::Level logSeverity = ball::Severity::e_WARN;
+    setStreamState(&subQueueContext, SubQueueContext::k_OPEN);
 
-        if (bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID == upstreamSubQueueId) {
-            // There is an optimization in RelayQueueEngine::configureHandle
-            // not to send producer parameters upstream if they are the same as
-            // default constructed.  In this case the UpstreamParameters cache
-            // does not have parameters for the k_DEFAULT_SUBQUEUE_ID.
-            logSeverity = ball::Severity::e_INFO;
-
-            // Consider this queue successfully reopen
-            notifyQueue(queueContext,
-                        bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID,
-                        generationCount,
-                        true);
-        }
-        BALL_LOGTHROTTLE_INFO_BLOCK(k_MAX_INSTANT_MESSAGES, k_NS_PER_MESSAGE)
-        {
-            BALL_LOG_STREAM(logSeverity)
-                << d_cluster_p->description()
-                << ": not sending a configure-queue request in response to"
-                << " ReopenQueue response, for queue [" << uri
-                << "], as the queue is not configured for upstream subQueue "
-                << bmqp::QueueId::SubQueueIdInt(upstreamSubQueueId);
-        }
-
-        return;  // RETURN
-    }
-
-    if (!sendConfigureQueueRequest(
-            streamParamsCopy,
-            queueptr->id(),
-            queueptr->uri(),
-            bdlf::BindUtil::bindS(d_allocator_p,
-                                  &ClusterQueueHelper::reconfigureCallback,
-                                  this,
-                                  bdlf::PlaceHolders::_1,
-                                  bdlf::PlaceHolders::_2,
-                                  cycle),
-            true,  // is a reconfigure-queue request
-            activeNode,
-            generationCount,
-            sqit->subId())) {
-        // Assume sending has failed due to a disconnect, therefore, there is
-        // no need to roll back the result of ReOpen request.
-        // Decrement all counters.
-        // Do not report "state is restored"
-
-        setStreamState(&subQueueContext, SubQueueContext::k_CLOSED);
-
-        // TBD: Note that invoking 'd_queue_p->streamParameters()' above is not
-        // thread safe as queue's parameteres are supposed to be read/written
-        // only from the queue-dispatcher thread.  This will be fixed
-        // eventually.
-
-        // Abort restore of the state: the channel is no longer valid, we'll
-        // wait for a new one to be active and will restart restoring the state
-        // from the beginning.
-    }
+    BMQ_LOGTHROTTLE_INFO << d_cluster_p->description()
+                         << ": queue successfully reopened ["
+                         << requestContext->request() << "].";
 }
 
 void ClusterQueueHelper::onConfigureQueueResponse(
@@ -2525,7 +2539,7 @@ void ClusterQueueHelper::onHandleConfigured(
             qId = request.choice().configureQueueStream().qId();
             configureQueueStream.qId() = qId;
 
-            bmqp::ProtocolUtil::convert(
+            bmqp::ConversionUtil::convert(
                 &configureQueueStream.streamParameters(),
                 streamParameters,
                 request.choice()
@@ -3441,11 +3455,11 @@ bool ClusterQueueHelper::sendConfigureQueueRequest(
             request->request().choice().makeConfigureQueueStream();
         qs.qId() = queueId;
 
-        bmqp::ProtocolUtil::convert(
+        bmqp::ConversionUtil::convert(
             &qs.streamParameters(),
             streamParameters,
-            bmqp::ProtocolUtil::makeSubQueueIdInfo(streamParameters.appId(),
-                                                   subId));
+            bmqp::ConversionUtil::makeSubQueueIdInfo(streamParameters.appId(),
+                                                     subId));
     }
 
     request->setResponseCb(
@@ -5118,8 +5132,8 @@ void ClusterQueueHelper::processPeerConfigureStreamRequest(
                              << ": Received configureQueueStreamRequest from ["
                              << requester->description() << "]: " << request;
 
-        bmqp::ProtocolUtil::convert(&adaptor,
-                                    request.choice().configureQueueStream());
+        bmqp::ConversionUtil::convert(&adaptor,
+                                      request.choice().configureQueueStream());
     }
     else {
         BSLS_ASSERT_SAFE(request.choice().isConfigureStreamValue());

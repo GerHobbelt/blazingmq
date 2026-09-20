@@ -34,7 +34,6 @@
 #include <bmqio_listenoptions.h>
 #include <bmqio_status.h>
 #include <bmqp_blobpoolutil.h>
-#include <bmqp_ctrlmsg_messages.h>
 #include <bmqp_event.h>
 #include <bmqt_sessionoptions.h>
 #include <bmqu_sharedresource.h>
@@ -43,11 +42,13 @@
 #include <bdlbb_blob.h>
 #include <bdlmt_eventscheduler.h>
 #include <bsl_functional.h>
+#include <bsl_memory.h>
 #include <bslma_allocator.h>
 #include <bslma_usesbslmaallocator.h>
 #include <bslmf_nestedtraitdeclaration.h>
 #include <bsls_keyword.h>
 #include <bsls_timeinterval.h>
+#include <bsls_types.h>
 
 namespace BloombergLP {
 
@@ -154,7 +155,7 @@ class AuthenticatedChannelFactory : public bmqio::ChannelFactory {
     /// after which reauthentication should be performed.  This interval is
     /// calculated with a buffer to avoid cutting too close to the actual
     /// expiration time.
-    int timeoutInterval(int lifetimeMs) const;
+    bsls::Types::Uint64 timeoutInterval(bsls::Types::Uint64 lifetimeMs) const;
 
     // PRIVATE MANIPULATORS
 

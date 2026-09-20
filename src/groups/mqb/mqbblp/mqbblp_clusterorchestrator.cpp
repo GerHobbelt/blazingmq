@@ -44,6 +44,7 @@
 #include <bsl_cstddef.h>  // size_t
 #include <bsl_memory.h>
 #include <bsl_string.h>
+#include <bsl_utility.h>
 #include <bsl_vector.h>
 #include <bsla_annotations.h>
 #include <bslmf_movableref.h>
@@ -500,7 +501,6 @@ void ClusterOrchestrator::onNodeUnavailable(mqbnet::ClusterNode* node)
     // by the leader, and followers should update the info only upon being
     // notified from the leader?
     d_stateManager_mp->markOrphan(ns->primaryPartitions(), node);
-    ns->removeAllPartitions();
 
     if (mqbnet::ElectorState::e_LEADER !=
             d_clusterData_p->electorInfo().electorState() ||

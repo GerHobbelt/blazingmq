@@ -21,13 +21,13 @@ jobs:
     name: UT coverage [python]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Generate Python Unit Tests Coverage report
         env:
           PYTHONPATH: ${{ github.workspace }}/src/python
         run: |
-          pip install -r ${{ github.workspace }}/src/python/requirements.txt
+          pip install -r ${{ github.workspace }}/src/python/requirements-test.txt
           cd ${{ github.workspace }}/src/python
           pytest --cov blazingmq \
             --cov-report term \
@@ -35,7 +35,7 @@ jobs:
             --cov-report xml:python-coverage.xml
 
       - name: Archive code coverage results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: code-coverage-report
           path: |

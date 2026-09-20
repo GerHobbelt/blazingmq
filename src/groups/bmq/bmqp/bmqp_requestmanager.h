@@ -334,8 +334,6 @@
 #include <bmqt_resultcode.h>
 
 #include <bmqc_orderedhashmap.h>
-#include <bmqex_bindutil.h>
-#include <bmqex_executionpolicy.h>
 #include <bmqex_executor.h>
 #include <bmqex_systemexecutor.h>
 #include <bmqio_channel.h>
@@ -629,6 +627,11 @@ class RequestManagerRequest {
     /// associated to this object: return either `success` or the category
     /// code associated to the Failure type of the response.
     bmqt::GenericResult::Enum result() const;
+
+    /// Convenient accessor to return the domain specific error code of the
+    /// response associated to this object: return either `success` or the
+    /// error code associated to the Failure type of the response.
+    int statusCode() const;
 
     /// Return the description of the node the request was sent to.
     const bsl::string& nodeDescription() const;
@@ -1124,6 +1127,16 @@ RequestManagerRequest<REQUEST, RESPONSE>::result() const
 }
 
 template <class REQUEST, class RESPONSE>
+int RequestManagerRequest<REQUEST, RESPONSE>::statusCode() const
+{
+    if (d_responseMessage.choice().isStatusValue()) {
+        return d_responseMessage.choice().status().code();  // RETURN
+    }
+
+    return bmqt::GenericResult::e_SUCCESS;
+}
+
+template <class REQUEST, class RESPONSE>
 const bsl::string&
 RequestManagerRequest<REQUEST, RESPONSE>::nodeDescription() const
 {
@@ -1489,16 +1502,23 @@ bmqt::GenericResult::Enum RequestManager<REQUEST, RESPONSE>::sendRequest(
     }
 
     // Schedule a timeout
+    struct Local {
+        static void dispatch(bmqex::Executor*             executor,
+                             const bsl::function<void()>& callback)
+        {
+            executor->dispatch(callback);
+        }
+    };
+
     d_scheduler_p->scheduleEvent(
         &(request->d_timeoutSchedulerHandle),
         bmqu::Time::nowMonotonicClock() + timeout,
-        bmqex::BindUtil::bindExecute(
-            bmqex::ExecutionPolicyUtil::possiblyBlocking()
-                .useExecutor(d_executor)
-                .useAllocator(d_allocator_p),
-            bdlf::BindUtil::bind(&RequestManager::onRequestTimeout,
+        bdlf::BindUtil::bind(&Local::dispatch,
+                             &d_executor,
+                             bsl::function<void()>(bdlf::BindUtil::bind(
+                                 &RequestManager::onRequestTimeout,
                                  this,
-                                 requestId)));
+                                 requestId))));
 
     // Insert the request in the map
     BSLA_MAYBE_UNUSED bsl::pair<RequestMapIter, bool> insertRC =

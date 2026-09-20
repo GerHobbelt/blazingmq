@@ -55,20 +55,9 @@ execute_process(
       -m pip
       install
       --quiet
-      -r "${CMAKE_CURRENT_SOURCE_DIR}/../python/requirements.txt"
+      -r "${CMAKE_CURRENT_SOURCE_DIR}/../python/requirements-test.txt"
 )
 
-# Use pytest-cmake from pypi to integrate pytest integration tests as CTest
-# targets.
-message(STATUS "Install pytest-cmake into virtual environment")
-execute_process(
-  COMMAND
-    "${Python3_EXECUTABLE}"
-    -m pip
-    install
-    --quiet
-    pytest-cmake
-)
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_BINARY_DIR}/venv/share/Pytest/cmake")
 set(Pytest_ROOT "${CMAKE_CURRENT_BINARY_DIR}/venv/bin")
 find_package(Pytest)
@@ -92,6 +81,27 @@ if(Pytest_FOUND)
       bmqbrkr bmqtool ${integration_test_files}
     PROPERTIES
       LABELS "integration;all"
+  )
+
+  message(STATUS "Adding fuzz tests to CTest")
+
+  file(GLOB_RECURSE fuzz_test_files
+    "${CMAKE_SOURCE_DIR}/src/fuzz-tests/*.py")
+  pytest_discover_tests(
+    all.fuzz
+    WORKING_DIRECTORY
+      "${CMAKE_SOURCE_DIR}/src/fuzz-tests"
+    ENVIRONMENT
+      "BLAZINGMQ_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    PYTHON_PATH_PREPEND
+      "${CMAKE_SOURCE_DIR}/src/python/"
+    STRIP_PARAM_BRACKETS
+    TRIM_FROM_NAME
+      "^test_"
+    DEPENDS
+      bmqbrkr ${fuzz_test_files}
+    PROPERTIES
+      LABELS "fuzztest;all"
   )
 endif()
 

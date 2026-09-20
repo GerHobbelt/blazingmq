@@ -1,4 +1,4 @@
-// Copyright 2021-2023 Bloomberg Finance L.P.
+// Copyright 2014-2023 Bloomberg Finance L.P.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,17 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Automatically generated file.  **DO NOT EDIT**
+#include <bmqp_queueinfo.h>
 
-// Generated on Wed Jun 18 14:44:06 2025
-// Command line: sim_cpp11_features.pl bmqu_objectplaceholder.cpp
-
-#define INCLUDED_BMQU_OBJECTPLACEHOLDER_CPP03  // Disable inclusion
-#include <bmqu_objectplaceholder_cpp03.h>      // Pro-forma #include
-
-// Empty file except when compiling bmqu_objectplaceholder.cpp
-#ifdef COMPILING_BMQU_OBJECTPLACEHOLDER_CPP
-
-// No C++03 Expansion
-
-#endif  // defined(COMPILING_BMQU_OBJECTPLACEHOLDER_CPP)
+#include <bmqscm_version.h>

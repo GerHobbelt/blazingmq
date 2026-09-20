@@ -16,3 +16,20 @@
 #include <bmqimp_sessionid.h>
 
 #include <bmqscm_version.h>
+
+#include <bmqp_ctrlmsg_messages.h>
+
+namespace BloombergLP {
+namespace bmqimp {
+
+SessionId::SessionId(
+    const bmqp_ctrlmsg::NegotiationMessage& negotiationMessage)
+: d_sessionId(negotiationMessage.isClientIdentityValue()
+                  ? negotiationMessage.clientIdentity().sessionId()
+                  : 0)
+{
+    // NOTHING
+}
+
+}  // close package namespace
+}  // close enterprise namespace

@@ -333,7 +333,7 @@ void Channel::setChannel(const bsl::weak_ptr<bmqio::Channel>& value)
     wakeUp();
 
     // Case 1, 2: wait until `threadFn` gets the new channel.
-    while (d_state == e_RESET) {
+    while (d_state == e_RESET && !d_isStopping) {
         // Synchronize with the writing thread.
         // This is to not reject writes after 'setChannel' returns.
         d_stateCondition.wait(&d_mutex);
@@ -720,9 +720,6 @@ Channel::writeImmediate(bool*                                     isConsumed,
             }
             *isConsumed = false;
         } break;
-#ifdef BMQ_ENABLE_MSG_GROUPID
-        case bmqt::EventBuilderResult::e_INVALID_MSG_GROUP_ID:
-#endif
         case bmqt::EventBuilderResult::e_PAYLOAD_EMPTY:
         case bmqt::EventBuilderResult::e_MISSING_CORRELATION_ID:
         case bmqt::EventBuilderResult::e_QUEUE_READONLY:
@@ -919,7 +916,7 @@ void Channel::threadFn()
                               << bmqu::PrintUtil::prettyBytes(numBytes())
                               << " pending bytes";
                 // If 'onWatermark' did not happen yet, do go into e_HWM to
-                // avoid calling BTE until LWM
+                // avoid calling transport layer until LWM
                 d_state.testAndSwap(e_READY, e_HWM);
             }
             else if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(

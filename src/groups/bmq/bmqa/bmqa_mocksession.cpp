@@ -344,6 +344,7 @@ Event MockSessionUtil::createSessionEvent(
     bmqt::SessionEventType::Enum sessionEventType,
     const bmqt::CorrelationId&   correlationId,
     const int                    errorCode,
+    bmqt::GenericResult::Enum    result,
     const bslstl::StringRef&     errorDescription,
     bslma::Allocator*            allocator)
 {
@@ -364,6 +365,7 @@ Event MockSessionUtil::createSessionEvent(
 
     implPtr->configureAsSessionEvent(sessionEventType,
                                      errorCode,
+                                     result,
                                      correlationId,
                                      errorDescription);
     return event;
@@ -374,6 +376,7 @@ Event MockSessionUtil::createQueueSessionEvent(
     QueueId*                     queueId,
     const bmqt::CorrelationId&   correlationId,
     int                          errorCode,
+    bmqt::GenericResult::Enum    result,
     const bslstl::StringRef&     errorDescription,
     bslma::Allocator*            allocator)
 {
@@ -394,6 +397,7 @@ Event MockSessionUtil::createQueueSessionEvent(
 
     implPtr->configureAsSessionEvent(sessionEventType,
                                      errorCode,
+                                     result,
                                      correlationId,
                                      errorDescription);
 
@@ -411,7 +415,7 @@ Event MockSessionUtil::createAckEvent(const bsl::vector<AckParams>& acks,
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(bufferFactory);
 
-    bslma::Allocator* alloc = bslma::Default::allocator(allocator);
+    bslma::Allocator*     alloc = bslma::Default::allocator(allocator);
     bmqp::AckEventBuilder ackBuilder(BlobSpCreatorF(bufferFactory, alloc),
                                      alloc);
 
@@ -828,10 +832,8 @@ const char* MockSession::toAscii(const Method method)
 
 void MockSession::initializeStats()
 {
-    bmqst::StatValue::SnapshotLocation start;
-    bmqst::StatValue::SnapshotLocation end;
-    start.setLevel(0).setIndex(0);
-    end.setLevel(0).setIndex(1);
+    bmqst::StatValue::SnapshotLocation start(0, 0);
+    bmqst::StatValue::SnapshotLocation end(0, 1);
     bmqimp::QueueStatsUtil::initializeStats(d_queuesStats_sp.get(),
                                             d_rootStatContext_mp.get(),
                                             start,

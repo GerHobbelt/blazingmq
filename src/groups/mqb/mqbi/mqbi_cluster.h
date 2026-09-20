@@ -44,7 +44,6 @@
 #include <mqbi_queue.h>
 
 // BMQ
-#include <bmqp_ctrlmsg_messages.h>
 #include <bmqp_requestmanager.h>
 
 #include <bmqio_status.h>
@@ -63,6 +62,13 @@ namespace BloombergLP {
 // FORWARD DECLARATION
 namespace bdlmt {
 class FixedThreadPool;
+}
+namespace bmqp_ctrlmsg {
+class ControlMessage;
+class OpenQueueResponse;
+class QueueHandleParameters;
+class Status;
+class StreamParameters;
 }
 namespace bmqu {
 class AtomicState;
@@ -154,7 +160,10 @@ struct ClusterErrorCode {
         /// Source node is not recognized as the leader
         e_SOURCE_NOT_LEADER = -211,
         /// Source node is not recognized as the primary
-        e_SOURCE_NOT_PRIMARY = -212
+        e_SOURCE_NOT_PRIMARY = -212,
+        /// The node's storage has irreconcilable data
+        /// with respect to a peer
+        e_IRRECONCILABLE_DATA = -213
     };
 
     // CLASS METHODS

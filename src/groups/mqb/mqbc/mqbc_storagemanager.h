@@ -122,13 +122,8 @@ class StorageManager BSLS_KEYWORD_FINAL
 
     typedef bsl::function<void(int)> RecoveryStatusCb;
 
-    typedef ClusterData::MultiRequestManagerType       MultiRequestManagerType;
-    typedef MultiRequestManagerType::RequestContextSp  RequestContextSp;
-    typedef MultiRequestManagerType::NodeResponsePairs NodeResponsePairs;
-    typedef MultiRequestManagerType::NodeResponsePairsConstIter
-        NodeResponsePairsCIter;
-
     typedef ClusterData::RequestManagerType RequestManagerType;
+    typedef RequestManagerType::RequestSp   RequestContextSp;
 
     typedef bdlmt::EventScheduler::RecurringEventHandle RecurringEventHandle;
 
@@ -481,21 +476,22 @@ class StorageManager BSLS_KEYWORD_FINAL
     ///         thread for the specified `partitionId`.
     void onPartitionRecovery(int partitionId);
 
-    /// Enqueue the `event` with `eventDataVec` to the Partition FSM.
+    /// Enqueue the `event` with `eventData` to the Partition FSM.
     ///
     /// THREAD: This method is invoked in the cluster dispatcher thread or the
     ///         associated Queue dispatcher thread for the `partitionId` in the
-    ///         specified `eventDataVec`.
-    void enqueuePartitionFSMEvent(PartitionFSM::Event::Enum event,
-                                  const EventData&          eventDataVec);
+    ///         specified `eventData`.
+    void enqueuePartitionFSMEvent(PartitionFSM::Event::Enum    event,
+                                  const PartitionFSMEventData& eventData);
 
-    /// Verify and enqueue the `event` with `eventDataVec` to the Partition
+    /// Verify and enqueue the `event` with `eventData` to the Partition
     /// FSM.
     ///
     /// THREAD: This method is invoked in the associated Queue dispatcher
-    ///         thread for the partitionId in the specified `eventDataVec`.
-    void enqueuePartitionFSMEventDispatched(PartitionFSM::Event::Enum event,
-                                            const EventData& eventDataVec);
+    ///         thread for the partitionId in the specified `eventData`.
+    void
+    enqueuePartitionFSMEventDispatched(PartitionFSM::Event::Enum    event,
+                                       const PartitionFSMEventData& eventData);
 
     /// Set the primary status of the specified `partitionId` to the specified
     /// `value`.
@@ -531,6 +527,13 @@ class StorageManager BSLS_KEYWORD_FINAL
     void startSendDataChunksAsPrimary(const DataDestinations& destinations,
                                       int                     partitionId,
                                       int                     requestId);
+
+    /// Deprecate the existing file set for `partitionId`, create a new
+    /// recovery file set, and reset self PSN.  Terminate on failure.
+    ///
+    /// THREAD: This method is invoked in the associated Queue dispatcher
+    ///         thread for the specified `partitionId`.
+    void primaryRemoveStorageImpl(int partitionId);
 
     /// Process replica data request of type PULL received from the specified
     /// `source` with the specified `message`.
@@ -574,14 +577,16 @@ class StorageManager BSLS_KEYWORD_FINAL
     /// THREAD: This method is invoked in the associated cluster's
     ///         dispatcher thread.
     void processReplicaStateResponseDispatched(
-        const RequestContextSp& requestContext);
+        const RequestContextSp& requestContext,
+        mqbnet::ClusterNode*    responder);
 
     /// Process the ReplicaStateResponse contained in the specified
-    /// `requestContext`.
+    /// `requestContext` from the specified `responder`.
     ///
     /// THREAD: This method is invoked in the associated cluster's
     ///         dispatcher thread or scheduler thread.
-    void processReplicaStateResponse(const RequestContextSp& requestContext);
+    void processReplicaStateResponse(const RequestContextSp& requestContext,
+                                     mqbnet::ClusterNode*    responder);
 
     /// Process the ReplicaDataResponse contained in the specified
     /// `requestContext` from the specified `responder`.
@@ -654,6 +659,9 @@ class StorageManager BSLS_KEYWORD_FINAL
 
     void do_primaryRemoveStorageIfNeeded(const EventWithData& event)
         BSLS_KEYWORD_OVERRIDE;
+
+    void
+    do_primaryRemoveStorage(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
 
     void do_failurePrimaryStateResponse(const EventWithData& event)
         BSLS_KEYWORD_OVERRIDE;

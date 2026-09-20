@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-slim
     name: License Check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: license check
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-slim
     name: PR Title Check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: pr title check
@@ -58,7 +58,7 @@ jobs:
     name: Check .mem files sorting
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check alphabetical order in .mem files
         run: |
@@ -92,15 +92,15 @@ jobs:
 
   cpp_formatting_check:
     name: C++ Formatting Check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: clang-format style check
         id: format-check
         run: |
-          git clang-format-18 --diff -q origin/main | tee clang_format.patch
+          git clang-format-21 --diff -q origin/main | tee clang_format.patch
           if [ -s clang_format.patch ]; then
             echo ""
             echo "clang-format check failed.  A patch file with the required"
@@ -113,7 +113,7 @@ jobs:
           fi
       - name: Upload formatting patch
         if: failure() && steps.format-check.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: clang-format-patch
           path: clang_format.patch
@@ -128,10 +128,10 @@ jobs:
     name: Python Formatting Check
     runs-on: ubuntu-slim
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
       - name: ruff style check
         id: format-check
         run: |
@@ -150,7 +150,7 @@ jobs:
           fi
       - name: Upload formatting patch
         if: failure() && steps.format-check.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ruff-format-patch
           path: ruff_format.patch
@@ -159,15 +159,15 @@ jobs:
     name: Python Linter Check
     runs-on: ubuntu-slim
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12.4'
       - name: Install dependencies
         run: |
-          pip3 install -r ${{ github.workspace }}/src/python/requirements.txt
+          pip3 install -r ${{ github.workspace }}/src/python/requirements-test.txt
           pip3 install pylint lint-diffs
           ln -s ${{ github.workspace }}/src/python/pylintrc ${{ github.workspace }}/.pylintrc
           echo [pylint] > ${{ github.workspace }}/.lint-diffs
