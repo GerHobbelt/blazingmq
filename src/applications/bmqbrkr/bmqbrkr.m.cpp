@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqbrkr.m.cpp                                                      -*-C++-*-
-
 // Application
 #include <bmqbrkrscm_version.h>
 #include <m_bmqbrkr_task.h>
@@ -293,17 +291,14 @@ static int getConfig(bsl::ostream&      errorDescription,
                          << "generated config file (first 1024 characters):\n"
                          << taskEnv->d_configJson.substr(
                                 0,
-                                bsl::min(1024,
-                                         static_cast<int>(
-                                             taskEnv->d_configJson.length())));
+                                bsl::min(bsl::string::size_type(1024),
+                                         taskEnv->d_configJson.length()));
         return rc_DECODE_FAILED;  // RETURN
     }
 
     taskEnv->d_config.appConfig().etcDir() = configDir;
     taskEnv->d_config.appConfig().brokerVersion() =
         bmqbrkrscm::Version::versionAsInt();
-    mqbcfg::BrokerConfig::set(taskEnv->d_config.appConfig());
-
     return rc_SUCCESS;
 }
 
@@ -396,7 +391,8 @@ static int initializeTask(bsl::ostream&    errorDescription,
     // Create the Task
     new (taskEnv->d_task.buffer())
         m_bmqbrkr::Task(taskEnv->d_bmqPrefix,
-                        taskEnv->d_config.taskConfig().allocatorType());
+                        taskEnv->d_config.taskConfig().allocatorType(),
+                        taskEnv->d_config.taskConfig().allocationLimit());
 
     bmqu::MemOutStream localError;
     const int          rc = taskEnv->d_task.object().initialize(
@@ -731,6 +727,8 @@ int main(int argc, const char* argv[])
             .value()
             .port() = port;
     }
+
+    mqbcfg::BrokerConfig::set(taskEnv.d_config.appConfig());
 
     // Create and initialize the task
     rc = initializeTask(errorDescription, &taskEnv);

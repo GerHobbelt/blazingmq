@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_storageutil.h                                                 -*-C++-*-
 #ifndef INCLUDED_MQBC_STORAGEUTIL
 #define INCLUDED_MQBC_STORAGEUTIL
 
@@ -93,18 +92,19 @@ class ClusterNode;
 
 namespace mqbc {
 
-namespace {
-/// Constant used to represent an invalid partition id.
-const unsigned int k_INVALID_PARTITION_ID =
-    bsl::numeric_limits<unsigned int>::max();
-}  // close unnamed namespace
-
 // ==================
 // struct StorageUtil
 // ==================
 
 /// Generic utilities for storage related operations.
 struct StorageUtil {
+  public:
+    // PUBLIC CONSTANTS
+
+    /// Constant used to represent an invalid partition id.
+    static const unsigned int k_INVALID_PARTITION_ID =
+        static_cast<unsigned int>(mqbi::Storage::k_INVALID_PARTITION_ID);
+
   private:
     // CLASS SCOPE CATEGORY
     BALL_LOG_SET_CLASS_CATEGORY("MQBC.STORAGEUTIL");
@@ -131,6 +131,7 @@ struct StorageUtil {
         QueueKeyInfoMapConstIter;
 
     typedef mqbs::DataStoreConfig::QueueCreationCb   QueueCreationCb;
+    typedef mqbs::DataStoreConfig::QueueDeletionCb   QueueDeletionCb;
     typedef mqbs::DataStoreConfig::RecoveredQueuesCb RecoveredQueuesCb;
 
     typedef mqbi::StorageManager_PartitionInfo PartitionInfo;
@@ -519,19 +520,19 @@ struct StorageUtil {
     ///
     /// THREAD: Executed by the cluster *DISPATCHER* thread.
     static int assignPartitionDispatcherThreads(
-        bdlmt::FixedThreadPool*                     threadPool,
-        mqbc::ClusterData*                          clusterData,
-        const mqbi::Cluster&                        cluster,
-        mqbi::Dispatcher*                           dispatcher,
-        const mqbcfg::PartitionConfig&              config,
-        FileStores*                                 fileStores,
-        BlobSpPool*                                 blobSpPool,
-        bmqma::CountingAllocatorStore*              allocators,
-        bsl::ostream&                               errorDescription,
-        int                                         replicationFactor,
-        const RecoveredQueuesCb&                    recoveredQueuesCb,
-        const bdlb::NullableValue<QueueCreationCb>& queueCreationCb =
-            bdlb::NullableValue<QueueCreationCb>());
+        bdlmt::FixedThreadPool*        threadPool,
+        mqbc::ClusterData*             clusterData,
+        const mqbi::Cluster&           cluster,
+        mqbi::Dispatcher*              dispatcher,
+        const mqbcfg::PartitionConfig& config,
+        FileStores*                    fileStores,
+        BlobSpPool*                    blobSpPool,
+        bmqma::CountingAllocatorStore* allocators,
+        bsl::ostream&                  errorDescription,
+        int                            replicationFactor,
+        const RecoveredQueuesCb&       recoveredQueuesCb,
+        const QueueCreationCb&         queueCreationCb,
+        const QueueDeletionCb&         queueDeletionCb);
 
     /// Clear the primary of the specified `partitionId` from the specified
     /// `fs` and `partitionInfo`, using the specified clusterDescription`.
@@ -588,7 +589,7 @@ struct StorageUtil {
                       mqbc::ClusterState*          clusterState,
                       const bsl::string&           clusterDescription,
                       int                          partitionId,
-                      const QueueKeyInfoMap&       queueKeyInfoMap,
+                      const QueueKeyInfoMap*       queueKeyInfoMap,
                       bslma::Allocator*            allocator);
 
     /// Print statistics regarding the specified 'unrecognizedDomains',

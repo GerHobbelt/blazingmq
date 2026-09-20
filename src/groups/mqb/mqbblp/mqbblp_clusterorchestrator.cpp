@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_clusterorchestrator.cpp                                     -*-C++-*-
 #include <mqbblp_clusterorchestrator.h>
 
 #include <mqbscm_version.h>
@@ -23,6 +22,7 @@
 #include <mqbc_clusterstateledger.h>
 #include <mqbc_clusterstatemanager.h>
 #include <mqbc_clusterutil.h>
+#include <mqbc_electorinfo.h>
 #include <mqbc_incoreclusterstateledger.h>
 #include <mqbcmd_messages.h>
 #include <mqbevt_callbackevent.h>
@@ -672,20 +672,19 @@ int ClusterOrchestrator::start(bsl::ostream& errorDescription)
         return rc * 10 + rc_CLUSTER_STATE_MANAGER_FAILURE;  // RETURN
     }
 
-    // Fetch latest leader sequence number from the ledger and supply it to the
-    // elector.
+    // Fetch latest LSN from the ledger and supply it to the elector.
     bmqp_ctrlmsg::LeaderMessageSequence ledgerLSN;
     rc = d_stateManager_mp->latestLedgerLSN(&ledgerLSN);
     if (rc == 0) {
         BALL_LOG_INFO << d_clusterData_p->identity().description()
-                      << ": Latest leader sequence number fetched from the "
-                      << "cluster state ledger: " << ledgerLSN;
+                      << ": Latest LSN fetched from the cluster state ledger: "
+                      << mqbc::printLSN(ledgerLSN);
     }
     else {
         BALL_LOG_WARN << d_clusterData_p->identity().description()
-                      << ": Failed to fetch latest leader sequence number from"
-                      << " the cluster state ledger, rc: " << rc
-                      << ". Using default value: " << ledgerLSN;
+                      << ": Failed to fetch latest LSN from the cluster state"
+                      << " ledger, rc: " << rc << ". Using default value: "
+                      << mqbc::printLSN(ledgerLSN);
     }
 
     d_clusterData_p->electorInfo().setLeaderMessageSequence(ledgerLSN);
@@ -1013,7 +1012,7 @@ void ClusterOrchestrator::processNodeStoppingNotification(
     failure.code()     = mqbi::ClusterErrorCode::e_STOPPING;
     failure.message()  = "Peer node is stopping";
 
-    d_clusterData_p->requestManager().cancelAllRequests(
+    d_clusterData_p->requestManager().cancelGroupRequests(
         response,
         ns->clusterNode()->nodeId());
 
@@ -1274,8 +1273,8 @@ void ClusterOrchestrator::processNodeStateChangeEvent(
     failure.code()     = mqbi::ClusterErrorCode::e_NODE_DOWN;
     failure.message()  = "Lost connection with peer node";
 
-    d_clusterData_p->requestManager().cancelAllRequests(response,
-                                                        node->nodeId());
+    d_clusterData_p->requestManager().cancelGroupRequests(response,
+                                                          node->nodeId());
 
     // Note that if the 'node' went down gracefully, 'onNodeUnavailable' would
     // have also been called in

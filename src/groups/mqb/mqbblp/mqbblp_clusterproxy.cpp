@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_clusterproxy.cpp                                            -*-C++-*-
 #include <mqbblp_clusterproxy.h>
 
 #include <mqbscm_version.h>
@@ -362,8 +361,8 @@ void ClusterProxy::onActiveNodeDown(const mqbnet::ClusterNode* node)
         failure.code()     = mqbi::ClusterErrorCode::e_STOPPING;
         failure.message()  = "Lost connection with active node while stopping";
 
-        d_clusterData.requestManager().cancelAllRequests(response,
-                                                         node->nodeId());
+        d_clusterData.requestManager().cancelGroupRequests(response,
+                                                           node->nodeId());
 
         return;  // RETURN
     }
@@ -388,7 +387,8 @@ void ClusterProxy::onActiveNodeDown(const mqbnet::ClusterNode* node)
     failure.code()     = mqbi::ClusterErrorCode::e_ACTIVE_LOST;
     failure.message()  = "Lost connection with active node";
 
-    d_clusterData.requestManager().cancelAllRequests(response, node->nodeId());
+    d_clusterData.requestManager().cancelGroupRequests(response,
+                                                       node->nodeId());
 }
 
 // PRIVATE MANIPULATORS
@@ -1412,8 +1412,8 @@ void ClusterProxy::onNodeDownDispatched(mqbnet::ClusterNode* node)
         failure.code()     = mqbi::ClusterErrorCode::e_NODE_DOWN;
         failure.message()  = "Lost connection with node";
 
-        d_clusterData.requestManager().cancelAllRequests(response,
-                                                         node->nodeId());
+        d_clusterData.requestManager().cancelGroupRequests(response,
+                                                           node->nodeId());
     }
 
     processActiveNodeManagerResult(result, node);

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbnet_initialconnectioncontext.h                        -*-C++-*-
 #ifndef INCLUDED_MQBNET_INITIALCONNECTIONCONTEXT
 #define INCLUDED_MQBNET_INITIALCONNECTIONCONTEXT
 
@@ -380,8 +379,6 @@ class InitialConnectionContext {
     void setResultState(void* value);
     void setAuthenticationContext(
         const bsl::shared_ptr<AuthenticationContext>& value);
-    void
-    setNegotiationContext(const bsl::shared_ptr<NegotiationContext>& value);
 
     /// Called by the IO upon `onClose` signal
     void onClose();

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbnet_mockcluster.h                                               -*-C++-*-
 #ifndef INCLUDED_MQBNET_MOCKCLUSTER
 #define INCLUDED_MQBNET_MOCKCLUSTER
 
@@ -270,7 +269,7 @@ class MockCluster : public Cluster {
                   bmqp::EventType::Enum type) BSLS_KEYWORD_OVERRIDE;
 
     /// Send the specified `blob` to all currently up nodes of this cluster
-    /// (exception of the current node).
+    /// (with the exception of the current node).
     void
     broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob) BSLS_KEYWORD_OVERRIDE;
 

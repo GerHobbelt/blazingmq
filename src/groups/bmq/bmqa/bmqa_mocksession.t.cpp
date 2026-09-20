@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqa_mocksession.t.cpp                                             -*-C++-*-
 #include <bmqa_mocksession.h>
 
 // BMQ
@@ -299,11 +298,6 @@ static void test1_staticMethods()
             bmqtst::TestHelperUtil::allocator()));
     }
 
-    bmqp::BlobPoolUtil::BlobSpPoolSp blobSpPool(
-        bmqp::BlobPoolUtil::createBlobPool(
-            &bufferFactory,
-            bmqtst::TestHelperUtil::allocator()));
-
     {
         PVV("Create Ack Event");
 
@@ -321,7 +315,7 @@ static void test1_staticMethods()
 
         bmqa::Event event = bmqa::MockSessionUtil::createAckEvent(
             acks,
-            blobSpPool.get(),
+            &bufferFactory,
             bmqtst::TestHelperUtil::allocator());
 
         bmqa::MessageEvent ackEvent = event.messageEvent();
@@ -380,7 +374,6 @@ static void test1_staticMethods()
         pushMsgs.emplace_back(payload, queueId, guid, properties);
         bmqa::Event event = bmqa::MockSessionUtil::createPushEvent(
             pushMsgs,
-            blobSpPool.get(),
             &bufferFactory,
             bmqtst::TestHelperUtil::allocator());
 
@@ -861,14 +854,8 @@ static void test5_confirmingMessages()
     pushMsgs.emplace_back(payload, queueId, guid2, properties);
     pushMsgs.emplace_back(payload, queueId, guid3, properties);
 
-    bmqp::BlobPoolUtil::BlobSpPoolSp blobSpPool(
-        bmqp::BlobPoolUtil::createBlobPool(
-            &bufferFactory,
-            bmqtst::TestHelperUtil::allocator()));
-
     mockSession.enqueueEvent(bmqa::MockSessionUtil::createPushEvent(
         pushMsgs,
-        blobSpPool.get(),
         &bufferFactory,
         bmqtst::TestHelperUtil::allocator()));
 
@@ -896,7 +883,6 @@ static void test5_confirmingMessages()
             bmqa::MessageEvent invalidEvent =
                 bmqa::MockSessionUtil ::createPushEvent(
                     invalidMsg,
-                    blobSpPool.get(),
                     &bufferFactory,
                     bmqtst::TestHelperUtil::allocator())
                     .messageEvent();
@@ -1196,16 +1182,9 @@ static void test6_runThrough()
                                 queueId,
                                 messageGUID,
                                 bmqa::MessageProperties());
-
-        bmqp::BlobPoolUtil::BlobSpPoolSp blobSpPool(
-            bmqp::BlobPoolUtil::createBlobPool(
-                &bufferFactory,
-                bmqtst::TestHelperUtil::allocator()));
-
         bmqa::MessageEvent pushMsgEvt =
             bmqa::MockSessionUtil::createPushEvent(
                 pushParams,
-                blobSpPool.get(),
                 &bufferFactory,
                 bmqtst::TestHelperUtil::allocator())
                 .messageEvent();
@@ -1350,6 +1329,36 @@ static void test7_postAndAccess()
 
     bmqa::MessageEvent postedEvent2(builder.messageEvent());
     bmqa::MessageEvent postedEvent3(builder.messageEvent());
+
+    // Test that MessageEvent can survive builder reset
+    builder.reset();
+
+    bmqa::MessageIterator i = postedEvent2.messageIterator();
+    bdlbb::Blob payload(&bufferFactory, bmqtst::TestHelperUtil::allocator());
+    int         rc = 0;
+    BMQTST_ASSERT(i.nextMessage());
+
+    rc = i.message().getData(&payload);
+    BMQTST_ASSERT_EQ(rc, 0);
+    BMQTST_ASSERT_EQ(0, bdlbb::BlobUtil::compare(payload, payload1));
+
+    BMQTST_ASSERT(i.nextMessage());
+    payload.setLength(0);
+    rc = i.message().getData(&payload);
+    BMQTST_ASSERT_EQ(rc, 0);
+    BMQTST_ASSERT_EQ(0, bdlbb::BlobUtil::compare(payload, payload2));
+
+    BMQTST_ASSERT(i.nextMessage());
+    payload.setLength(0);
+    rc = i.message().getData(&payload);
+    BMQTST_ASSERT_EQ(rc, 0);
+    BMQTST_ASSERT_EQ(0, bdlbb::BlobUtil::compare(payload, payload3));
+
+    BMQTST_ASSERT(i.nextMessage());
+    payload.setLength(0);
+    rc = i.message().getData(&payload);
+    BMQTST_ASSERT_EQ(rc, 0);
+    BMQTST_ASSERT_EQ(0, bdlbb::BlobUtil::compare(payload, payload4));
 
     BMQA_EXPECT_CALL(mockSession, post(postedEvent2)).returning(0);
     BMQTST_ASSERT_EQ(mockSession.post(postedEvent2), 0);

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqba_adminsession.t.cpp                                            -*-C++-*-
 #include <mqba_adminsession.h>
 
 // MQB
@@ -298,8 +297,6 @@ int main(int argc, char* argv[])
 
         mqbcfg::AppConfig brokerConfig(bmqtst::TestHelperUtil::allocator());
         mqbcfg::BrokerConfig::set(brokerConfig);
-
-        mqbu::MessageGUIDUtil::initialize();
 
         switch (_testCase) {
         case 0:

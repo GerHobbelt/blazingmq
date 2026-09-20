@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_remotequeue.cpp                                             -*-C++-*-
 #include <mqbblp_remotequeue.h>
 
 #include <mqbscm_version.h>
@@ -97,10 +96,9 @@ int RemoteQueue::configureAsProxy(bsl::ostream& errorDescription,
     enum RcEnum {
         // Value for the various RC error categories
         rc_SUCCESS                  = 0,
-        rc_STORAGE_CFG_FAILURE      = -1,
-        rc_INCOMPATIBLE_STORAGE     = -2,
-        rc_UNKNOWN_DOMAIN_CONFIG    = -3,
-        rc_QUEUE_ENGINE_CFG_FAILURE = -4
+        rc_INCOMPATIBLE_STORAGE     = -1,
+        rc_UNKNOWN_DOMAIN_CONFIG    = -2,
+        rc_QUEUE_ENGINE_CFG_FAILURE = -3
     };
 
     if (isReconfigure) {
@@ -135,14 +133,10 @@ int RemoteQueue::configureAsProxy(bsl::ostream& errorDescription,
     limits.bytes()    = bsl::numeric_limits<bsls::Types::Int64>::max();
 
     storageSp->setConsistency(domainCfg.consistency());
-    int rc = storageSp->configure(errorDescription,
-                                  config,
-                                  limits,
-                                  domainCfg.messageTtl(),
-                                  domainCfg.maxDeliveryAttempts());
-    if (0 != rc) {
-        return 10 * rc + rc_STORAGE_CFG_FAILURE;  // RETURN
-    }
+    storageSp->configure(config,
+                         limits,
+                         domainCfg.messageTtl(),
+                         domainCfg.maxDeliveryAttempts());
 
     storageSp->capacityMeter()->disable();
     // In a remote queue, we don't care about monitoring, so disable it for
@@ -163,7 +157,8 @@ int RemoteQueue::configureAsProxy(bsl::ostream& errorDescription,
             RelayQueueEngine(d_state_p, mqbconfm::Domain(), d_allocator_p),
         d_allocator_p);
 
-    rc = d_queueEngine_mp->configure(errorDescription, isReconfigure);
+    const int rc = d_queueEngine_mp->configure(errorDescription,
+                                               isReconfigure);
     if (rc != 0) {
         return 10 * rc + rc_QUEUE_ENGINE_CFG_FAILURE;  // RETURN
     }
@@ -186,23 +181,22 @@ int RemoteQueue::configureAsProxy(bsl::ostream& errorDescription,
     return rc_SUCCESS;
 }
 
-int RemoteQueue::configureAsClusterMember(bsl::ostream& errorDescription,
-                                          bool          isReconfigure)
+int RemoteQueue::configureAsClusterMember(bool isReconfigure)
 {
     // executed by the *QUEUE DISPATCHER* thread
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_state_p->queue()->inDispatcherThread());
     enum {
-        rc_SUCCESS                   = 0,
-        rc_QUEUE_CONFIGURE_FAILURE   = -1,
-        rc_ENGINE_CONFIGURE_FAILURE  = -2,
-        rc_STORAGE_CONFIGURE_FAILURE = -3
+        rc_SUCCESS                  = 0,
+        rc_QUEUE_CONFIGURE_FAILURE  = -1,
+        rc_ENGINE_CONFIGURE_FAILURE = -2
     };
 
     int                     rc        = 0;
     mqbi::Queue*            queue     = d_state_p->queue();
-    const mqbconfm::Domain& domainCfg = d_state_p->domain()->config();
+    bsl::shared_ptr<const mqbconfm::Domain> domainCfg =
+        d_state_p->domain()->config();
 
     if (!isReconfigure) {
         // Only create a storage if this is the initial configure; reconfigure
@@ -217,9 +211,9 @@ int RemoteQueue::configureAsClusterMember(bsl::ostream& errorDescription,
             d_state_p->uri(),
             d_state_p->key(),
             d_state_p->partitionId(),
-            domainCfg.messageTtl(),
-            domainCfg.maxDeliveryAttempts(),
-            domainCfg.storage());
+            domainCfg->messageTtl(),
+            domainCfg->maxDeliveryAttempts(),
+            domainCfg->storage());
         if (rc != 0) {
             // This most likely means that this queue's partition at this
             // replica is out of sync.
@@ -254,20 +248,15 @@ int RemoteQueue::configureAsClusterMember(bsl::ostream& errorDescription,
         // Create the queueEngine.
         d_queueEngine_mp.load(
             new (*d_allocator_p)
-                RelayQueueEngine(d_state_p, domainCfg, d_allocator_p),
+                RelayQueueEngine(d_state_p, *domainCfg, d_allocator_p),
             d_allocator_p);
     }
     else {
-        d_state_p->storage()->setConsistency(domainCfg.consistency());
-        rc = d_state_p->storage()->configure(
-            errorDescription,
-            domainCfg.storage().config(),
-            domainCfg.storage().domainLimits(),
-            domainCfg.messageTtl(),
-            domainCfg.maxDeliveryAttempts());
-        if (rc) {
-            return 10 * rc + rc_STORAGE_CONFIGURE_FAILURE;  // RETURN
-        }
+        d_state_p->storage()->setConsistency(domainCfg->consistency());
+        d_state_p->storage()->configure(domainCfg->storage().config(),
+                                        domainCfg->storage().domainLimits(),
+                                        domainCfg->messageTtl(),
+                                        domainCfg->maxDeliveryAttempts());
     }
 
     bdlma::LocalSequentialAllocator<1024> localAllocator(d_allocator_p);
@@ -548,11 +537,12 @@ int RemoteQueue::configure(bsl::ostream& errorDescription, bool isReconfigure)
 
     // Update stats
     if (isReconfigure) {
-        const mqbconfm::Domain& domainCfg = d_state_p->domain()->config();
-        if (domainCfg.mode().isFanoutValue()) {
+        bsl::shared_ptr<const mqbconfm::Domain> domainCfg =
+            d_state_p->domain()->config();
+        if (domainCfg->mode().isFanoutValue()) {
             d_state_p->stats()->updateDomainAppIds(
-                domainCfg.mode().fanout().publishAppIdMetrics()
-                    ? domainCfg.mode().fanout().appIDs()
+                domainCfg->mode().fanout().publishAppIdMetrics()
+                    ? domainCfg->mode().fanout().appIDs()
                     : bsl::vector<bsl::string>(d_allocator_p));
         }
     }
@@ -561,8 +551,8 @@ int RemoteQueue::configure(bsl::ostream& errorDescription, bool isReconfigure)
         return configureAsProxy(errorDescription, isReconfigure);  // RETURN
     }
     else {
-        return configureAsClusterMember(errorDescription, isReconfigure);
-        // RETURN
+        // Will print an ALARM on failure
+        return configureAsClusterMember(isReconfigure);  // RETURN
     }
 }
 

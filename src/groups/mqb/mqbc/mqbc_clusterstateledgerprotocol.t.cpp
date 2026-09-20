@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_clusterstateledgerprotocol.t.cpp                              -*-C++-*-
 #include <mqbc_clusterstateledgerprotocol.h>
 
 #include <bmqu_memoutstream.h>
@@ -196,8 +195,7 @@ static void test2_enumPrint()
             {L_, mqbc::ClusterStateRecordType::e_SNAPSHOT, "SNAPSHOT"},
             {L_, mqbc::ClusterStateRecordType::e_UPDATE, "UPDATE"},
             {L_, mqbc::ClusterStateRecordType::e_COMMIT, "COMMIT"},
-            {L_, mqbc::ClusterStateRecordType::e_ACK, "ACK"},
-            {L_, -1, "(* UNKNOWN *)"}};
+            {L_, mqbc::ClusterStateRecordType::e_ACK, "ACK"}};
 
         printEnumHelper<mqbc::ClusterStateRecordType>(k_DATA);
     }

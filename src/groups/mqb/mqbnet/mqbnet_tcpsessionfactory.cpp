@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbnet_tcpsessionfactory.cpp                                       -*-C++-*-
 #include <mqbnet_tcpsessionfactory.h>
 
 #include <mqbscm_version.h>
@@ -1310,6 +1309,10 @@ void TCPSessionFactory::stopListening()
     d_isListening = false;
 
     cancelListeners();
+
+    if (d_reconnectingChannelFactory_mp) {
+        d_reconnectingChannelFactory_mp->disableReconnect();
+    }
 }
 
 void TCPSessionFactory::closeClients()

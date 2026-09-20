@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbi_storage.h                                                     -*-C++-*-
 #ifndef INCLUDED_MQBI_STORAGE
 #define INCLUDED_MQBI_STORAGE
 
@@ -54,9 +53,11 @@
 #include <bsl_memory.h>
 #include <bsl_ostream.h>
 #include <bsl_string.h>
+#include <bsl_type_traits.h>
 #include <bsl_utility.h>
 #include <bsl_vector.h>
 #include <bslma_managedptr.h>
+#include <bslmf_nestedtraitdeclaration.h>
 #include <bsls_types.h>
 
 namespace BloombergLP {
@@ -214,8 +215,8 @@ class StorageMessageAttributes {
 
     StorageMessageAttributes(
         bsls::Types::Uint64                  arrivalTimestamp,
-        unsigned int                         appDataLen,
         unsigned int                         refCount,
+        unsigned int                         appDataLen,
         const bmqp::MessagePropertiesInfo&   messagePropertiesInfo,
         bmqt::CompressionAlgorithmType::Enum compressionAlgorithmType,
         bool                                 hasReceipt       = true,
@@ -273,6 +274,9 @@ bool operator!=(const StorageMessageAttributes& lhs,
 
 struct AppMessage {
     // VST to track the state associated with (GUID, App) pair.
+
+    // TRAITS
+    BSLMF_NESTED_TRAIT_DECLARATION(AppMessage, bsl::is_trivially_copyable)
 
     // PULIC TYOES
     enum State { e_NONE = 0, e_PUT = 1, e_PUSH = 2, e_CONFIRM = 3 };
@@ -418,6 +422,10 @@ class StorageIterator {
 class Storage {
   public:
     // PUBLIC CONSTANTS
+    /// Note that this has the same bit pattern as
+    /// `mqbc::StorageUtil::k_INVALID_PARTITION_ID` (`UINT_MAX`), which is
+    /// the unsigned counterpart used when working with wire-protocol
+    /// partition IDs.
     static const int k_INVALID_PARTITION_ID = -1;
 
     /// A constant representing any (but not invalid) partitionId.  This is
@@ -447,16 +455,12 @@ class Storage {
     // MANIPULATORS
 
     /// Configure this storage using the specified `config` and `limits`.
-    /// Return 0 on success, or a non-zero return code and fill in a
-    /// description of the error in the specified `errorDescription`
-    /// otherwise.  Note that calling `configure` on an already configured
-    /// storage should atomically reconfigure that storage with the new
-    /// configuration (or fail and leave the storage untouched).
-    virtual int configure(bsl::ostream&            errorDescription,
-                          const mqbconfm::Storage& config,
-                          const mqbconfm::Limits&  limits,
-                          const bsls::Types::Int64 messageTtl,
-                          const int                maxDeliveryAttempts) = 0;
+    /// Note that calling `configure` on an already configured storage should
+    /// atomically reconfigure that storage with the new configuration.
+    virtual void configure(const mqbconfm::Storage& config,
+                           const mqbconfm::Limits&  limits,
+                           bsls::Types::Int64       messageTtl,
+                           int                      maxDeliveryAttempts) = 0;
 
     /// Set the consistency level associated to this storage to the specified
     /// `value`.

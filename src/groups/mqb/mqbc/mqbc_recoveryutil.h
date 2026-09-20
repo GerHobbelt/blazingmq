@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_recoveryutil.h                                                -*-C++-*-
 #ifndef INCLUDED_MQBC_RECOVERYUTIL
 #define INCLUDED_MQBC_RECOVERYUTIL
 
@@ -90,9 +89,7 @@ struct RecoveryUtil {
         const bmqp_ctrlmsg::PartitionSequenceNumber& beginSeqNum);
 
     /// Increment the specified `currentSeqNum` using the specified
-    /// `journalIt`.  Make sure that the incremented sequence number is less
-    /// than or equal to the specified `endSeqNum` or else return appropriate
-    /// non-zero return code.  Return 0 on successful, 1 if the end of the
+    /// `journalIt`.  Return 0 on successful, 1 if the end of the
     /// journal file is reached, and non-zero for failure scenarios.
     static int incrementCurrentSeqNum(
         bmqp_ctrlmsg::PartitionSequenceNumber* currentSeqNum,

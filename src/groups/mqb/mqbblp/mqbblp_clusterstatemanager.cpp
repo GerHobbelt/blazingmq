@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_clusterstatemanager.cpp                                     -*-C++-*-
 #include <mqbblp_clusterstatemanager.h>
 
 #include <mqbscm_version.h>
@@ -21,6 +20,7 @@
 #include <mqbblp_storagemanager.h>
 #include <mqbc_clusternodesession.h>
 #include <mqbc_clusterstateledgeriterator.h>
+#include <mqbc_electorinfo.h>
 #include <mqbevt_clusterstateevent.h>
 #include <mqbi_cluster.h>
 #include <mqbi_domain.h>
@@ -208,9 +208,9 @@ void ClusterStateManager::onLeaderSyncStateQueryResponse(
                      d_clusterData_p->membership().selfNodeStatus());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
-                  << ": processing leader sync query response. Self's leader "
-                  << "message sequence: "
-                  << d_clusterData_p->electorInfo().leaderMessageSequence();
+                  << ": processing leader sync query response. Self's LSN: "
+                  << mqbc::printLSN(d_clusterData_p->electorInfo()
+                                        .leaderMessageSequence());
 
     mqbnet::ClusterNode* maxSeqNode = d_clusterData_p->membership().selfNode();
     bmqp_ctrlmsg::LeaderMessageSequence maxSeq =
@@ -270,7 +270,7 @@ void ClusterStateManager::onLeaderSyncStateQueryResponse(
     if (maxSeqNode == d_clusterData_p->membership().selfNode()) {
         BALL_LOG_INFO << d_clusterData_p->identity().description()
                       << ": leader has latest view during leader sync step. "
-                      << "Leader message sequence: " << maxSeq;
+                      << "LSN: " << mqbc::printLSN(maxSeq);
 
         onSelfActiveLeader();
 
@@ -282,10 +282,10 @@ void ClusterStateManager::onLeaderSyncStateQueryResponse(
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << ": follower node " << maxSeqNode->nodeDescription()
-                  << " has latest view during leader sync step.  Leader "
-                  << "message sequence of that node: " << maxSeq
-                  << ". Self's leader message sequence: "
-                  << d_clusterData_p->electorInfo().leaderMessageSequence()
+                  << " has latest view during leader sync step.  LSN of that"
+                  << " node: " << mqbc::printLSN(maxSeq) << ". Self's LSN: "
+                  << mqbc::printLSN(d_clusterData_p->electorInfo()
+                                        .leaderMessageSequence())
                   << ".";
 
     RequestManagerType::RequestSp request =
@@ -405,8 +405,8 @@ void ClusterStateManager::onLeaderSyncDataQueryResponse(
     BSLS_ASSERT_SAFE(bmqp_ctrlmsg::NodeStatus::E_AVAILABLE ==
                      d_clusterData_p->membership().selfNodeStatus());
 
-    // Self's leader message sequence must be smaller than the one contained in
-    // the response from follower.
+    // Self's LSN must be smaller than the one contained in the response from
+    // follower.
 
     if (!(d_clusterData_p->electorInfo().leaderMessageSequence() <
           leaderSyncData.sequenceNumber())) {
@@ -414,12 +414,13 @@ void ClusterStateManager::onLeaderSyncDataQueryResponse(
 
         BMQTSK_ALARMLOG_ALARM("CLUSTER")
             << d_clusterData_p->identity().description()
-            << ": Received a smaller or equal leader-msg-sequence number in "
-            << "leader-sync data query response from  follower node "
-            << responder->nodeDescription()
-            << ". Received sequence: " << leaderSyncData.sequenceNumber()
-            << ", self sequence:"
-            << d_clusterData_p->electorInfo().leaderMessageSequence()
+            << ": Received a smaller or equal LSN in "
+            << "leader-sync data query response from follower node "
+            << responder->nodeDescription() << ". Received LSN: "
+            << mqbc::printLSN(leaderSyncData.sequenceNumber())
+            << ", self LSN: "
+            << mqbc::printLSN(
+                   d_clusterData_p->electorInfo().leaderMessageSequence())
             << ". Attempting to send leader-sync state query to AVAILABLE "
             << "followers again." << BMQTSK_ALARMLOG_END;
 
@@ -429,10 +430,11 @@ void ClusterStateManager::onLeaderSyncDataQueryResponse(
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << ": processing leader-sync data response from "
-                  << responder->nodeDescription()
-                  << ". Self's leader message sequence: "
-                  << d_clusterData_p->electorInfo().leaderMessageSequence()
-                  << ", received sequence: " << leaderSyncData.sequenceNumber()
+                  << responder->nodeDescription() << ". Self's LSN: "
+                  << mqbc::printLSN(d_clusterData_p->electorInfo()
+                                        .leaderMessageSequence())
+                  << ", received LSN: "
+                  << mqbc::printLSN(leaderSyncData.sequenceNumber())
                   << ". Leader sync data: " << leaderSyncData << ".";
 
     // Converge the partitions.  First step is to update self's partition info
@@ -990,7 +992,7 @@ void ClusterStateManager::initiateLeaderSync(bool wait)
     }
 
     // Node is AVAILABLE.  Perform leader sync with all AVAILABLE nodes.  Do
-    // not update self's leader message sequence yet.
+    // not update self's LSN yet.
 
     bsl::vector<mqbnet::ClusterNode*> availableFollowers;
     for (ClusterNodeSessionMapIter nit =
@@ -1090,12 +1092,12 @@ void ClusterStateManager::processLeaderSyncStateQuery(
                          .isLeaderSyncStateQueryValue());
 
     // This query is sent by a passive leader ('source') to all AVAILABLE
-    // followers to find out the latest leader state (leader message sequence
-    // to be specific).  We don't check to see if 'source' is really perceived
-    // as the leader by this node, because it really doesn't matter.  If
-    // 'source' is not the leader anymore, it will simply not process this
-    // response.  We do however check self status, and if self is not
-    // AVAILABLE, we do not respond so as not to send any incomplete info.
+    // followers to find out the latest leader state (LSN to be specific).  We
+    // don't check to see if 'source' is really perceived as the leader by this
+    // node, because it really doesn't matter.  If 'source' is not the leader
+    // anymore, it will simply not process this response.  We do however check
+    // self status, and if self is not AVAILABLE, we do not respond so as not
+    // to send any incomplete info.
 
     bmqp_ctrlmsg::ControlMessage controlMsg;
     controlMsg.rId() = message.rId();

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_journalfileiterator.t.cpp                                     -*-C++-*-
 #include <mqbs_journalfileiterator.h>
 
 // MQB
@@ -1424,8 +1423,6 @@ static void test12_backwardAdvance()
 int main(int argc, char* argv[])
 {
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
-
-    mqbu::MessageGUIDUtil::initialize();
 
     switch (_testCase) {
     case 0:

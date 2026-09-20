@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqio_reconnectingchannelfactory.cpp                               -*-C++-*-
 #include <bmqio_reconnectingchannelfactory.h>
 
 #include <bmqscm_version.h>
@@ -185,6 +184,10 @@ ReconnectingChannelFactory_ConnectHandle::properties() const
 void ReconnectingChannelFactory::scheduleConnect(
     const ConnectHandlePtr& handle)
 {
+    if (!d_isReconnectEnabled) {
+        return;  // RETURN
+    }
+
     if (!handle->d_endpoints.empty()) {
         // If we haven't yet exhausted all endpoints, retry immediately without
         // waiting.
@@ -459,6 +462,7 @@ ReconnectingChannelFactory::ReconnectingChannelFactory(
     const Config&     config,
     bslma::Allocator* basicAllocator)
 : d_validator(false)
+, d_isReconnectEnabled(true)
 , d_config(config, basicAllocator)
 , d_handles(basicAllocator)
 , d_mutex()
@@ -501,6 +505,11 @@ void ReconnectingChannelFactory::stop()
     }
 
     d_config.d_base_p->stop();
+}
+
+void ReconnectingChannelFactory::disableReconnect()
+{
+    d_isReconnectEnabled = false;
 }
 
 void ReconnectingChannelFactory::listen(Status*                      status,

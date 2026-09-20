@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqba_dispatcher.cpp                                                -*-C++-*-
 #include <mqba_dispatcher.h>
 
 #include <mqbscm_version.h>
@@ -532,6 +531,8 @@ void Dispatcher::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event,
     case mqbi::DispatcherClientType::e_QUEUE:
     case mqbi::DispatcherClientType::e_CLUSTER: {
         DispatcherContext* dispatcherContext = d_contexts[type].get();
+
+        BSLS_ASSERT_SAFE(dispatcherContext->d_processorPool_mp);
 
         bslmf::MovableRefUtil::access(event)->setEnqueueTime(
             bmqsys::Time::highResolutionTimer());

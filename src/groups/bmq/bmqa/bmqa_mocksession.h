@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqa_mocksession.h                                                 -*-C++-*-
 #ifndef INCLUDED_BMQA_MOCKSESSION
 #define INCLUDED_BMQA_MOCKSESSION
 
@@ -695,12 +694,29 @@ struct MockSessionUtil {
     /// `e_ACK` with the specified `acks` params using the specified
     /// `bufferFactory` and the specified `allocator` to supply memory.
     static Event createAckEvent(const bsl::vector<AckParams>& acks,
+                                bdlbb::BlobBufferFactory*     bufferFactory,
+                                bslma::Allocator*             allocator);
+
+    /// Create and return an `Event` configured as a message event of type
+    /// `e_ACK` with the specified `acks` params using the specified
+    /// `blobSpPool`, `bufferFactory`, and `allocator` to supply memory.
+    static Event createAckEvent(const bsl::vector<AckParams>& acks,
                                 BlobSpPool*                   blobSpPool,
+                                bdlbb::BlobBufferFactory*     bufferFactory,
                                 bslma::Allocator*             allocator);
 
     /// Create and return an `Event` configured as a message event of type
     /// `e_PUSH` and with the specified `pushEventParams`, using the
     /// specified `bufferFactory` and the specified `allocator` to supply
+    /// memory.
+    static Event
+    createPushEvent(const bsl::vector<PushMessageParams>& pushEventParams,
+                    bdlbb::BlobBufferFactory*             bufferFactory,
+                    bslma::Allocator*                     allocator);
+
+    /// Create and return an `Event` configured as a message event of type
+    /// `e_PUSH` and with the specified `pushEventParams`, using the
+    /// specified `blobSpPool`, `bufferFactory`, and `allocator` to supply
     /// memory.
     static Event
     createPushEvent(const bsl::vector<PushMessageParams>& pushEventParams,
@@ -1123,6 +1139,8 @@ class MockSession : public AbstractSession {
     /// Record the messages in the specified `event` as unconfirmed if it is
     /// a push message event.
     void processIfPushEvent(const Event& event);
+
+    MessageEvent createMessageEvent();
 
     // PRIVATE ACCESSORS
 

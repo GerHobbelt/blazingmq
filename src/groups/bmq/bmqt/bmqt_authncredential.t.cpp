@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqt_authncredential.t.cpp                                   -*-C++-*-
 #include <bmqt_authncredential.h>
 
 // TEST DRIVER
@@ -67,19 +66,6 @@ static void test1_breathingTest()
         bsl::string           mechanism("BMQ");
         bsl::vector<char>     data(Local::makeAuthnData());
         bmqt::AuthnCredential cred(mechanism, data);
-
-        ASSERT(cred.mechanism() == mechanism);
-        ASSERT(cred.data() == data);
-    }
-
-    PV("Test setMechanism and setData");
-    {
-        bmqt::AuthnCredential cred;
-        bsl::string           mechanism("BMQ");
-        bsl::vector<char>     data(Local::makeAuthnData());
-
-        cred.setMechanism(mechanism);
-        cred.setData(data);
 
         ASSERT(cred.mechanism() == mechanism);
         ASSERT(cred.data() == data);

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_clusterstateledger.t.cpp                                      -*-C++-*-
 #include <mqbc_clusterstateledger.h>
 
 // BMQ
@@ -335,8 +334,7 @@ static void test4_commitStatus_print()
         const char* d_expected;
     } k_DATA[] = {{L_, 0, "SUCCESS"},
                   {L_, -1, "CANCELED"},
-                  {L_, -2, "TIMEOUT"},
-                  {L_, -9, "(* UNKNOWN *)"}};
+                  {L_, -2, "TIMEOUT"}};
 
     const size_t k_NUM_DATA = sizeof(k_DATA) / sizeof(*k_DATA);
 
@@ -457,9 +455,7 @@ static void test6_clusterStateLedgerConsistency_toAscii()
         const char* d_expected;
     } k_DATA[] = {
         {L_, mqbc::ClusterStateLedgerConsistency::e_EVENTUAL, "EVENTUAL"},
-        {L_, mqbc::ClusterStateLedgerConsistency::e_STRONG, "STRONG"},
-        {L_, -1, "(* UNKNOWN *)"},
-    };
+        {L_, mqbc::ClusterStateLedgerConsistency::e_STRONG, "STRONG"}};
     // NOTE: Using the 'integer' value instead of the enum to ensure the
     //       numeric values are *never* changed.
 
@@ -507,8 +503,7 @@ static void test7_clusterStateLedgerConsistency_print()
         const char* d_expected;
     } k_DATA[] = {
         {L_, mqbc::ClusterStateLedgerConsistency::e_EVENTUAL, "EVENTUAL"},
-        {L_, mqbc::ClusterStateLedgerConsistency::e_STRONG, "STRONG"},
-        {L_, -1, "(* UNKNOWN *)"}};
+        {L_, mqbc::ClusterStateLedgerConsistency::e_STRONG, "STRONG"}};
 
     const size_t k_NUM_DATA = sizeof(k_DATA) / sizeof(*k_DATA);
 

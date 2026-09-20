@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_clusterstatemanager.h                                         -*-C++-*-
 #ifndef INCLUDED_MQBC_CLUSTERSTATEMANAGER
 #define INCLUDED_MQBC_CLUSTERSTATEMANAGER
 
@@ -159,7 +158,7 @@ class ClusterStateManager BSLS_KEYWORD_FINAL
     mqbc::ClusterFSM d_clusterFSM;
 
     /// Map from a cluster node (including self) to its view of the latest
-    /// ledger leader sequence number.
+    /// ledger LSN.
     NodeToLSNMap d_nodeToLedgerLSNMap;
 
     /// Underlying cluster state ledger.

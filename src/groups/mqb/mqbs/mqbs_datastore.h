@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_datastore.h                                                   -*-C++-*-
 #ifndef INCLUDED_MQBS_DATASTORE
 #define INCLUDED_MQBS_DATASTORE
 
@@ -377,8 +376,8 @@ class DataStoreConfig {
 
     typedef mqbi::Storage::AppInfos AppInfos;
 
-    // TODO: Temporarily. Remove after all versions wait for CSL commits
-    // before calling onQueueAssigned/onQueueUpdated.
+    /// Replicas create/update/delete storage upon Replication events
+    /// (queueCreationCb/queueDeletionCb).
     typedef bsl::function<void(int                     partitionId,
                                const bmqt::Uri&        uri,
                                const mqbu::StorageKey& queueKey,
@@ -386,10 +385,16 @@ class DataStoreConfig {
                                bool                    isNewQueue)>
         QueueCreationCb;
 
+    typedef bsl::function<void(int                     partitionId,
+                               const bmqt::Uri&        uri,
+                               const mqbu::StorageKey& queueKey,
+                               const mqbu::StorageKey& appKey)>
+        QueueDeletionCb;
+
     /// Signature of callback used by `mqbs::FileStore` to indicate the list
     /// of file-backed queues (and metadata) retrieved during recovery
     /// phase.
-    typedef bsl::function<void(int partitionId, const QueueKeyInfoMap& queues)>
+    typedef bsl::function<void(int partitionId, const QueueKeyInfoMap* queues)>
         RecoveredQueuesCb;
 
   private:
@@ -426,6 +431,8 @@ class DataStoreConfig {
 
     QueueCreationCb d_queueCreationCb;
 
+    QueueDeletionCb d_queueDeletionCb;
+
     RecoveredQueuesCb d_recoveredQueuesCb;
 
     int d_maxArchivedFileSets;
@@ -448,6 +455,7 @@ class DataStoreConfig {
     DataStoreConfig& setMaxJournalFileSize(bsls::Types::Uint64 value);
     DataStoreConfig& setMaxQlistFileSize(bsls::Types::Uint64 value);
     DataStoreConfig& setQueueCreationCb(const QueueCreationCb& value);
+    DataStoreConfig& setQueueDeletionCb(const QueueDeletionCb& value);
     DataStoreConfig& setRecoveredQueuesCb(const RecoveredQueuesCb& value);
 
     /// Set the corresponding member to the specified `value` and return a
@@ -468,6 +476,7 @@ class DataStoreConfig {
     bsls::Types::Uint64       maxJournalFileSize() const;
     bsls::Types::Uint64       maxQlistFileSize() const;
     const QueueCreationCb&    queueCreationCb() const;
+    const QueueDeletionCb&    queueDeletionCb() const;
     const RecoveredQueuesCb&  recoveredQueuesCb() const;
 
     /// Return the value of the corresponding member.
@@ -571,14 +580,14 @@ class DataStore : public mqbi::DispatcherClient {
 
     // MANIPULATORS
 
-    /// Open this instance using the specified `queueKeyInfoMap`. Return
-    /// zero on success, non-zero value otherwise.
-    virtual int
-    open(const QueueKeyInfoMap& queueKeyInfoMap = QueueKeyInfoMap()) = 0;
+    /// Open this instance using the optionally specified `queueKeyInfoMap`.
+    /// Return zero on success, non-zero value otherwise.
+    virtual int open(QueueKeyInfoMap* queueKeyInfoMap) = 0;
 
     /// Close this instance.  If the optional `flush` flag is true, flush
     /// the data store to the backup storage (e.g., disk) if applicable.
-    virtual void close(bool flush = false) = 0;
+    /// If the optional `archive` flag is true, archive the data store.
+    virtual void close(bool flush = false, bool archive = false) = 0;
 
     /// Create and load into the specified `storageSp` an instance of
     /// ReplicatedStorage for the queue having the specified `queueUri` and
@@ -1021,6 +1030,13 @@ DataStoreConfig::setQueueCreationCb(const QueueCreationCb& value)
 }
 
 inline DataStoreConfig&
+DataStoreConfig::setQueueDeletionCb(const QueueDeletionCb& value)
+{
+    d_queueDeletionCb = value;
+    return *this;
+}
+
+inline DataStoreConfig&
 DataStoreConfig::setRecoveredQueuesCb(const RecoveredQueuesCb& value)
 {
     d_recoveredQueuesCb = value;
@@ -1098,6 +1114,12 @@ inline const DataStoreConfig::QueueCreationCb&
 DataStoreConfig::queueCreationCb() const
 {
     return d_queueCreationCb;
+}
+
+inline const DataStoreConfig::QueueDeletionCb&
+DataStoreConfig::queueDeletionCb() const
+{
+    return d_queueDeletionCb;
 }
 
 inline const DataStoreConfig::RecoveredQueuesCb&

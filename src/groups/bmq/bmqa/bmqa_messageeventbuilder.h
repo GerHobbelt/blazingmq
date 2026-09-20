@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqa_messageeventbuilder.h                                         -*-C++-*-
 #ifndef INCLUDED_BMQA_MESSAGEEVENTBUILDER
 #define INCLUDED_BMQA_MESSAGEEVENTBUILDER
 
@@ -285,6 +284,8 @@ namespace bmqa {
 struct MessageEventBuilderImpl {
     // PUBLIC DATA
 
+    typedef bsl::function<MessageEvent()> MessageEventFactory;
+
     /// This is needed so that `getMessageEvent()` can return a const ref.
     MessageEvent d_msgEvent;
 
@@ -309,6 +310,8 @@ struct MessageEventBuilderImpl {
     /// CONTRACT: the stored value is correct every moment when in READ mode,
     /// and the value is not guaranteed to be correct when in WRITE mode.
     int d_messageEventSizeFinal;
+
+    MessageEventFactory d_messageEventFactory;
 };
 
 // =========================

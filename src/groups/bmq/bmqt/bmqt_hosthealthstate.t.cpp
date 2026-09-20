@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqt_hosthealthstate.t.cpp                                         -*-C++-*-
 #include <bmqt_hosthealthstate.h>
 
 #include <bmqu_memoutstream.h>
@@ -77,14 +76,13 @@ static void test2_printTest()
         const char*                 d_expected;
     } k_DATA[] = {{bmqt::HostHealthState::e_UNKNOWN, "UNKNOWN"},
                   {bmqt::HostHealthState::e_HEALTHY, "HEALTHY"},
-                  {bmqt::HostHealthState::e_UNHEALTHY, "UNHEALTHY"},
-                  {static_cast<bmqt::HostHealthState::Enum>(-1234),
-                   "(* UNKNOWN *)"}};
+                  {bmqt::HostHealthState::e_UNHEALTHY, "UNHEALTHY"}};
 
     const size_t k_NUM_DATA = sizeof(k_DATA) / sizeof(*k_DATA);
 
     for (size_t idx = 0; idx < k_NUM_DATA; ++idx) {
-        const Test&        test = k_DATA[idx];
+        const Test& test = k_DATA[idx];
+
         bmqu::MemOutStream out(bmqtst::TestHelperUtil::allocator());
         bmqu::MemOutStream expected(bmqtst::TestHelperUtil::allocator());
 

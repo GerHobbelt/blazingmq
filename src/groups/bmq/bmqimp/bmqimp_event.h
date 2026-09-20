@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqimp_event.h                                                     -*-C++-*-
 #ifndef INCLUDED_BMQIMP_EVENT
 #define INCLUDED_BMQIMP_EVENT
 
@@ -362,14 +361,6 @@ class Event {
     /// thought of as just changing the view on the underlying blob from
     /// write (builder) to read (iterator).
     Event& downgradeMessageEventModeToRead();
-
-    /// Change the message event mode with which this instance is currently
-    /// configured to MessageEventMode::WRITE, *and* reset the underlying
-    /// blob.  This method has no effect if the mode is already `WRITE`.
-    /// Behavior is undefined unless this instance's `type()` is
-    /// MESSAGEVENT.  Note that this method should logically be thought of
-    /// as resetting this instance as a message event in write mode.
-    Event& upgradeMessageEventModeToWrite();
 
     // ACCESSORS
 

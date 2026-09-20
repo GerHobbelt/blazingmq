@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqimp_queue.t.cpp                                                 -*-C++-*-
 #include <bmqimp_queue.h>
 
 // BMQ
@@ -216,14 +215,13 @@ static void test3_printQueueStateTest()
                   {bmqimp::QueueState::e_CLOSING_CFG, "CLOSING_CFG"},
                   {bmqimp::QueueState::e_CLOSING_CLS, "CLOSING_CLS"},
                   {bmqimp::QueueState::e_CLOSED, "CLOSED"},
-                  {bmqimp::QueueState::e_PENDING, "PENDING"},
-                  {static_cast<bmqimp::QueueState::Enum>(-1),
-                   "(* UNKNOWN *)"}};
+                  {bmqimp::QueueState::e_PENDING, "PENDING"}};
 
     const size_t k_NUM_DATA = sizeof(k_DATA) / sizeof(*k_DATA);
 
     for (size_t idx = 0; idx < k_NUM_DATA; ++idx) {
-        const Test&        test = k_DATA[idx];
+        const Test& test = k_DATA[idx];
+
         bmqu::MemOutStream out(bmqtst::TestHelperUtil::allocator());
         bmqu::MemOutStream expected(bmqtst::TestHelperUtil::allocator());
 

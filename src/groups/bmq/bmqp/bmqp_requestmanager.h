@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqp_requestmanager.h                                              -*-C++-*-
 #ifndef INCLUDED_BMQP_REQUESTMANAGER
 #define INCLUDED_BMQP_REQUESTMANAGER
 
@@ -84,10 +83,15 @@
 // 'cancelAllRequests' is invoked, response callback of request 'A' will be
 // invoked first, followed by response callback of request 'B'.  This guarantee
 // is provided because application may rely on the assumption that response
-// callbacks are invoked in the order of sending requests.  There are two
-// versions of 'cancelAllRequests': the one that does take 'groupId' and the
-// one that does not.  Without 'groupId', all requests get cancelled, otherwise
-// only those requests which were associated with the same id by 'setGroupId'.
+// callbacks are invoked in the order of sending requests.  There are three
+// versions of 'cancelAllRequests': the one that takes no filter argument, the
+// one that takes 'groupId', and the one that takes 'componentId'.  Without
+// any filter all requests get cancelled.  With 'groupId', only those requests
+// which were associated with the same id by 'setGroupId' get cancelled.  With
+// 'componentId', only those requests tagged with the same component identifier
+// via 'setComponentId' get cancelled.  The two filtered versions operate on
+// orthogonal axes and can therefore coexist on the same 'RequestManager'
+// instance without interference.
 //
 /// Distributed Trace Integration
 ///-----------------------------
@@ -379,6 +383,41 @@ namespace bmqp {
 template <class REQUEST, class RESPONSE>
 class RequestManager;
 
+// ================================
+// struct RequestManagerComponentId
+// ================================
+
+/// Integer constants used to tag requests sent via a `RequestManager` for the
+/// purpose of component-scoped cancellation.
+struct RequestManagerComponentId {
+    // CONSTANTS
+    enum {
+        /// Default; no component association.
+        k_NO_COMPONENT_ID = 0,
+
+        /// Cluster FSM component id.
+        k_CLUSTER_FSM = 1,
+
+        /// Base value for Partition FSM component ids.  Each partition
+        /// gets a unique componentId computed as
+        /// `k_PARTITION_FSM_PREFIX + partitionId`.  Use the
+        /// `partitionFSM()` class method to obtain the componentId for a
+        /// given partition.
+        k_PARTITION_FSM_PREFIX = 900
+    };
+
+    // CLASS METHODS
+
+    /// Return the componentId for the partition with the specified
+    /// `partitionId`.  The behavior is undefined unless
+    /// `0 <= partitionId < 100`.
+    static int partitionFSM(int partitionId);
+
+    /// Return true if the specified `componentId` is valid, including
+    /// `k_NO_COMPONENT_ID`.
+    static bool isValid(int componentId);
+};
+
 // ===========================
 // class RequestManagerRequest
 // ===========================
@@ -460,6 +499,11 @@ class RequestManagerRequest {
     // requests, allowing to cancel all
     // requests sharing the same group.
 
+    int d_componentId;
+    // The 'componentId' associated with this
+    // request.  Used to cancel all requests
+    // belonging to a specific component.
+
     bsl::shared_ptr<bmqpi::DTSpan> d_dtSpan_sp;
     // Distributed Trace span representing
     // this request.
@@ -535,13 +579,20 @@ class RequestManagerRequest {
     /// reference offering modifiable access to this object.
     RequestManagerRequest& setAsyncNotifierCb(const AsyncNotifierCb& value);
 
-    /// Set group identifier to the specified value to assist canceling
+    /// Set group identifier to the specified `value` to assist canceling
     /// requests belonging to one group only.  By default, the identifier is
     /// `k_NO_GROUP_ID` meaning the request does not belong to any group in
     /// which case it gets cancelled by `cancelAllRequests` without
     /// `groupId`.  Return a reference offering modifiable access to this
     /// object.
     RequestManagerRequest& setGroupId(int value);
+
+    /// Set component identifier to the specified `value` to assist canceling
+    /// requests belonging to one component only.  By default, the identifier
+    /// is `RequestManagerComponentId::k_NO_COMPONENT_ID`.  Return a
+    /// reference offering modifiable access to this object.  The behavior is
+    /// undefined unless `value` is valid and is not `k_NO_COMPONENT_ID`.
+    RequestManagerRequest& setComponentId(int value);
 
     /// Take shared ownership of the specified `span` and ensure that it
     /// lives at least as long as this object. The `span` is intended to
@@ -584,6 +635,9 @@ class RequestManagerRequest {
 
     /// Return the associated group id (`NO_GROUP_ID` by default).
     int groupId() const;
+
+    /// Return the associated component id (`k_NO_COMPONENT_ID` by default).
+    int componentId() const;
 
     /// Return the associated user data.
     const bdld::Datum& userData() const;
@@ -715,12 +769,16 @@ class RequestManager {
     /// Apply the specified `response` to the specified `request`.
     void applyResponse(const RequestSp& request, const RESPONSE& response);
 
-    /// Cancel all outstanding requests belonging to the specified
-    /// `groupId`, with the specified `reason` response description.  If the
-    /// `groupId` is `NO_GROUP_ID`, cancel all requests.  The corresponding
-    /// response callbacks will be invoked in the order in which requests
-    /// were sent.
-    void cancelAllRequestsImpl(const RESPONSE& reason, int groupId);
+    /// Cancel all outstanding requests matching the specified `groupId` and
+    /// `componentId` filters, with the specified `reason` response
+    /// description.  A value of `NO_GROUP_ID` for `groupId` disables
+    /// group filtering; a value of `k_NO_COMPONENT_ID` for `componentId`
+    /// disables component filtering.  Both filters are applied with AND
+    /// semantics.  The corresponding response callbacks will be invoked in
+    /// the order in which requests were sent.
+    void cancelAllRequestsImpl(const RESPONSE& reason,
+                               int             groupId,
+                               int             componentId);
 
   private:
     // NOT IMPLEMENTED
@@ -817,12 +875,39 @@ class RequestManager {
     /// behavior is undefined if `groupId` is `NO_GROUP_ID`.  The
     /// corresponding response callbacks will be invoked in the order in
     /// which requests were sent.
-    void cancelAllRequests(const RESPONSE& reason, int groupId);
+    void cancelGroupRequests(const RESPONSE& reason, int groupId);
+
+    /// Cancel all outstanding requests tagged with the specified
+    /// `componentId`, with the specified `reason` response description.
+    /// The behavior is undefined if `componentId` is
+    /// `k_NO_COMPONENT_ID`.  The corresponding response callbacks will be
+    /// invoked in the order in which requests were sent.
+    void cancelComponentRequests(const RESPONSE& reason, int componentId);
 };
 
 // ============================================================================
 //                             INLINE DEFINITIONS
 // ============================================================================
+
+// --------------------------------
+// struct RequestManagerComponentId
+// --------------------------------
+
+inline int RequestManagerComponentId::partitionFSM(int partitionId)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(partitionId >= 0);
+    BSLS_ASSERT_SAFE(partitionId < 100);
+
+    return k_PARTITION_FSM_PREFIX + partitionId;
+}
+
+inline bool RequestManagerComponentId::isValid(int componentId)
+{
+    return componentId == k_NO_COMPONENT_ID || componentId == k_CLUSTER_FSM ||
+           (componentId >= k_PARTITION_FSM_PREFIX &&
+            componentId < k_PARTITION_FSM_PREFIX + 100);
+}
 
 // ---------------------------
 // class RequestManagerRequest
@@ -842,6 +927,7 @@ RequestManagerRequest<REQUEST, RESPONSE>::RequestManagerRequest(
 , d_haveTimeout(false)
 , d_haveResponse(false)
 , d_groupId(k_NO_GROUP_ID)
+, d_componentId(RequestManagerComponentId::k_NO_COMPONENT_ID)
 , d_dtSpan_sp(NULL)
 , d_dtContext_p(NULL)
 , d_userData(allocator)
@@ -873,6 +959,8 @@ void RequestManagerRequest<REQUEST, RESPONSE>::clear()
     d_asyncNotifierCb = bsl::nullptr_t();
     d_sendTime        = 0;
     d_nodeDescription.clear();
+    d_groupId     = k_NO_GROUP_ID;
+    d_componentId = RequestManagerComponentId::k_NO_COMPONENT_ID;
     d_dtSpan_sp.reset();
     d_dtContext_p = NULL;
 }
@@ -934,6 +1022,18 @@ RequestManagerRequest<REQUEST, RESPONSE>&
 RequestManagerRequest<REQUEST, RESPONSE>::setGroupId(int value)
 {
     d_groupId = value;
+    return *this;
+}
+
+template <class REQUEST, class RESPONSE>
+RequestManagerRequest<REQUEST, RESPONSE>&
+RequestManagerRequest<REQUEST, RESPONSE>::setComponentId(int value)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(RequestManagerComponentId::isValid(value));
+    BSLS_ASSERT_SAFE(value != RequestManagerComponentId::k_NO_COMPONENT_ID);
+
+    d_componentId = value;
     return *this;
 }
 
@@ -1034,6 +1134,12 @@ template <class REQUEST, class RESPONSE>
 int RequestManagerRequest<REQUEST, RESPONSE>::groupId() const
 {
     return d_groupId;
+}
+
+template <class REQUEST, class RESPONSE>
+int RequestManagerRequest<REQUEST, RESPONSE>::componentId() const
+{
+    return d_componentId;
 }
 
 template <class REQUEST, class RESPONSE>
@@ -1448,23 +1554,41 @@ template <class REQUEST, class RESPONSE>
 void RequestManager<REQUEST, RESPONSE>::cancelAllRequests(
     const RESPONSE& reason)
 {
-    cancelAllRequestsImpl(reason, RequestType::k_NO_GROUP_ID);
+    cancelAllRequestsImpl(reason,
+                          RequestType::k_NO_GROUP_ID,
+                          RequestManagerComponentId::k_NO_COMPONENT_ID);
 }
 
 template <class REQUEST, class RESPONSE>
-void RequestManager<REQUEST, RESPONSE>::cancelAllRequests(
+void RequestManager<REQUEST, RESPONSE>::cancelGroupRequests(
     const RESPONSE& reason,
     int             groupId)
 {
+    // PRECONDITIONS
     BSLS_ASSERT_SAFE(groupId != RequestType::k_NO_GROUP_ID);
 
-    cancelAllRequestsImpl(reason, groupId);
+    cancelAllRequestsImpl(reason,
+                          groupId,
+                          RequestManagerComponentId::k_NO_COMPONENT_ID);
+}
+
+template <class REQUEST, class RESPONSE>
+void RequestManager<REQUEST, RESPONSE>::cancelComponentRequests(
+    const RESPONSE& reason,
+    int             componentId)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(componentId !=
+                     RequestManagerComponentId::k_NO_COMPONENT_ID);
+
+    cancelAllRequestsImpl(reason, RequestType::k_NO_GROUP_ID, componentId);
 }
 
 template <class REQUEST, class RESPONSE>
 void RequestManager<REQUEST, RESPONSE>::cancelAllRequestsImpl(
     const RESPONSE& reason,
-    int             groupId)
+    int             groupId,
+    int             componentId)
 {
     // Note that requests must be cancelled in the same order in which they
     // were sent.
@@ -1476,12 +1600,16 @@ void RequestManager<REQUEST, RESPONSE>::cancelAllRequestsImpl(
     {
         bslmt::LockGuard<bslmt::Mutex> guard(&d_mutex);  // MUTEX LOCKED
 
-        // Iterate over each requests, moving the ones matching
-        // 'nodeDescription' from the 'd_requests' map to 'requests'.
         RequestMapIter it = d_requests.begin();
         while (it != d_requests.end()) {
-            if (groupId == RequestType::k_NO_GROUP_ID  // i.e., cancel all
-                || groupId == it->second->groupId()) {
+            const bool matchGroup = (groupId == RequestType::k_NO_GROUP_ID) ||
+                                    (groupId == it->second->groupId());
+            const bool matchComponent =
+                (componentId ==
+                 RequestManagerComponentId::k_NO_COMPONENT_ID) ||
+                (componentId == it->second->componentId());
+
+            if (matchGroup && matchComponent) {
                 // Do not notify about timed out requests.
                 if (!it->second->d_haveTimeout) {
                     BSLA_MAYBE_UNUSED bsl::pair<RequestMapIter, bool>
@@ -1497,14 +1625,28 @@ void RequestManager<REQUEST, RESPONSE>::cancelAllRequestsImpl(
         }
     }
 
-    if (groupId == RequestType::k_NO_GROUP_ID) {
+    const bool hasGroup     = (groupId != RequestType::k_NO_GROUP_ID);
+    const bool hasComponent = (componentId !=
+                               RequestManagerComponentId::k_NO_COMPONENT_ID);
+    if (!hasGroup && !hasComponent) {
         BALL_LOG_INFO << "Canceling all requests (" << requestsCopy.size()
                       << " items) with " << reason << ".";
     }
-    else {
-        BALL_LOG_INFO << "Canceling requests belonging to '" << groupId
-                      << "' group (" << requestsCopy.size() << " items) with "
+    else if (hasGroup && !hasComponent) {
+        BALL_LOG_INFO << "Canceling requests belonging to group '" << groupId
+                      << "' (" << requestsCopy.size() << " items) with "
                       << reason << ".";
+    }
+    else if (!hasGroup && hasComponent) {
+        BALL_LOG_INFO << "Canceling requests belonging to component '"
+                      << componentId << "' (" << requestsCopy.size()
+                      << " items) with " << reason << ".";
+    }
+    else {
+        BALL_LOG_INFO
+            << "Canceling requests simultaneously belonging to group '"
+            << groupId << "' and component '" << componentId << "' ("
+            << requestsCopy.size() << " items) with " << reason << ".";
     }
 
     if (requestsCopy.empty()) {

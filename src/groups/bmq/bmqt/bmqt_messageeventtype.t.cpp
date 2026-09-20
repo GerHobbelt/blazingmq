@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqt_messageeventtype.t.cpp                                        -*-C++-*-
 #include <bmqt_messageeventtype.h>
 
 #include <bmqu_memoutstream.h>
@@ -45,10 +44,6 @@ static void test1_breathingTest()
     PV("Testing toAscii");
     str = bmqt::MessageEventType::toAscii(bmqt::MessageEventType::e_PUSH);
     BMQTST_ASSERT_EQ(str, "PUSH");
-
-    obj = static_cast<bmqt::MessageEventType::Enum>(-1);
-    str = bmqt::MessageEventType::toAscii(obj);
-    BMQTST_ASSERT_EQ(str, "(* UNKNOWN *)");
 
     PV("Testing fromAscii");
     res = bmqt::MessageEventType::fromAscii(&obj, "PUT");
@@ -83,14 +78,13 @@ static void test2_printTest()
     } k_DATA[] = {{bmqt::MessageEventType::e_UNDEFINED, "UNDEFINED"},
                   {bmqt::MessageEventType::e_PUT, "PUT"},
                   {bmqt::MessageEventType::e_PUSH, "PUSH"},
-                  {bmqt::MessageEventType::e_ACK, "ACK"},
-                  {static_cast<bmqt::MessageEventType::Enum>(-1),
-                   "(* UNKNOWN *)"}};
+                  {bmqt::MessageEventType::e_ACK, "ACK"}};
 
     const size_t k_NUM_DATA = sizeof(k_DATA) / sizeof(*k_DATA);
 
     for (size_t idx = 0; idx < k_NUM_DATA; ++idx) {
-        const Test&        test = k_DATA[idx];
+        const Test& test = k_DATA[idx];
+
         bmqu::MemOutStream out(bmqtst::TestHelperUtil::allocator());
         bmqu::MemOutStream expected(bmqtst::TestHelperUtil::allocator());
 

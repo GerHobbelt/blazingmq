@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_remotequeue.h                                               -*-C++-*-
 #ifndef INCLUDED_MQBBLP_REMOTEQUEUE
 #define INCLUDED_MQBBLP_REMOTEQUEUE
 
@@ -251,8 +250,7 @@ class RemoteQueue {
     // PRIVATE MANIPULATORS
     int configureAsProxy(bsl::ostream& errorDescription, bool isReconfigure);
 
-    int configureAsClusterMember(bsl::ostream& errorDescription,
-                                 bool          isReconfigure);
+    int configureAsClusterMember(bool isReconfigure);
 
     /// Load into the specified `subQueueInfos` all subQueueIds which are
     /// present in the `SubQueueIdsOption` of the specified `options` of the

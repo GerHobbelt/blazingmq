@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_queueenginetester.h                                         -*-C++-*-
 #ifndef INCLUDED_MQBBLP_QUEUEENGINETESTER
 #define INCLUDED_MQBBLP_QUEUEENGINETESTER
 
@@ -645,7 +644,7 @@ inline T* QueueEngineTester::createQueueEngine()
     BSLS_ASSERT_OPT(!d_queueEngine_mp && "'createQueueEngine()' was called");
     T* result = new (*d_allocator_p)
         T(d_queueState_mp.get(),
-          d_queueState_mp->queue()->domain()->config(),
+          *d_queueState_mp->queue()->domain()->config(),
           d_allocator_p);
     // Create and configure Queue Engine
     d_queueEngine_mp.load(result, d_allocator_p);

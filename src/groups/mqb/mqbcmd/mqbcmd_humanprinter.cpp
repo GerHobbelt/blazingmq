@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbcmd_humanprinter.cpp                                            -*-C++-*-
 #include <mqbcmd_humanprinter.h>
 
 #include <mqbscm_version.h>
@@ -393,8 +392,8 @@ void printFileStoreSummary(bsl::ostream&           os,
        << "]:" << newlineAndIndent(level, spacesPerLevel) << "----------------"
        << newlineAndIndent(level + 1, spacesPerLevel)
        << "Primary Node: " << summary.primaryNodeDescription()
-       << ", Sequence Number: (" << summary.primaryLeaseId() << ", "
-       << summary.sequenceNum() << ")"
+       << ", PSN: [ primaryLeaseId = " << summary.primaryLeaseId()
+       << " sequenceNumber = " << summary.sequenceNum() << "]"
        << newlineAndIndent(level + 1, spacesPerLevel)
        << "IsAvailable: " << bsl::boolalpha << summary.isAvailable()
        << newlineAndIndent(level + 1, spacesPerLevel)
@@ -1164,7 +1163,7 @@ void printElectorInfo(bsl::ostream&      os,
        << bmqu::PrintUtil::newlineAndIndent(level, spacesPerLevel)
        << "Leader Node           : " << electorInfo.leaderNode()
        << bmqu::PrintUtil::newlineAndIndent(level, spacesPerLevel)
-       << "Leader Sequence Number: [ electorTerm = "
+       << "LSN: [ electorTerm = "
        << electorInfo.leaderMessageSequence().electorTerm()
        << " sequenceNumber = "
        << electorInfo.leaderMessageSequence().sequenceNumber() << " ]"

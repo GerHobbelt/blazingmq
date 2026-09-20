@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_clusterstatetable.h                                           -*-C++-*-
 #ifndef INCLUDED_MQBC_CLUSTERSTATETABLE
 #define INCLUDED_MQBC_CLUSTERSTATETABLE
 
@@ -56,8 +55,8 @@ struct ClusterStateTableState {
         /// Self is follower, healing its CSL.
         e_FOL_HEALING = 1,
 
-        /// Self is leader, exchanging leader sequence numbers (LSNs) with
-        /// followers to determine who has the most up-to-date CSL.
+        /// Self is leader, exchanging LSNs with followers to determine who
+        /// has the most up-to-date CSL.
         e_LDR_HEALING_STG1 = 2,
 
         /// Self is leader, healing its CSL and the followers' CSLs.  It will
@@ -362,6 +361,8 @@ class ClusterStateTableActions {
     void do_stopWatchdog_initializeQueueKeyInfoMap_updatePrimaryInPFSMs(
         const ARGS& args);
 
+    void do_stopWatchdog_updatePrimaryInPFSMs(const ARGS& args);
+
     void do_stopWatchdog_cleanupLSNs_cancelRequests(const ARGS& args);
 
     void
@@ -515,7 +516,7 @@ class ClusterStateTable
                 FOL_HEALING);
         CST_CFG(FOL_HEALING,
                 CSL_CMT_SUCCESS,
-                stopWatchdog_initializeQueueKeyInfoMap_updatePrimaryInPFSMs,
+                stopWatchdog_updatePrimaryInPFSMs,
                 FOL_HEALED);
         CST_CFG(FOL_HEALING, CSL_CMT_FAIL, triggerWatchdog, FOL_HEALING);
         CST_CFG(FOL_HEALING,
@@ -791,6 +792,14 @@ void ClusterStateTableActions<ARGS>::
 {
     do_stopWatchdog(args);
     do_initializeQueueKeyInfoMap(args);
+    do_updatePrimaryInPFSMs(args);
+}
+
+template <typename ARGS>
+void ClusterStateTableActions<ARGS>::do_stopWatchdog_updatePrimaryInPFSMs(
+    const ARGS& args)
+{
+    do_stopWatchdog(args);
     do_updatePrimaryInPFSMs(args);
 }
 

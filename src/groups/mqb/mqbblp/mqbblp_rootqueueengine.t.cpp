@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_rootqueueengine.t.cpp                                       -*-C++-*-
 #include <mqbblp_rootqueueengine.h>
 
 // MQB
@@ -1389,7 +1388,7 @@ static void test9_priorityCreateAndConfigure()
             mqbblp::RootQueueEngine::create(
                 queueEngine,
                 d_queueState_mp.get(),
-                d_queueState_mp->domain()->config(),
+                *d_queueState_mp->domain()->config(),
                 allocator);
         }
 
@@ -2598,7 +2597,7 @@ static void test22_createAndConfigure()
             mqbblp::RootQueueEngine::create(
                 queueEngine,
                 d_queueState_mp.get(),
-                d_queueState_mp->domain()->config(),
+                *d_queueState_mp->domain()->config(),
                 allocator);
         }
 

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqtst_testhelper.h                                                -*-C++-*-
 #ifndef INCLUDED_BMQTST_TESTHELPER
 #define INCLUDED_BMQTST_TESTHELPER
 
@@ -394,7 +393,7 @@
         bsl::ostream           _os(&_buf);                                    \
         _os << D << '\0';                                                     \
         bslstl::StringRef _osStr(_buf.data(), _buf.length());                 \
-        if (!X) {                                                             \
+        if (!(X)) {                                                           \
             BloombergLP::_assert(false, _osStr.data(), __FILE__, __LINE__);   \
         }                                                                     \
     }
@@ -775,6 +774,43 @@ struct TestHelperUtil {
 
     /// Allocator to use by the components under test.
     static bslma::Allocator*& allocator();
+
+    /// Sanitizers flags
+    /// Set to `true` if test built with the specified sanitizer enabled,
+    /// `false` otherwise.
+
+    /// Asan
+#if defined(__has_feature)  // Clang-supported method for checking sanitizers.
+    static const bool k_ASAN = __has_feature(address_sanitizer);
+#elif defined(__SANITIZE_ADDRESS__)  // GCC-supported macros
+    static const bool k_ASAN = true;
+#else
+    static const bool k_ASAN = false;
+#endif
+    /// Msan
+#if defined(__has_feature)  // Clang-supported method for checking sanitizers.
+    static const bool k_MSAN = __has_feature(memory_sanitizer);
+#elif defined(__SANITIZE_MEMORY__)  // GCC-supported macros
+    static const bool k_MSAN = true;
+#else
+    static const bool k_MSAN = false;
+#endif
+    /// Tsan
+#if defined(__has_feature)  // Clang-supported method for checking sanitizers.
+    static const bool k_TSAN = __has_feature(thread_sanitizer);
+#elif defined(__SANITIZE_THREAD__)  // GCC-supported macros
+    static const bool k_TSAN = true;
+#else
+    static const bool k_TSAN = false;
+#endif
+    /// UBSan
+#if defined(__has_feature)  // Clang-supported method for checking sanitizers.
+    static const bool k_UBSAN = __has_feature(undefined_behavior_sanitizer);
+#elif defined(__SANITIZE_UNDEFINED__)  // GCC-supported macros
+    static const bool k_UBSAN = true;
+#else
+    static const bool k_UBSAN = false;
+#endif
 };
 
 }

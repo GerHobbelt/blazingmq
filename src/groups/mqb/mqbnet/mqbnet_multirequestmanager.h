@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbnet_multirequestmanager.h                                       -*-C++-*-
 #ifndef INCLUDED_MQBNET_MULTIREQUESTMANAGER
 #define INCLUDED_MQBNET_MULTIREQUESTMANAGER
 
 //@PURPOSE: Provide a mechanism to manage multiple requests.
 //
 //@CLASSES:
-//  mqbnet::MultiRequestManager     : Mechanism to manage multiple requests
+//  mqbnet::MultiRequestManager: Mechanism to manage multiple requests
 //
 //@DESCRIPTION: 'mqbnet::MultiRequestManager' is a mechanism to manage multiple
 // requests sent to peer nodes in a cluster.
@@ -114,6 +113,8 @@ class MultiRequestManagerRequestContext {
 
     ResponseCb d_responseCb;
 
+    int d_componentId;
+
   private:
     // NOT IMPLEMENTED
     MultiRequestManagerRequestContext(
@@ -147,8 +148,17 @@ class MultiRequestManagerRequestContext {
     /// Set the response call to the specified `value`.
     void setResponseCb(const ResponseCb& value);
 
+    /// Set the component id to the specified `value`.  This value is
+    /// propagated to each sub-request created by the `MultiRequestManager`
+    /// when sending.  The behavior is undefined unless `value` is valid
+    /// and is not `k_NO_COMPONENT_ID`.
+    void setComponentId(int value);
+
     // ACCESSORS
     const REQUEST& request() const;
+
+    /// Return the component id.
+    int componentId() const;
 
     /// Return a reference offering non-modifiable access to the
     /// corresponding member of this object.
@@ -275,6 +285,7 @@ MultiRequestManagerRequestContext<REQUEST, RESPONSE, TARGET>::
 , d_nodeResponsePairs(allocator)
 , d_numOutstandingRequests(0)
 , d_responseCb(bsl::allocator_arg, allocator)
+, d_componentId(bmqp::RequestManagerComponentId::k_NO_COMPONENT_ID)
 {
     // NOTHING
 }
@@ -287,6 +298,7 @@ void MultiRequestManagerRequestContext<REQUEST, RESPONSE, TARGET>::clear()
     d_nodeResponsePairs.clear();
     d_numOutstandingRequests = 0;
     d_responseCb             = bsl::nullptr_t();
+    d_componentId = bmqp::RequestManagerComponentId::k_NO_COMPONENT_ID;
 }
 
 template <class REQUEST, class RESPONSE, class TARGET>
@@ -315,12 +327,31 @@ void MultiRequestManagerRequestContext<REQUEST, RESPONSE, TARGET>::
     d_responseCb = value;
 }
 
+template <class REQUEST, class RESPONSE, class TARGET>
+void MultiRequestManagerRequestContext<REQUEST, RESPONSE, TARGET>::
+    setComponentId(int value)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(bmqp::RequestManagerComponentId::isValid(value));
+    BSLS_ASSERT_SAFE(value !=
+                     bmqp::RequestManagerComponentId::k_NO_COMPONENT_ID);
+
+    d_componentId = value;
+}
+
 // ACCESSORS
 template <class REQUEST, class RESPONSE, class TARGET>
 const REQUEST&
 MultiRequestManagerRequestContext<REQUEST, RESPONSE, TARGET>::request() const
 {
     return d_request;
+}
+
+template <class REQUEST, class RESPONSE, class TARGET>
+int MultiRequestManagerRequestContext<REQUEST, RESPONSE, TARGET>::componentId()
+    const
+{
+    return d_componentId;
 }
 
 template <class REQUEST, class RESPONSE, class TARGET>
@@ -456,6 +487,10 @@ void MultiRequestManager<REQUEST, RESPONSE, TARGET>::sendRequest(
                                  context,
                                  it->first));
         setGroupId(singleRequestCtx, it->first);
+        if (context->componentId() !=
+            bmqp::RequestManagerComponentId::k_NO_COMPONENT_ID) {
+            singleRequestCtx->setComponentId(context->componentId());
+        }
 
         bsl::string               errorDescription;
         bmqt::GenericResult::Enum sendRc = d_requestManager_p->sendRequest(

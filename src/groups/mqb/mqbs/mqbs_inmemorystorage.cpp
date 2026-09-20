@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_inmemorystorage.cpp                                           -*-C++-*-
 #include <mqbs_inmemorystorage.h>
 
 #include <mqbscm_version.h>
@@ -101,12 +100,10 @@ InMemoryStorage::~InMemoryStorage()
 
 // MANIPULATORS
 //   (virtual mqbi::Storage)
-int InMemoryStorage::configure(
-    BSLA_MAYBE_UNUSED bsl::ostream& errorDescription,
-    const mqbconfm::Storage&        config,
-    const mqbconfm::Limits&         limits,
-    const bsls::Types::Int64        messageTtl,
-    const int                       maxDeliveryAttempts)
+void InMemoryStorage::configure(const mqbconfm::Storage& config,
+                                const mqbconfm::Limits&  limits,
+                                bsls::Types::Int64       messageTtl,
+                                int                      maxDeliveryAttempts)
 {
     d_config = config;
     d_capacityMeter.setLimits(limits.messages(), limits.bytes())
@@ -115,8 +112,6 @@ int InMemoryStorage::configure(
     d_ttlSeconds = messageTtl;
 
     d_virtualStorageCatalog.setDefaultRda(maxDeliveryAttempts);
-
-    return 0;
 }
 
 void InMemoryStorage::setConsistency(const mqbconfm::Consistency& value)

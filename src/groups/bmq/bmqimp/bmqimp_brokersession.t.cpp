@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqimp_brokersession.t.cpp                                         -*-C++-*-
 #include <bmqimp_brokersession.h>
 
 // BMQ
@@ -3334,8 +3333,10 @@ static void queueOpenCloseAsync(bsls::Types::Uint64 queueFlags)
     BMQTST_ASSERT_EQ(pQueue->state(), bmqimp::QueueState::e_CLOSED);
     BMQTST_ASSERT_EQ(pQueue->isValid(), false);
 
+    int rc;
+
     PVV_SAFE("Close unopened queue async");
-    int rc = obj.session().closeQueueAsync(pQueue, timeout);
+    rc = obj.session().closeQueueAsync(pQueue, timeout);
 
     // Verify the result
     BMQTST_ASSERT_EQ(rc, bmqt::CloseQueueResult::e_SUCCESS);
@@ -4252,8 +4253,8 @@ static void test21_post_Limit()
 {
     bmqtst::TestHelper::printTestName("POST CHANNEL LIMIT TEST");
 
-    const bsls::TimeInterval timeout     = bsls::TimeInterval(15);
-    const bsls::TimeInterval lwmTimeout  = bsls::TimeInterval(0.1);
+    const bsls::TimeInterval timeout    = bsls::TimeInterval(15);
+    const bsls::TimeInterval lwmTimeout = bsls::TimeInterval(0.1);
     bmqt::SessionOptions     sessionOptions;
     bmqt::QueueOptions       queueOptions;
     bdlmt::EventScheduler    scheduler(bsls::SystemClockType::e_MONOTONIC,
@@ -5376,16 +5377,16 @@ static void test25_sessionFsmTable()
         obj.onStartTimeout();
     }
 
-    {
-        // STOPPED  -> STARTING
-        tcpRc = 11;
+    // STOPPED  -> STARTING
+    tcpRc = 11;
 
+    {
+        // Start failure
         int rc = obj.startAsync();
         BMQTST_ASSERT_EQ(rc, tcpRc);
-
-        // Start failure
-        // STARTING -> STOPPED
     }
+
+    // STARTING -> STOPPED
 
     tcpRc = 0;
 
@@ -6150,9 +6151,9 @@ static void reopenError(bsls::Types::Uint64 queueFlags)
 {
     bmqtst::TestHelper::printTestName("REOPEN ERROR TEST");
 
-    bmqt::SessionOptions     sessionOptions;
-    bmqt::QueueOptions       queueOptions;
-    bdlmt::EventScheduler    scheduler(bsls::SystemClockType::e_MONOTONIC,
+    bmqt::SessionOptions  sessionOptions;
+    bmqt::QueueOptions    queueOptions;
+    bdlmt::EventScheduler scheduler(bsls::SystemClockType::e_MONOTONIC,
                                     bmqtst::TestHelperUtil::allocator());
 
     sessionOptions.setNumProcessingThreads(1);

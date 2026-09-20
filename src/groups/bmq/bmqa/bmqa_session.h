@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqa_session.h                                                     -*-C++-*-
 #ifndef INCLUDED_BMQA_SESSION
 #define INCLUDED_BMQA_SESSION
 
@@ -668,6 +667,8 @@ struct SessionImpl {
     SessionImpl(const bmqt::SessionOptions&            options,
                 bslma::ManagedPtr<SessionEventHandler> eventHandler,
                 bslma::Allocator*                      allocator = 0);
+
+    void loadMessageEventBuilder(MessageEventBuilder* builder);
 };
 
 // =============

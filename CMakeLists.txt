@@ -1,6 +1,6 @@
 cmake_minimum_required( VERSION 3.23 )
 
-project(BMQ
+project(BlazingMQ
   VERSION 99.99.99
   DESCRIPTION "A modern high-performance open source message queuing system"
   HOMEPAGE_URL "https://bloomberg.github.io/blazingmq/"
@@ -44,6 +44,9 @@ if( "${CMAKE_CXX_COMPILER_ID}" MATCHES "(Apple)?Clang" )
           "-Wno-float-equal"            # operator== in generated classes
           "-Wno-documentation-unknown-command"
                                         # Don't warn about @bbref{}
+          "-Wno-unneeded-member-function"
+                                        # BSLMF_NESTED_TRAIT_DECLARATION in
+                                        # anonymous namespaces
   )
 
 

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbcfg_brokerconfig.t.cpp                                          -*-C++-*-
 #include <mqbcfg_brokerconfig.h>
 #include <mqbcfg_messages.h>
 
@@ -34,11 +33,20 @@ BMQTST_TEST(breathing)
 {
     BMQTST_ASSERT_SAFE_FAIL(mqbcfg::BrokerConfig::get());
 
-    mqbcfg::AppConfig config;
-    mqbcfg::BrokerConfig::set(config);
-    BMQTST_ASSERT_EQ(&mqbcfg::BrokerConfig::get(), &config);
+    {
+        mqbcfg::AppConfig config;
+        mqbcfg::BrokerConfig::set(config);
 
-    BMQTST_ASSERT_SAFE_FAIL(mqbcfg::BrokerConfig::set(config));
+        // The singleton must return another object (copy)
+        BMQTST_ASSERT_NE(&mqbcfg::BrokerConfig::get(), &config);
+
+        // Second attempt to set broker config should fail
+        BMQTST_ASSERT_SAFE_FAIL(mqbcfg::BrokerConfig::set(config));
+    }
+
+    // Broker config should be available even when the original config goes
+    // out of scope and destructed.
+    BMQTST_ASSERT(&mqbcfg::BrokerConfig::get() != NULL);
 }
 
 // ============================================================================

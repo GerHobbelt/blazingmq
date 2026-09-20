@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbnet_initialconnectioncontext.cpp                       -*-C++-*-
 #include <mqbnet_initialconnectioncontext.h>
 
 #include <mqbscm_version.h>
@@ -449,12 +448,6 @@ void InitialConnectionContext::setAuthenticationContext(
     BSLS_ASSERT_SAFE(!d_authenticationCtxSp);
 
     d_authenticationCtxSp = value;
-}
-
-void InitialConnectionContext::setNegotiationContext(
-    const bsl::shared_ptr<NegotiationContext>& value)
-{
-    d_negotiationCtxSp = value;
 }
 
 void InitialConnectionContext::onClose()

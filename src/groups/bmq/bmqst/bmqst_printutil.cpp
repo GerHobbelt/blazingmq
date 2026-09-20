@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqst_printutil.cpp -*-C++-*-
 #include <bmqst_printutil.h>
 
 #include <bdlb_bitutil.h>
@@ -114,7 +113,8 @@ const char* memoryHelper(bsls::Types::Int64* num,
     }
 
     bsls::Types::Int64 shift = level * 10;
-    bsls::Types::Int64 div   = 1LL << shift;
+
+    bsls::Types::Int64 div = 1LL << shift;
     *num                   = bytes >> shift;
     *remainder             = static_cast<int>(
         bsl::floor(((static_cast<double>(bytes - (*num << shift)) /

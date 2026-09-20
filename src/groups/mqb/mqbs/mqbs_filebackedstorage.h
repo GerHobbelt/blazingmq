@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_filebackedstorage.h                                           -*-C++-*-
 #ifndef INCLUDED_MQBS_FILEBACKEDSTORAGE
 #define INCLUDED_MQBS_FILEBACKEDSTORAGE
 
@@ -276,6 +275,7 @@ class FileBackedStorage BSLS_KEYWORD_FINAL : public ReplicatedStorage {
                       const bmqt::Uri&               queueUri,
                       const mqbu::StorageKey&        queueKey,
                       mqbi::Domain*                  domain,
+                      const mqbconfm::Domain&        config,
                       bslma::Allocator*              allocator,
                       bmqma::CountingAllocatorStore* allocatorStore = 0);
 
@@ -383,16 +383,12 @@ class FileBackedStorage BSLS_KEYWORD_FINAL : public ReplicatedStorage {
     // MANIPULATORS
 
     /// Configure this storage using the specified `config` and `limits`.
-    /// Return 0 on success, or an non-zero return code and fill in a
-    /// description of the error in the specified `errorDescription`
-    /// otherwise.  Note that calling `configure` on an already configured
-    /// storage should atomically reconfigure that storage with the new
-    /// configuration (or fail and leave the storage untouched).
-    int configure(bsl::ostream&            errorDescription,
-                  const mqbconfm::Storage& config,
-                  const mqbconfm::Limits&  limits,
-                  const bsls::Types::Int64 messageTtl,
-                  int maxDeliveryAttempts) BSLS_KEYWORD_OVERRIDE;
+    /// Note that calling `configure` on an already configured storage should
+    /// atomically reconfigure that storage with the new configuration.
+    void configure(const mqbconfm::Storage& config,
+                   const mqbconfm::Limits&  limits,
+                   bsls::Types::Int64       messageTtl,
+                   int maxDeliveryAttempts) BSLS_KEYWORD_OVERRIDE;
 
     /// Set the consistency level associated to this storage to the specified
     /// `value`.

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_inmemorystorage.t.cpp                                         -*-C++-*-
 #include <mqbs_inmemorystorage.h>
 
 // MQB
@@ -215,11 +214,11 @@ struct Tester {
     }
 
     // MANIPULATORS
-    int configure(bsls::Types::Int64 msgCapacity       = k_DEFAULT_MSG,
-                  bsls::Types::Int64 byteCapacity      = k_DEFAULT_BYTES,
-                  double             msgWatermarkRatio = k_MSG_WATERMARK_RATIO,
-                  double byteWatermarkRatio     = k_BYTE_WATERMARK_RATIO,
-                  bsls::Types::Int64 messageTtl = k_INT64_MAX)
+    void configure(bsls::Types::Int64 msgCapacity  = k_DEFAULT_MSG,
+                   bsls::Types::Int64 byteCapacity = k_DEFAULT_BYTES,
+                   double msgWatermarkRatio        = k_MSG_WATERMARK_RATIO,
+                   double byteWatermarkRatio       = k_BYTE_WATERMARK_RATIO,
+                   bsls::Types::Int64 messageTtl   = k_INT64_MAX)
     {
         // PRECONDITIONS
         BSLS_ASSERT_OPT(d_replicatedStorage_mp && "Storage was not created");
@@ -234,12 +233,10 @@ struct Tester {
         limits.bytes()                  = byteCapacity;
         limits.bytesWatermarkRatio()    = byteWatermarkRatio;
 
-        bmqu::MemOutStream errDescription(bmqtst::TestHelperUtil::allocator());
-        return d_replicatedStorage_mp->configure(errDescription,
-                                                 config,
-                                                 limits,
-                                                 messageTtl,
-                                                 0);  // maxDeliveryAttempts
+        d_replicatedStorage_mp->configure(config,
+                                          limits,
+                                          messageTtl,
+                                          0);  // maxDeliveryAttempts
     }
 
     mqbs::ReplicatedStorage& storage()
@@ -427,14 +424,14 @@ BMQTST_TEST(configure)
 
     Tester tester(k_PROXY_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_DEFAULT_MSG, k_DEFAULT_BYTES) == 0);
+    tester.configure(k_DEFAULT_MSG, k_DEFAULT_BYTES);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
     BMQTST_ASSERT_EQ(storage.capacityMeter()->byteCapacity(), k_DEFAULT_BYTES);
     BMQTST_ASSERT_EQ(storage.config(), inMemoryStorageConfig());
 
-    BMQTST_ASSERT_EQ(tester.configure(k_DEFAULT_MSG, k_DEFAULT_BYTES + 5), 0);
+    tester.configure(k_DEFAULT_MSG, k_DEFAULT_BYTES + 5);
     BMQTST_ASSERT_EQ(storage.capacityMeter()->byteCapacity(),
                      k_DEFAULT_BYTES + 5);
     BMQTST_ASSERT_EQ(storage.config(), inMemoryStorageConfig());
@@ -807,7 +804,7 @@ BMQTST_TEST(put_withVirtualStorages)
 
     Tester tester(k_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
@@ -876,7 +873,7 @@ BMQTST_TEST(removeAllMessages_appKeyNotFound)
 
     Tester tester(k_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
@@ -926,7 +923,7 @@ BMQTST_TEST(removeAllMessages)
 
     Tester tester(k_PROXY_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
@@ -991,7 +988,7 @@ BMQTST_TEST(get_withVirtualStorages)
 
     Tester tester(k_PROXY_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
@@ -1053,7 +1050,7 @@ BMQTST_TEST(confirm)
 
     Tester tester(k_PROXY_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
@@ -1202,7 +1199,7 @@ BMQTST_TEST(getIterator_withVirtualStorages)
 
     Tester tester(k_PROXY_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     mqbs::ReplicatedStorage& storage = tester.storage();
 
@@ -1347,7 +1344,7 @@ BMQTST_TEST(capacityMeter_limitBytes)
 
     Tester tester(k_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT) == 0);
+    tester.configure(k_MSG_LIMIT, k_BYTES_LIMIT);
 
     bsl::vector<bmqt::MessageGUID> guids(bmqtst::TestHelperUtil::allocator());
 
@@ -1391,11 +1388,11 @@ BMQTST_TEST(garbageCollect)
 
     Tester tester(k_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
 
-    BSLS_ASSERT_OPT(tester.configure(k_DEFAULT_MSG,
-                                     k_DEFAULT_BYTES,
-                                     k_MSG_WATERMARK_RATIO,
-                                     k_BYTE_WATERMARK_RATIO,
-                                     k_TTL) == 0);
+    tester.configure(k_DEFAULT_MSG,
+                     k_DEFAULT_BYTES,
+                     k_MSG_WATERMARK_RATIO,
+                     k_BYTE_WATERMARK_RATIO,
+                     k_TTL);
 
     bsl::vector<bmqt::MessageGUID> guids(bmqtst::TestHelperUtil::allocator());
 
@@ -1469,8 +1466,6 @@ int main(int argc, char* argv[])
     TEST_PROLOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
 
     bmqsys::Time::initialize(bmqtst::TestHelperUtil::allocator());
-
-    mqbu::MessageGUIDUtil::initialize();
 
     {
         mqbcfg::AppConfig brokerConfig(bmqtst::TestHelperUtil::allocator());

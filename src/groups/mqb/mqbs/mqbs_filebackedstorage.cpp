@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_filebackedstorage.cpp                                         -*-C++-*-
 #include <mqbs_filebackedstorage.h>
 
 #include <mqbscm_version.h>
@@ -107,6 +106,7 @@ FileBackedStorage::FileBackedStorage(
     const bmqt::Uri&               queueUri,
     const mqbu::StorageKey&        queueKey,
     mqbi::Domain*                  domain,
+    const mqbconfm::Domain&        config,
     bslma::Allocator*              allocator,
     bmqma::CountingAllocatorStore* allocatorStore)
 : d_allocator_p(allocator)
@@ -117,7 +117,7 @@ FileBackedStorage::FileBackedStorage(
 , d_virtualStorageCatalog(
       this,
       allocatorStore ? allocatorStore->get("VirtualHandles") : d_allocator_p)
-, d_ttlSeconds(domain->config().messageTtl())
+, d_ttlSeconds(config.messageTtl())
 , d_capacityMeter(
       bsl::string("queue [", d_allocator_p) + queueUri.asString() + "]",
       domain->capacityMeter(),
@@ -127,12 +127,12 @@ FileBackedStorage::FileBackedStorage(
                             bdlf::PlaceHolders::_1),  // stream
       d_allocator_p)
 , d_handles(bsls::TimeInterval()
-                .addMilliseconds(domain->config().deduplicationTimeMs())
+                .addMilliseconds(config.deduplicationTimeMs())
                 .totalNanoseconds(),
             allocatorStore ? allocatorStore->get("Handles") : d_allocator_p)
 , d_queueOpRecordHandles(d_allocator_p)
 , d_isEmpty(1)
-, d_hasReceipts(!domain->config().consistency().isStrongValue())
+, d_hasReceipts(!config.consistency().isStrongValue())
 , d_currentlyAutoConfirming()
 , d_autoConfirmHandles(d_allocator_p)
 , d_autoConfirmApps(d_allocator_p)
@@ -149,8 +149,7 @@ FileBackedStorage::FileBackedStorage(
     // and domain instance will return a zero capacity meter when queries to be
     // passed to the 'FileBackedStorage' instance.
     d_virtualStorageCatalog.stats()->initialize(queueUri, domain);
-    d_virtualStorageCatalog.setDefaultRda(
-        domain->config().maxDeliveryAttempts());
+    d_virtualStorageCatalog.setDefaultRda(config.maxDeliveryAttempts());
 }
 
 FileBackedStorage::~FileBackedStorage()
@@ -232,12 +231,10 @@ bool FileBackedStorage::hasReceipt(const bmqt::MessageGUID& msgGUID) const
     return d_store_p->hasReceipt(handles[0]);
 }
 
-int FileBackedStorage::configure(
-    BSLA_MAYBE_UNUSED bsl::ostream& errorDescription,
-    const mqbconfm::Storage&        config,
-    const mqbconfm::Limits&         limits,
-    const bsls::Types::Int64        messageTtl,
-    int                             maxDeliveryAttempts)
+void FileBackedStorage::configure(const mqbconfm::Storage& config,
+                                  const mqbconfm::Limits&  limits,
+                                  bsls::Types::Int64       messageTtl,
+                                  int                      maxDeliveryAttempts)
 {
     d_config = config;
     d_capacityMeter.setLimits(limits.messages(), limits.bytes())
@@ -246,8 +243,6 @@ int FileBackedStorage::configure(
     d_ttlSeconds = messageTtl;
 
     d_virtualStorageCatalog.setDefaultRda(maxDeliveryAttempts);
-
-    return 0;
 }
 
 void FileBackedStorage::setConsistency(const mqbconfm::Consistency& value)
@@ -791,7 +786,7 @@ int FileBackedStorage::gcExpiredMessages(const bdlt::Datetime& currentTimeUtc,
     bsls::Types::Int64 deduplicationTimeNs = 0;
     if (queue() && queue()->domain()) {
         deduplicationTimeNs =
-            queue()->domain()->config().deduplicationTimeMs() *
+            queue()->domain()->config()->deduplicationTimeMs() *
             bdlt::TimeUnitRatio::k_NANOSECONDS_PER_MILLISECOND;
     }
 

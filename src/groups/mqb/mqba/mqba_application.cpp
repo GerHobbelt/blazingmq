@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqba_application.cpp                                               -*-C++-*-
 #include <mqba_application.h>
 
 #include <mqbscm_version.h>
@@ -117,9 +116,6 @@ void Application::oneTimeInit()
                                       0xFFFFFFFF);
 
         bsl::srand(seed);
-
-        // Make MessageGUID generation thread-safe by calling initialize
-        mqbu::MessageGUIDUtil::initialize();
     }
 }
 

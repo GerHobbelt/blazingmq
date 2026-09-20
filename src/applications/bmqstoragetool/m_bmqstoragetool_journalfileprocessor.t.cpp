@@ -14,11 +14,12 @@
 // limitations under the License.
 
 // bmqstoragetool
-#include "m_bmqstoragetool_compositesequencenumber.h"
-#include "m_bmqstoragetool_parameters.h"
-#include <m_bmqstoragetool_commandprocessorfactory.h>
-#include <m_bmqstoragetool_filemanagermock.h>
 #include <m_bmqstoragetool_journalfileprocessor.h>
+
+#include <m_bmqstoragetool_commandprocessorfactory.h>
+#include <m_bmqstoragetool_compositesequencenumber.h>
+#include <m_bmqstoragetool_filemanagermock.h>
+#include <m_bmqstoragetool_parameters.h>
 #include <m_bmqstoragetool_printermock.h>
 #include <m_bmqstoragetool_searchresultfactory.h>
 
@@ -36,6 +37,7 @@
 #include <bsl_list.h>
 #include <bsl_utility.h>
 #include <bslma_allocator.h>
+#include <bslma_default.h>
 
 // TEST DRIVER
 #include <bmqtst_testhelper.h>
@@ -296,15 +298,15 @@ bsls::Types::Uint64 recordOffset(const RECORD_TYPE& record)
                                mqbs::FileStoreProtocol::k_JOURNAL_RECORD_SIZE;
 }
 
-/// Helper matcher to check the offset of the record. Return 'true' if the
-/// specified 'expectedOffset' is equal to the offset of the RecordDetails
+/// Helper matcher to check the PSN of the record. Return 'true' if the
+/// specified 'expectedPSN' is equal to the PSN of the RecordDetails
 /// 'arg'.
-MATCHER_P(SequenceNumberMatcher, expectedSequenceNumber, "")
+MATCHER_P(SequenceNumberMatcher, expectedPSN, "")
 {
-    CompositeSequenceNumber seq(arg.d_record.header().primaryLeaseId(),
+    CompositeSequenceNumber psn(arg.d_record.header().primaryLeaseId(),
                                 arg.d_record.header().sequenceNumber());
-    *result_listener << "SequenceNumber : " << seq;
-    return seq == expectedSequenceNumber;
+    *result_listener << "PSN : " << psn;
+    return psn == expectedPSN;
 }
 
 }  // close unnamed namespace
@@ -2655,5 +2657,5 @@ int main(int argc, char* argv[])
     } break;
     }
 
-    TEST_EPILOG(bmqtst::TestHelper::e_CHECK_DEF_GBL_ALLOC);
+    TEST_EPILOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
 }

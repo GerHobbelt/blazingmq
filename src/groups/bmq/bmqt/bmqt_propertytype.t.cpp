@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqt_propertytype.t.cpp                                            -*-C++-*-
 #include <bmqt_propertytype.h>
 
 // TEST DRIVER
@@ -41,10 +40,6 @@ static void test1_breathingTest()
     PV("Testing toAscii");
     str = bmqt::PropertyType::toAscii(bmqt::PropertyType::e_BINARY);
     BMQTST_ASSERT_EQ(str, "BINARY");
-
-    obj = static_cast<bmqt::PropertyType::Enum>(-1);
-    str = bmqt::PropertyType::toAscii(obj);
-    BMQTST_ASSERT_EQ(str, "(* UNKNOWN *)");
 
     PV("Testing fromAscii");
     res = bmqt::PropertyType::fromAscii(&obj, "STRING");

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqp_pusheventbuilder.h                                            -*-C++-*-
 #ifndef INCLUDED_BMQP_PUSHEVENTBUILDER
 #define INCLUDED_BMQP_PUSHEVENTBUILDER
 
@@ -90,14 +89,14 @@ class PushEventBuilder {
   public:
     // TYPES
     typedef bmqp::BlobPoolUtil::BlobSpPool BlobSpPool;
+    typedef bsl::function<bsl::shared_ptr<bdlbb::Blob>(void)> BlobSpCreator;
 
   private:
     // DATA
     /// Allocator to use.
     bslma::Allocator* d_allocator_p;
 
-    /// Blob pool to use.  Held, not owned.
-    BlobSpPool* d_blobSpPool_p;
+    BlobSpCreator d_blobSpCreator;
 
     /// Blob being built by this object.
     /// `mutable` to skip writing the length until the blob is retrieved.
@@ -164,6 +163,8 @@ class PushEventBuilder {
     /// set BlobBufferFactory since we might want to expand the built Blob
     /// dynamically.
     PushEventBuilder(BlobSpPool* blobSpPool_p, bslma::Allocator* allocator);
+    PushEventBuilder(const BlobSpCreator& blobSpCreator,
+                     bslma::Allocator*    allocator);
 
     // MANIPULATORS
 

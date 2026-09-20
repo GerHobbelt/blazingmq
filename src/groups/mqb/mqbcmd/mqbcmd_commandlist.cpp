@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbcmd_commandlist.cpp                                             -*-C++-*-
 #include <mqbcmd_commandlist.h>
 
 #include <mqbscm_version.h>
@@ -126,6 +125,10 @@ struct CommandDefinition {
     {"CLUSTERS CLUSTER <name> STORAGE PARTITION <partitionId> SUMMARY",
      "Show summary of the 'partitionId' of cluster 'name'",
      "Show summary of the 'partitionId' of cluster 'name'"},
+    {"CLUSTERS CLUSTER <name> STORAGE PARTITION (<partitionId>|ALL) ROLLOVER",
+     "Rollover the storage files of 'partitionId' of cluster 'name'",
+     "Rollover the storage files of 'partitionId' of cluster 'name'. If "
+     "'ALL' is used then rollover all partitions."},
     {"CLUSTERS CLUSTER <name> STORAGE DOMAIN <domain_name> QUEUE_STATUS",
      "Show status of queues belonging to 'domain_name' in the storage of "
      "cluster 'name'",

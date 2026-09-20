@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbmock_storagemanager.cpp                                         -*-C++-*-
 #include <mqbmock_storagemanager.h>
 
 #include <mqbscm_version.h>
@@ -80,35 +79,6 @@ int StorageManager::updateQueuePrimary(
     BSLA_MAYBE_UNUSED const AppInfos&  removedIdKeyPairs)
 {
     return 0;
-}
-
-void StorageManager::registerQueueReplica(
-    BSLA_MAYBE_UNUSED int   partitionId,
-    BSLA_MAYBE_UNUSED const bmqt::Uri& uri,
-    BSLA_MAYBE_UNUSED const mqbu::StorageKey& queueKey,
-    BSLA_MAYBE_UNUSED const AppInfos&         appIdKeyPairs,
-    BSLA_MAYBE_UNUSED mqbi::Domain* domain)
-{
-    // NOTHING
-}
-
-void StorageManager::unregisterQueueReplica(
-    BSLA_MAYBE_UNUSED int   partitionId,
-    BSLA_MAYBE_UNUSED const bmqt::Uri& uri,
-    BSLA_MAYBE_UNUSED const mqbu::StorageKey& queueKey,
-    BSLA_MAYBE_UNUSED const mqbu::StorageKey& appKey)
-{
-    // NOTHING
-}
-
-void StorageManager::updateQueueReplica(
-    BSLA_MAYBE_UNUSED int   partitionId,
-    BSLA_MAYBE_UNUSED const bmqt::Uri& uri,
-    BSLA_MAYBE_UNUSED const mqbu::StorageKey& queueKey,
-    BSLA_MAYBE_UNUSED const AppInfos&         appIdKeyPairs,
-    BSLA_MAYBE_UNUSED mqbi::Domain* domain)
-{
-    // NOTHING
 }
 
 void StorageManager::resetQueue(

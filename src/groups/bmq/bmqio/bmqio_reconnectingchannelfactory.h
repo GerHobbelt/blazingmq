@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqio_reconnectingchannelfactory.h                                 -*-C++-*-
 #ifndef INCLUDED_BMQIO_RECONNECTINGCHANNELFACTORY
 #define INCLUDED_BMQIO_RECONNECTINGCHANNELFACTORY
 
@@ -258,6 +257,7 @@ class ReconnectingChannelFactory : public ChannelFactory {
 
     // DATA
     bmqu::AtomicValidator d_validator;
+    bsls::AtomicBool      d_isReconnectEnabled;
     Config                d_config;
     ConnectHandleMap      d_handles;
     bslmt::Mutex          d_mutex;
@@ -319,6 +319,10 @@ class ReconnectingChannelFactory : public ChannelFactory {
     /// the thread calling this function is the same thread that called
     /// `start()` and is not one of the I/O threads used by this object.
     void stop() BSLS_KEYWORD_OVERRIDE;
+
+    /// Disable automatic reconnection.  After this call, channels that go
+    /// down will not trigger a reconnect attempt.
+    void disableReconnect();
 
     // ChannelFactory
 

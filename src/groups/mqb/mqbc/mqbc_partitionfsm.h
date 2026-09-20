@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_partitionfsm.h                                                -*-C++-*-
 #ifndef INCLUDED_MQBC_PARTITIONFSM
 #define INCLUDED_MQBC_PARTITIONFSM
 
@@ -246,6 +245,13 @@ class PartitionFSM {
 
     /// Observers of this object.
     ObserversSet d_observers;
+
+  public:
+    // PUBLIC DATA
+
+    /// String constant to use in log messages to indicate a partition FSM
+    /// defect.
+    static const char* k_PFSM_DEFECT_LOG_TAG;
 
   private:
     // NOT IMPLEMENTED

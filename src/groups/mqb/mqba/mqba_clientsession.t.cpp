@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqba_clientsession.t.cpp                                           -*-C++-*-
 #include <mqba_clientsession.h>
 
 // MQB
@@ -2508,8 +2507,6 @@ int main(int argc, char* argv[])
             mqbstat::BrokerStatsUtil::initializeStatContext(
                 30,
                 bmqtst::TestHelperUtil::allocator());
-
-        mqbu::MessageGUIDUtil::initialize();
 
         switch (_testCase) {
         case 0:

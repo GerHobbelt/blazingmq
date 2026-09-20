@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbs_storageprintutil.t.cpp                                        -*-C++-*-
 #include <mqbs_storageprintutil.h>
 
 // MQB
@@ -174,8 +173,7 @@ struct Tester {
         limits.bytes()                  = k_INT64_MAX;
         limits.bytesWatermarkRatio()    = 0.8;
 
-        d_storage_mp->configure(errorDescription,
-                                config,
+        d_storage_mp->configure(config,
                                 limits,
                                 domainCfg.messageTtl(),
                                 domainCfg.maxDeliveryAttempts());

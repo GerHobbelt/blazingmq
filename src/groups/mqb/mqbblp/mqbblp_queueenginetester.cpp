@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbblp_queueenginetester.cpp                                       -*-C++-*-
 #include <mqbblp_queueenginetester.h>
 
 // MQB
@@ -424,8 +423,6 @@ void QueueEngineTester::oneTimeInit()
     BSLMT_ONCE_DO
     {
         bmqsys::Time::initialize();
-        // Make MessageGUID generation thread-safe by calling initialize
-        mqbu::MessageGUIDUtil::initialize();
     }
 }
 
@@ -569,12 +566,10 @@ void QueueEngineTester::init(const mqbconfm::Domain& domainConfig,
     limits.bytes()    = bsl::numeric_limits<bsls::Types::Int64>::max();
 
     storage_p->setConsistency(domainConfig.consistency());
-    rc = storage_p->configure(errorDescription,
-                              config,
-                              limits,
-                              domainConfig.messageTtl(),
-                              domainConfig.maxDeliveryAttempts());
-    BSLS_ASSERT_OPT(rc == 0 && "storage configure fail");
+    storage_p->configure(config,
+                         limits,
+                         domainConfig.messageTtl(),
+                         domainConfig.maxDeliveryAttempts());
 
     // Add virtual storages
     const bool isFanoutMode = domainConfig.mode().isFanoutValue();
@@ -725,8 +720,9 @@ QueueEngineTester::getHandle(const bsl::string& clientText)
     // Consistency
     // NOTE: appId can only be specified in fanout mode, and it must be
     //       associated with a readCount of 1
-    const mqbconfm::Domain& domainConfig = d_queueState_mp->domain()->config();
-    const bool              isFanout     = domainConfig.mode().isFanoutValue();
+    bsl::shared_ptr<const mqbconfm::Domain> domainConfig =
+        d_queueState_mp->domain()->config();
+    const bool   isFanout           = domainConfig->mode().isFanoutValue();
     unsigned int upstreamSubQueueId = bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID;
     // Populate SubQueueIdInfo (if any)
     if (isFanout) {
@@ -898,8 +894,9 @@ int QueueEngineTester::configureHandle(const bsl::string& clientText)
 
     // Consistency
     // NOTE: appId can only be specified in fanout mode
-    const mqbconfm::Domain& domainConfig = d_queueState_mp->domain()->config();
-    const bool              isFanout     = domainConfig.mode().isFanoutValue();
+    bsl::shared_ptr<const mqbconfm::Domain> domainConfig =
+        d_queueState_mp->domain()->config();
+    const bool isFanout = domainConfig->mode().isFanoutValue();
     BSLS_ASSERT_OPT((appId == bmqp::ProtocolUtil::k_DEFAULT_APP_ID) ||
                     isFanout);
 
@@ -1223,8 +1220,9 @@ void QueueEngineTester::purgeQueue(const bslstl::StringRef& appId)
     mqbu::StorageKey          appKey = mqbi::QueueEngine::k_DEFAULT_APP_KEY;
 
     bsl::string appIdInternal = bmqp::ProtocolUtil::k_DEFAULT_APP_ID;
-    const mqbconfm::Domain& domainConfig = d_queueState_mp->domain()->config();
-    const bool              isFanout     = domainConfig.mode().isFanoutValue();
+    bsl::shared_ptr<const mqbconfm::Domain> domainConfig =
+        d_queueState_mp->domain()->config();
+    const bool isFanout = domainConfig->mode().isFanoutValue();
     if (isFanout) {
         appIdInternal = appId;
         appKey        = mqbu::StorageKey::k_NULL_KEY;
@@ -1542,8 +1540,9 @@ bool QueueEngineTester::getUpstreamParameters(
     const bslstl::StringRef&        appId) const
 {
     unsigned int upstreamSubQueueId = bmqp::QueueId::k_DEFAULT_SUBQUEUE_ID;
-    const mqbconfm::Domain& domainConfig = d_queueState_mp->domain()->config();
-    const bool              isFanout     = domainConfig.mode().isFanoutValue();
+    bsl::shared_ptr<const mqbconfm::Domain> domainConfig =
+        d_queueState_mp->domain()->config();
+    const bool isFanout = domainConfig->mode().isFanoutValue();
 
     if (isFanout) {
         SubIdsMap::const_iterator subIdCiter = d_subIds.find(appId);

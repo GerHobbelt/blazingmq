@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqa_messageeventbuilder.cpp                                       -*-C++-*-
 #include <bmqa_messageeventbuilder.h>
 
 #include <bmqscm_version.h>
@@ -176,16 +175,11 @@ void MessageEventBuilder::reset()
     msgImplRef.d_event_p    = 0;
     msgImplRef.d_correlationId.makeUnset();
 
-    // Get bmqimp::Event from bmqa::MessageEvent
-    typedef bsl::shared_ptr<bmqimp::Event> EventSP;
-    EventSP& eventSpRef = reinterpret_cast<EventSP&>(d_impl.d_msgEvent);
+    BSLS_ASSERT_OPT(d_impl.d_messageEventFactory);
 
+    d_impl.d_msgEvent              = d_impl.d_messageEventFactory();
     d_impl.d_messageCountFinal     = 0;
     d_impl.d_messageEventSizeFinal = 0;
-
-    eventSpRef->upgradeMessageEventModeToWrite();
-    // underlying PutEventBuilder is reset in
-    // 'upgradeMessageEventModeToWrite'
 }
 
 const MessageEvent& MessageEventBuilder::messageEvent()

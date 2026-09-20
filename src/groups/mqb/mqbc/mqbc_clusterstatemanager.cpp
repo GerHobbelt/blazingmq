@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_clusterstatemanager.cpp                                       -*-C++-*-
 #include <bsla_unused.h>
 #include <mqbc_clusterstatemanager.h>
 
@@ -21,6 +20,7 @@
 // MQB
 #include <mqbc_clusterstateledgeriterator.h>
 #include <mqbc_clusterutil.h>
+#include <mqbc_electorinfo.h>
 #include <mqbevt_clusterstateevent.h>
 #include <mqbi_cluster.h>
 #include <mqbi_storagemanager.h>
@@ -296,6 +296,9 @@ void ClusterStateManager::do_initializeQueueKeyInfoMap(
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterFSM.isSelfHealed());
+    // CSL is the source of truth for the Primary only,
+    // and we assume Leader and Primary are always the same node.
+    BSLS_ASSERT_SAFE(d_clusterFSM.isSelfLeader());
 
     d_storageManager_p->initializeQueueKeyInfoMap(*d_state_p);
 }
@@ -386,6 +389,7 @@ void ClusterStateManager::do_sendFollowerLSNRequests(
         .makeFollowerLSNRequest();
 
     contextSp->setDestinationNodes(followers);
+    contextSp->setComponentId(bmqp::RequestManagerComponentId::k_CLUSTER_FSM);
     contextSp->setResponseCb(
         bdlf::BindUtil::bind(&ClusterStateManager::onFollowerLSNResponse,
                              this,
@@ -511,6 +515,7 @@ void ClusterStateManager::do_sendFollowerClusterStateRequest(
 
     RequestContextSp request =
         d_clusterData_p->requestManager().createRequest();
+    request->setComponentId(bmqp::RequestManagerComponentId::k_CLUSTER_FSM);
     request->request()
         .choice()
         .makeClusterMessage()
@@ -637,7 +642,8 @@ void ClusterStateManager::do_storeSelfLSN(const EventWithMetadata& event)
     d_nodeToLedgerLSNMap[inputMessage.source()] = selfLSN;
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
-                  << ": In the Cluster FSM, storing self's LSN as " << selfLSN;
+                  << ": In the Cluster FSM, storing self's LSN as "
+                  << printLSN(selfLSN);
 }
 
 void ClusterStateManager::do_storeFollowerLSNs(const EventWithMetadata& event)
@@ -660,7 +666,7 @@ void ClusterStateManager::do_storeFollowerLSNs(const EventWithMetadata& event)
         BALL_LOG_INFO << d_clusterData_p->identity().description()
                       << ": In the Cluster FSM, storing the LSN of "
                       << cit->source()->nodeDescription() << " as "
-                      << cit->leaderSequenceNumber();
+                      << printLSN(cit->leaderSequenceNumber());
     }
 }
 
@@ -688,7 +694,7 @@ void ClusterStateManager::do_removeFollowerLSN(const EventWithMetadata& event)
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << ": In the Cluster FSM, removing the LSN of "
                   << crashedFollowerNode->nodeDescription() << ", which was "
-                  << cit->second;
+                  << printLSN(cit->second);
 
     d_nodeToLedgerLSNMap.erase(cit);
 }
@@ -738,6 +744,7 @@ void ClusterStateManager::do_sendRegistrationRequest(
 
     RequestContextSp request =
         d_clusterData_p->requestManager().createRequest();
+    request->setComponentId(bmqp::RequestManagerComponentId::k_CLUSTER_FSM);
 
     bmqp_ctrlmsg::RegistrationRequest& registrationRequest =
         request->request()
@@ -844,12 +851,13 @@ void ClusterStateManager::do_logUnexpectedCSLCommit(
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
-    BALL_LOG_ERROR << d_clusterData_p->identity().description()
-                   << ": Cluster FSM is in " << d_clusterFSM.state()
-                   << " state while receiving unexpected CSL commit. Current "
-                      "leader sequence number is "
-                   << d_clusterData_p->electorInfo().leaderMessageSequence()
-                   << ".";
+    BALL_LOG_ERROR
+        << d_clusterData_p->identity().description() << ": Cluster FSM is in "
+        << d_clusterFSM.state()
+        << " state while receiving unexpected CSL commit. Current "
+           "LSN is "
+        << printLSN(d_clusterData_p->electorInfo().leaderMessageSequence())
+        << ".";
 }
 
 void ClusterStateManager::do_logStaleFollowerLSNResponse(
@@ -873,7 +881,7 @@ void ClusterStateManager::do_logStaleFollowerLSNResponse(
                       << ": Follower LSN response from "
                       << cit->source()->nodeDescription()
                       << " with rId = " << cit->requestId() << " and a LSN of "
-                      << cit->leaderSequenceNumber()
+                      << printLSN(cit->leaderSequenceNumber())
                       << " is stale.  Self is no longer leader.";
     }
 }
@@ -1005,7 +1013,8 @@ void ClusterStateManager::do_logFailRegistrationResponse(
 
         BALL_LOG_ERROR << d_clusterData_p->identity().description()
                        << ": Failed to send registration request with LSN = "
-                       << inputMessage.leaderSequenceNumber() << " to "
+                       << printLSN(inputMessage.leaderSequenceNumber())
+                       << " to "
                        << d_clusterData_p->electorInfo().leaderNode();
     }
     else {
@@ -1095,7 +1104,9 @@ void ClusterStateManager::do_cancelRequests(
     failure.code()     = mqbi::ClusterErrorCode::e_UNKNOWN;
     failure.message()  = "Cancellation by Cluster FSM";
 
-    d_clusterData_p->requestManager().cancelAllRequests(response);
+    d_clusterData_p->requestManager().cancelComponentRequests(
+        response,
+        bmqp::RequestManagerComponentId::k_CLUSTER_FSM);
 }
 
 // PRIVATE MANIPULATORS

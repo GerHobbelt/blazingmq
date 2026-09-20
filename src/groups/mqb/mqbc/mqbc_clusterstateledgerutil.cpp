@@ -13,10 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_clusterstateledgerutil.cpp                                    -*-C++-*-
 #include <mqbc_clusterstateledgerutil.h>
 
 #include <mqbscm_version.h>
+// MQB
+#include <mqbc_electorinfo.h>
+
 // BMQ
 #include <bmqp_crc32c.h>
 #include <bmqp_protocol.h>
@@ -302,10 +304,12 @@ int ClusterStateLedgerUtil::validateLog(mqbsi::Log::Offset* offset,
         crc32cComputed = bmqp::Crc32c::calculate(blob);
         if (crc32cComputed != crc32cExpected) {
             BMQTSK_ALARMLOG_ALARM("CLUSTER")
-                << "CSL Recovery: CRC mismatch for record with sequenceNumber "
-                << "[" << recHeader->sequenceNumber() << "] in file '"
-                << log->logConfig().location() << "' with fileKey ["
-                << fileHeader->fileKey() << "] at offset " << currOffset << "."
+                << "CSL Recovery: CRC mismatch for record with LSN "
+                << printLSN(recHeader->electorTerm(),
+                            recHeader->sequenceNumber())
+                << " in file '" << log->logConfig().location()
+                << "' with fileKey [" << fileHeader->fileKey()
+                << "] at offset " << currOffset << "."
                 << " CRC32-C Expected: " << crc32cExpected << "."
                 << " CRC32-C Computed: " << crc32cComputed << "."
                 << " ClusterStateRecordHeader: [headerWords: "
@@ -313,8 +317,6 @@ int ClusterStateLedgerUtil::validateLog(mqbsi::Log::Offset* offset,
                 << ", recordType: " << recHeader->recordType()
                 << ", leaderAdvisoryWords: "
                 << recHeader->leaderAdvisoryWords()
-                << ", electorTerm: " << recHeader->electorTerm()
-                << ", sequenceNumber: " << recHeader->sequenceNumber()
                 << ", timestamp: " << recHeader->timestamp() << "]"
                 << BMQTSK_ALARMLOG_END;
             return ClusterStateLedgerUtilRc::e_INVALID_CHECKSUM;  // RETURN

@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// bmqimp_event.cpp                                                   -*-C++-*-
 #include <bmqimp_event.h>
 
 #include <bmqscm_version.h>
@@ -316,27 +315,6 @@ Event& Event::downgradeMessageEventModeToRead()
         //       handle this correctly (by returning invalid argument error).
     }
 
-    return *this;
-}
-
-Event& Event::upgradeMessageEventModeToWrite()
-{
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(type() == EventType::e_MESSAGE);
-
-    if (MessageEventMode::e_WRITE == d_msgEventMode) {
-        return *this;  // RETURN
-    }
-
-    d_msgEventMode = MessageEventMode::e_WRITE;
-    BSLS_ASSERT_SAFE(d_isPutEventBuilderConstructed);
-    d_putEventBuilderBuffer.object().reset();
-    d_putMsgIter.clear();
-    d_rawEvent.clear();
-    d_queues.clear();
-    d_queuesBySubscriptionId.clear();
-    d_contexts.clear();
-    d_correlationId.makeUnset();
     return *this;
 }
 
