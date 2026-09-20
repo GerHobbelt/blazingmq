@@ -33,7 +33,6 @@
 // BMQ
 #include <bmqp_crc32c.h>
 #include <bmqp_ctrlmsg_messages.h>
-#include <bmqp_protocolutil.h>
 
 #include <bmqsys_time.h>
 #include <bmqu_memoutstream.h>
@@ -160,7 +159,6 @@ struct Tester {
                 mqbmock::Cluster(bmqtst::TestHelperUtil::allocator(),
                                  true,  // isClusterMember
                                  d_isLeader,
-                                 true,   // isCSLMode
                                  true,   // isFSMWorkflow
                                  false,  // doesFSMwriteQLIST
                                  clusterNodeDefs,
@@ -1242,7 +1240,7 @@ static void test11_leaderHighestLeaderHealed()
 
     // Verify that a cluster state snapshot is applied to the CSL
     ClusterMessageCRefList advisories;
-    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
+    tester.d_clusterStateLedger_p->_uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
     BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
@@ -1367,7 +1365,7 @@ static void test12_followerHighestLeaderHealed()
 
     // Verify that a cluster state snapshot is applied to the CSL
     ClusterMessageCRefList advisories;
-    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
+    tester.d_clusterStateLedger_p->_uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
     BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
@@ -1499,7 +1497,7 @@ static void test14_leaderCSLCommitFailure()
 
     // CSL_CMT_FAIL triggers the watchdog (reschedules to now) but stays in
     // LDR_HEALING_STG2.  Advance time so the triggered watchdog fires.
-    // The e_WATCH_DOG transition goes to UNKNOWN, which re-applies
+    // The e_WATCHDOG transition goes to UNKNOWN, which re-applies
     // SLCT_LDR, landing in LDR_HEALING_STG1.
     BSLS_ASSERT_OPT(tester.d_clusterStateManager_mp->healthState() ==
                     mqbc::ClusterStateTableState::e_LDR_HEALING_STG2);
@@ -1549,7 +1547,7 @@ static void test15_followerCSLCommitFailure()
 
     // CSL_CMT_FAIL triggers the watchdog (reschedules to now) but stays in
     // FOL_HEALING.  Advance time so the triggered watchdog fires.
-    // The e_WATCH_DOG transition goes to UNKNOWN, which re-applies
+    // The e_WATCHDOG transition goes to UNKNOWN, which re-applies
     // SLCT_FOL, landing back in FOL_HEALING.
     BSLS_ASSERT_OPT(tester.d_clusterStateManager_mp->healthState() ==
                     mqbc::ClusterStateTableState::e_FOL_HEALING);
@@ -1654,7 +1652,7 @@ static void test16_followerClusterStateRespFailureLeaderNext()
     //
     // Verify that a cluster state snapshot is applied to the CSL
     ClusterMessageCRefList advisories;
-    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
+    tester.d_clusterStateLedger_p->_uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
     BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
@@ -1805,7 +1803,7 @@ static void test17_followerClusterStateRespFailureFollowerNext()
 
     // Verify that a cluster state snapshot is applied to the CSL
     ClusterMessageCRefList advisories;
-    tester.d_clusterStateLedger_p->uncommittedAdvisories(&advisories);
+    tester.d_clusterStateLedger_p->_uncommittedAdvisories(&advisories);
     BMQTST_ASSERT_EQ(advisories.size(), 1U);
     BMQTST_ASSERT(advisories.front().get().choice().isLeaderAdvisoryValue());
 
@@ -2735,7 +2733,7 @@ static void test26_watchdogStopResetsState()
 // WATCHDOG STOP RESETS STATE
 //
 // Concerns:
-//   do_stopWatchDog (via stop / STOP_NODE) increments generation and
+//   do_stopWatchdog (via stop / STOP_NODE) increments generation and
 //   resets retries.
 //
 // Plan:
@@ -2743,7 +2741,7 @@ static void test26_watchdogStopResetsState()
 //  2) Elect leader -> LDR_HEALING_STG1
 //  3) Verify initial watchdog context (retries = 2, generation = 0,
 //     active = true)
-//  4) Call stop() -> triggers STOP_NODE -> calls do_stopWatchDog
+//  4) Call stop() -> triggers STOP_NODE -> calls do_stopWatchdog
 //  5) Verify generation incremented, retries reset, active = false,
 //     state = STOPPED
 //
@@ -2773,7 +2771,7 @@ static void test26_watchdogStopResetsState()
     BMQTST_ASSERT_EQ(tester.d_clusterStateManager_mp->isWatchdogActive(),
                      true);
 
-    // Stop -> triggers STOP_NODE -> calls do_stopWatchDog
+    // Stop -> triggers STOP_NODE -> calls do_stopWatchdog
     tester.d_clusterStateManager_mp->stop();
 
     // Verify state transitioned to STOPPED
@@ -2939,8 +2937,6 @@ int main(int argc, char* argv[])
 {
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
 
-    bmqp::ProtocolUtil::initialize(bmqtst::TestHelperUtil::allocator());
-
     switch (_testCase) {
     case 0:
     case 28: test28_watchdogLeaderRetryExhaustion(); break;
@@ -2976,8 +2972,6 @@ int main(int argc, char* argv[])
         bmqtst::TestHelperUtil::testStatus() = -1;
     } break;
     }
-
-    bmqp::ProtocolUtil::shutdown();
 
     TEST_EPILOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
     // Can't ensure no default memory is allocated because

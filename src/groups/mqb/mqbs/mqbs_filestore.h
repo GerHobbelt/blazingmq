@@ -381,9 +381,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // Throttler for alarming on soft
     // limits of partition files
 
-    bool d_isCSLModeEnabled;
-    // Whether CSL mode is enabled
-
     bool d_isFSMWorkflow;
     // Whether FSM workflow is enabled
 
@@ -395,13 +392,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // Whether to ignore Crc32
     // calculations.  We should only set
     // this to true during testing.
-
-    int d_naglePacketCount;
-    // Max number of messages in the
-    // 'd_storageEventBuilder' before
-    // flushing the builder.  Depending
-    // the cluster channels load, it can
-    // grow or shrink.
 
     bmqp::StorageEventBuilder d_storageEventBuilder;
     // Storage event builder to use.
@@ -673,7 +663,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
         bsls::Types::Uint64            recordOffset);
 
     /// Flush the storage if the specified `immediateFlush` is `true` or the
-    /// `d_storageEventBuilder` is over the `d_naglePacketCount` limit.
+    /// `d_storageEventBuilder` is over the `k_NAGLE_PACKET_COUNT` limit.
     void flushIfNeeded(bool immediateFlush);
 
     // PRIVATE ACCESSORS
@@ -709,8 +699,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
 
     /// Create an instance with the specified `config`, `processorId`,
     /// `dispatcher`, `cluster`, `clusterStats`, `blobSpPool`,
-    /// `miscWorkThreadPool`, `isCSLModeEnabled`, `isFSMWorkflow` and
-    /// `allocator`.
+    /// `miscWorkThreadPool`, `isFSMWorkflow` and `allocator`.
     FileStore(const DataStoreConfig&                          config,
               int                                             processorId,
               mqbi::Dispatcher*                               dispatcher,
@@ -719,7 +708,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
               BlobSpPool*                                     blobSpPool,
               StateSpPool*                                    statePool,
               bdlmt::FixedThreadPool* miscWorkThreadPool,
-              bool                    isCSLModeEnabled,
               bool                    isFSMWorkflow,
               bool                    doesFSMwriteQLIST,
               int                     replicationFactor,

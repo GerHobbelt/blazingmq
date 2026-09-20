@@ -113,7 +113,7 @@ void ClusterStateManager::do_abort(const EventWithMetadata& event)
     mqbu::ExitUtil::terminate(mqbu::ExitCode::e_UNSUPPORTED_SCENARIO);  // EXIT
 }
 
-void ClusterStateManager::do_startWatchDog(
+void ClusterStateManager::do_startWatchdog(
     BSLA_MAYBE_UNUSED const EventWithMetadata& event)
 {
     // executed by the cluster *DISPATCHER* thread
@@ -138,7 +138,7 @@ void ClusterStateManager::do_startWatchDog(
     d_watchdogCtx.d_active = true;
 }
 
-void ClusterStateManager::do_stopWatchDog(
+void ClusterStateManager::do_stopWatchdog(
     BSLA_MAYBE_UNUSED const EventWithMetadata& event)
 {
     // executed by the cluster *DISPATCHER* thread
@@ -161,7 +161,7 @@ void ClusterStateManager::do_stopWatchDog(
     }
 }
 
-void ClusterStateManager::do_triggerWatchDog(
+void ClusterStateManager::do_triggerWatchdog(
     BSLA_MAYBE_UNUSED const EventWithMetadata& event)
 {
     // executed by the cluster *DISPATCHER* thread
@@ -1038,7 +1038,7 @@ void ClusterStateManager::do_reapplySelectLeader(
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(d_clusterData_p->electorInfo().isSelfLeader());
-    BSLS_ASSERT_SAFE(d_clusterFSM.state() == ClusterFSM::State::e_UNKNOWN);
+    BSLS_ASSERT_SAFE(d_clusterFSM.isSelfLeader());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << ": Re-apply transition to leader in the Cluster FSM.";
@@ -1046,7 +1046,7 @@ void ClusterStateManager::do_reapplySelectLeader(
     InputMessages inputMessages(1, d_allocator_p);
     inputMessages.at(0).setSource(d_clusterData_p->membership().selfNode());
 
-    applyFSMEvent(ClusterFSM::Event::e_SLCT_LDR,
+    applyFSMEvent(ClusterFSM::Event::e_REAPPLY_LDR,
                   ClusterFSMEventMetadata(inputMessages));
 }
 
@@ -1058,7 +1058,7 @@ void ClusterStateManager::do_reapplySelectFollower(
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
     BSLS_ASSERT_SAFE(!d_clusterData_p->electorInfo().isSelfLeader());
-    BSLS_ASSERT_SAFE(d_clusterFSM.state() == ClusterFSM::State::e_UNKNOWN);
+    BSLS_ASSERT_SAFE(d_clusterFSM.isSelfFollower());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << ": Re-apply transition to follower in the Cluster FSM.";
@@ -1066,7 +1066,7 @@ void ClusterStateManager::do_reapplySelectFollower(
     InputMessages inputMessages(1, d_allocator_p);
     inputMessages.at(0).setSource(d_clusterData_p->electorInfo().leaderNode());
 
-    applyFSMEvent(ClusterFSM::Event::e_SLCT_FOL,
+    applyFSMEvent(ClusterFSM::Event::e_REAPPLY_FOL,
                   ClusterFSMEventMetadata(inputMessages));
 }
 
@@ -1177,6 +1177,14 @@ void ClusterStateManager::applyFSMEvent(
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
 
+    if (event == ClusterFSM::Event::e_SLCT_LDR &&
+        d_clusterFSM.isSelfLeader()) {
+        BALL_LOG_INFO << d_clusterData_p->identity().description()
+                      << ": dropping redundant SLCT_LDR event,"
+                      << " already in leader state.";
+        return;
+    }
+
     d_clusterFSM.enqueueEvent(EventWithMetadata(event, metadata));
 }
 
@@ -1258,7 +1266,7 @@ void ClusterStateManager::onWatchdogDispatched(int generation)
     // Decrement retry counter
     const int retriesRemaining = d_watchdogCtx.d_retriesRemaining--;
 
-    // Mark that watchdog has fired so that `do_startWatchDog` will schedule
+    // Mark that watchdog has fired so that `do_startWatchdog` will schedule
     // a fresh timer on the next invocation.
     d_watchdogCtx.d_active = false;
 
@@ -1271,7 +1279,7 @@ void ClusterStateManager::onWatchdogDispatched(int generation)
         << d_watchdogNumRetries << BMQTSK_ALARMLOG_END;
 
     if (retriesRemaining > 0) {
-        applyFSMEvent(ClusterFSM::Event::e_WATCH_DOG,
+        applyFSMEvent(ClusterFSM::Event::e_WATCHDOG,
                       ClusterFSMEventMetadata());
     }
     else {

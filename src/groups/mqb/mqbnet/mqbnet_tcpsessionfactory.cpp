@@ -902,6 +902,12 @@ void TCPSessionFactory::enableHeartbeat(
 {
     // executed by the *SCHEDULER* thread
 
+    BALL_LOG_INFO << "Enabling TCPSessionFactory '" << d_config.name()
+                  << "' Heartbeat for [session: '"
+                  << channelInfo_sp->d_session_sp->description()
+                  << "', channel: '" << channelInfo_sp->d_channel_sp.get()
+                  << "' ]";
+
     d_heartbeatChannels[channelInfo_sp->d_channel_sp.get()] = channelInfo_sp;
 }
 
@@ -1171,9 +1177,8 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
         new (*d_allocator_p) bmqio::ResolvingChannelFactory(
             bmqio::ResolvingChannelFactoryConfig(
                 d_tcpChannelFactory_mp.get(),
-                bmqex::ExecutionPolicyUtil::oneWay()
-                    .neverBlocking()
-                    .useExecutor(d_resolutionContext.executor()),
+                bmqex::ExecutionPolicyUtil::neverBlocking().useExecutor(
+                    d_resolutionContext.executor()),
                 d_allocator_p)
                 .resolutionFn(bdlf::BindUtil::bind(
                     &monitoredDNSResolution,

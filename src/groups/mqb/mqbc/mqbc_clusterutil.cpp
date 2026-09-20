@@ -1049,19 +1049,6 @@ bool ClusterUtil::assignQueue(ClusterState*         clusterState,
 
     clusterState->queueKeys().erase(key);
 
-    if (!cluster->isCSLModeEnabled()) {
-        // Broadcast 'queueAssignmentAdvisory' to all followers
-
-        // NOTE: We must broadcast this control message before applying to CSL,
-        // because if CSL is running in eventual consistency it will
-        // immediately apply a commit with a higher seqeuence number than the
-        // QueueAssignmentAdvisory.  If we ever receive the commit before the
-        // QAA, we will alarm due to out-of-sequence advisory.
-        clusterData->messageTransmitter().broadcastMessage(controlMsg);
-
-        BSLS_ASSERT_SAFE(queueAdvisory.queues().size() == 1);
-    }
-
     // Apply 'queueAssignmentAdvisory' to CSL
     BALL_LOG_INFO << clusterData->identity().description()
                   << ": 'QueueAssignmentAdvisory' will be applied to "
@@ -1484,7 +1471,8 @@ void ClusterUtil::sendClusterState(
         if (trustCSL) {
             // We construct a "merged state" of current cluster state and
             // information from uncommitted CSL advisories, before sending over
-            // to follower(s).
+            // to follower(s).  Loading the CSL iterator gives us the merged
+            // state for free.
             //
             // NOTE: This code path is *only* reachable in non-FSM mode.
             ClusterState tempState(
@@ -1503,15 +1491,6 @@ void ClusterUtil::sendClusterState(
                     << "state as part of 'sendClusterState', rc: " << rc;
 
                 return;  // RETURN
-            }
-
-            ClusterStateLedger::ClusterMessageCRefList uncommittedAdvisories;
-            ledger->uncommittedAdvisories(&uncommittedAdvisories);
-            for (ClusterStateLedger::ClusterMessageCRefList::const_iterator
-                     cit = uncommittedAdvisories.begin();
-                 cit != uncommittedAdvisories.end();
-                 ++cit) {
-                apply(&tempState, *cit, *clusterData);
             }
 
             if (!newlyAssigned.empty()) {
@@ -1590,18 +1569,6 @@ void ClusterUtil::sendClusterState(
             &advisory.sequenceNumber());
 
         loadQueuesInfo(&advisory.queues(), clusterState);
-    }
-
-    // Need to send the control message for the old brokers to process
-    // LeaderAdvisory.
-    if (!clusterData->cluster().isCSLModeEnabled()) {
-        if (node) {
-            clusterData->messageTransmitter().sendMessage(controlMessage,
-                                                          node);
-        }
-        else {
-            clusterData->messageTransmitter().broadcastMessage(controlMessage);
-        }
     }
 
     const int rc = ledger->apply(clusterMessage);

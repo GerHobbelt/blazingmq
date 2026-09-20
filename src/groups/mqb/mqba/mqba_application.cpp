@@ -120,8 +120,6 @@ void Application::oneTimeInit()
 
         // Make MessageGUID generation thread-safe by calling initialize
         mqbu::MessageGUIDUtil::initialize();
-
-        bmqp::ProtocolUtil::initialize();
     }
 }
 
@@ -129,7 +127,6 @@ void Application::oneTimeShutdown()
 {
     BSLMT_ONCE_DO
     {
-        bmqp::ProtocolUtil::shutdown();
         bmqsys::Time::shutdown();
     }
 }
@@ -529,8 +526,8 @@ void Application::stop()
     // any DispatcherClient that might be in the middle of its destruction.
     d_dispatcher_mp->disableFlushClients();
 
-    // Stop TransportManager since 'Application::initiateShutdown' closed all
-    // client sessions and 'Cluster::initiateShutdown' closes all cluster nodes
+    // 'Application::initiateShutdown' had closed all client sessions.
+    // 'Cluster::initiateShutdown' had drained and closed all cluster nodes
     // sessions.
     STOP_OBJ(d_transportManager_mp, "TransportManager");
     STOP_OBJ(d_clusterCatalog_mp, "ClusterCatalog");

@@ -127,9 +127,6 @@ class MockClusterNode : public ClusterNode {
     /// Reset the channel associated to this node.
     ClusterNode* resetChannel() BSLS_KEYWORD_OVERRIDE;
 
-    /// Close the channel associated to this node, if any.
-    void closeChannel() BSLS_KEYWORD_OVERRIDE;
-
     /// Enqueue the specified message `blob` of the specified `type`to be
     /// written to the channel associated to this node.  Return 0 on
     /// success, and a non-zero value otherwise.  Note that success does not
@@ -269,15 +266,12 @@ class MockCluster : public Cluster {
 
     /// Write the specified `blob` of the specified `type` to all connected
     /// nodes of this cluster (with the exception of the current node).
-    /// Return the maximum number of pending items across all cluster
-    /// channels prior to broadcasting.
-    int writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
-                 bmqp::EventType::Enum type) BSLS_KEYWORD_OVERRIDE;
+    void writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
+                  bmqp::EventType::Enum type) BSLS_KEYWORD_OVERRIDE;
 
     /// Send the specified `blob` to all currently up nodes of this cluster
-    /// (exception of the current node).  Return the maximum number of
-    /// pending items across all cluster channels prior to broadcasting.
-    int
+    /// (exception of the current node).
+    void
     broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob) BSLS_KEYWORD_OVERRIDE;
 
     /// Close the channels associated to all nodes in this cluster.

@@ -125,6 +125,8 @@ const char* ClusterStateTableEvent::toAscii(ClusterStateTableEvent::Enum value)
     switch (value) {
         CASE(SLCT_LDR)
         CASE(SLCT_FOL)
+        CASE(REAPPLY_LDR)
+        CASE(REAPPLY_FOL)
         CASE(FOL_LSN_RQST)
         CASE(FOL_LSN_RSPN)
         CASE(FAIL_FOL_LSN_RSPN)
@@ -144,7 +146,7 @@ const char* ClusterStateTableEvent::toAscii(ClusterStateTableEvent::Enum value)
         CASE(RST_PRIMARY)
         CASE(CSL_CMT_SUCCESS)
         CASE(CSL_CMT_FAIL)
-        CASE(WATCH_DOG)
+        CASE(WATCHDOG)
         CASE(NUM_EVENTS)
     default: return "(* UNKNOWN *)";
     }
@@ -166,6 +168,8 @@ bool ClusterStateTableEvent::fromAscii(ClusterStateTableEvent::Enum* out,
 
     CHECKVALUE(SLCT_LDR)
     CHECKVALUE(SLCT_FOL)
+    CHECKVALUE(REAPPLY_LDR)
+    CHECKVALUE(REAPPLY_FOL)
     CHECKVALUE(FOL_LSN_RQST)
     CHECKVALUE(FOL_LSN_RSPN)
     CHECKVALUE(FAIL_FOL_LSN_RSPN)
@@ -185,7 +189,7 @@ bool ClusterStateTableEvent::fromAscii(ClusterStateTableEvent::Enum* out,
     CHECKVALUE(RST_PRIMARY)
     CHECKVALUE(CSL_CMT_SUCCESS)
     CHECKVALUE(CSL_CMT_FAIL)
-    CHECKVALUE(WATCH_DOG)
+    CHECKVALUE(WATCHDOG)
     CHECKVALUE(NUM_EVENTS)
 
     // Invalid string

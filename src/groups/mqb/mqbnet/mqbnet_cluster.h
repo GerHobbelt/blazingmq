@@ -139,9 +139,6 @@ class ClusterNode {
     /// Reset the channel associated to this node.
     virtual ClusterNode* resetChannel() = 0;
 
-    /// Close the channel associated to this node, if any.
-    virtual void closeChannel() = 0;
-
     /// Enqueue the specified message `blob` of the specified `type`to be
     /// written to the channel associated to this node.  Return 0 on
     /// success, and a non-zero value otherwise.  Note that success does not
@@ -213,15 +210,12 @@ class Cluster {
 
     /// Write the specified `blob` of the specified `type` to all connected
     /// nodes of this cluster (with the exception of the current node).
-    /// Return the maximum number of pending items across all cluster
-    /// channels prior to broadcasting.
-    virtual int writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
-                         bmqp::EventType::Enum               type) = 0;
+    virtual void writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
+                          bmqp::EventType::Enum               type) = 0;
 
     /// Send the specified `blob` to all currently up nodes of this cluster
-    /// (exception of the current node).  Return the maximum number of
-    /// pending items across all cluster channels prior to broadcasting.
-    virtual int broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob) = 0;
+    /// (with the exception of the current node).
+    virtual void broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob) = 0;
 
     /// Close the channels associated to all nodes in this cluster.
     virtual void closeChannels() = 0;

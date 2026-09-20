@@ -4391,7 +4391,7 @@ int FileStore::writeQueueCreationRecord(
 
     StorageMapIter sit = d_storages.find(queueKey);
     if (sit == d_storages.end()) {
-        if (d_isCSLModeEnabled) {
+        if (d_isFSMWorkflow) {
             return rc_QUEUE_CREATION_FAILURE;  // RETURN
         }
         else {
@@ -5150,7 +5150,7 @@ void FileStore::aliasMessage(bsl::shared_ptr<bdlbb::Blob>* appData,
 void FileStore::flushIfNeeded(bool immediateFlush)
 {
     if (immediateFlush ||
-        d_storageEventBuilder.messageCount() >= d_naglePacketCount) {
+        d_storageEventBuilder.messageCount() >= k_NAGLE_PACKET_COUNT) {
         // Should notify weak consistency queues after replicated batch
         flushStorage();
         notifyQueuesOnReplicatedBatch();
@@ -5167,7 +5167,6 @@ FileStore::FileStore(
     BlobSpPool*                                     blobSpPool,
     StateSpPool*                                    statePool,
     bdlmt::FixedThreadPool*                         miscWorkThreadPool,
-    bool                                            isCSLModeEnabled,
     bool                                            isFSMWorkflow,
     bool                                            doesFSMwriteQLIST,
     int                                             replicationFactor,
@@ -5203,11 +5202,9 @@ FileStore::FileStore(
 , d_sequenceNum(0)
 , d_syncPoints(allocator)
 , d_storages(allocator)
-, d_isCSLModeEnabled(isCSLModeEnabled)
 , d_isFSMWorkflow(isFSMWorkflow)
 , d_qListAware(!d_isFSMWorkflow || doesFSMwriteQLIST)
 , d_ignoreCrc32c(false)
-, d_naglePacketCount(k_NAGLE_PACKET_COUNT)
 , d_storageEventBuilder(FileStoreProtocol::k_VERSION,
                         bmqp::EventType::e_STORAGE,
                         d_blobSpPool_p,
@@ -5220,9 +5217,6 @@ FileStore::FileStore(
     BSLS_ASSERT(dispatcher);
     BSLS_ASSERT(d_cluster_p);
     BSLS_ASSERT(1 <= clusterSize());
-    if (d_isFSMWorkflow) {
-        BSLS_ASSERT_SAFE(d_isCSLModeEnabled);
-    }
 
     bmqu::MemOutStream os;
     os << "Partition [" << d_config.partitionId()
@@ -6327,7 +6321,8 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
     rawEvent.loadStorageMessageIterator(&iter);
     BSLS_ASSERT_SAFE(iter.isValid());
 
-    bool hasValidLeaseIdSeqNum = false;
+    FileStore::NodeContext* nodeContext           = 0;
+    bool                    hasValidLeaseIdSeqNum = false;
 
     if (0 < d_primaryLeaseId) {
         // File store encountered valid primaryLeaseId and sequence number in
@@ -6441,6 +6436,14 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
 
         if (bmqp::StorageMessageType::e_DATA == header.messageType()) {
             rc = writeMessageRecord(header, *recHeader, blob, recordPosition);
+
+            if (0 == rc && (header.flags() &
+                            bmqp::StorageHeaderFlags::e_RECEIPT_REQUESTED)) {
+                nodeContext = generateReceipt(nodeContext,
+                                              d_primaryNode_p,
+                                              recHeader->primaryLeaseId(),
+                                              recHeader->sequenceNumber());
+            }
         }
         else if (bmqp::StorageMessageType::e_QLIST == header.messageType()) {
             rc = writeQueueCreationRecord(header,
@@ -6468,6 +6471,8 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
             return 10 * rc + rc_WRITE_FAILURE;  // RETURN
         }
     }
+
+    sendReceipt(d_primaryNode_p, nodeContext);
 
     return rc_SUCCESS;
 }
@@ -6534,6 +6539,13 @@ void FileStore::sendReceipt(mqbnet::ClusterNode* node,
                             NodeContext*         nodeContext)
 {
     if (nodeContext == 0) {
+        return;  // RETURN
+    }
+
+    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(!node)) {
+        BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
+        BALL_LOG_ERROR << partitionDesc()
+                       << "Cannot send Receipt: primary node is null.";
         return;  // RETURN
     }
 
@@ -6952,17 +6964,7 @@ void FileStore::flushStorage()
     BALL_LOG_TRACE << partitionDesc() << "Flushing "
                    << d_storageEventBuilder.messageCount()
                    << " STORAGE messages.";
-    const int maxChannelPendingItems = d_cluster_p->broadcast(
-        d_storageEventBuilder.blob());
-    if (maxChannelPendingItems > 0) {
-        if (d_naglePacketCount < k_NAGLE_PACKET_COUNT) {
-            // back off
-            ++d_naglePacketCount;
-        }
-    }
-    else if (d_naglePacketCount) {
-        --d_naglePacketCount;
-    }
+    d_cluster_p->broadcast(d_storageEventBuilder.blob());
     d_storageEventBuilder.reset();
 }
 
@@ -7327,7 +7329,7 @@ void FileStore::loadSummary(mqbcmd::FileStore* fileStore) const
                                     d_sequenceNum,
                                     d_records.size(),
                                     d_unreceipted.size(),
-                                    d_naglePacketCount,
+                                    k_NAGLE_PACKET_COUNT,
                                     d_fileSets,
                                     d_storages);
 }

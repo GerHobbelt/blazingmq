@@ -137,11 +137,6 @@ ClusterNode* ClusterNodeImp::resetChannel()
     return this;
 }
 
-void ClusterNodeImp::closeChannel()
-{
-    d_channel.closeChannel();
-}
-
 bmqt::GenericResult::Enum
 ClusterNodeImp::write(const bsl::shared_ptr<bdlbb::Blob>& blob,
                       bmqp::EventType::Enum               type)
@@ -232,28 +227,14 @@ Cluster* ClusterImp::unregisterObserver(ClusterObserver* observer)
     return this;
 }
 
-int ClusterImp::writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
-                         bmqp::EventType::Enum               type)
+void ClusterImp::writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
+                          bmqp::EventType::Enum               type)
 {
-    unsigned int maxPushChannelPendingItems = 0;
-    unsigned int maxChannelPendingItems     = 0;
     for (bsl::list<ClusterNodeImp>::iterator it = d_nodes.begin();
          it != d_nodes.end();
          ++it) {
         // Write to all peers (except self)
         if (it->nodeId() != selfNodeId()) {
-            unsigned int numItems = it->channel().numItems();
-            if (numItems > maxPushChannelPendingItems) {
-                // Ignore replicas to which we do not send PUSH data
-                // Note that PUSH data get written after Storage
-                if (it->channel().numItems(bmqp::EventType::e_PUSH)) {
-                    maxPushChannelPendingItems = numItems;
-                }
-                else if (numItems > maxChannelPendingItems) {
-                    maxChannelPendingItems = numItems;
-                }
-            }
-
             bmqt::GenericResult::Enum rc = it->write(blob, type);
 
             if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(
@@ -271,25 +252,26 @@ int ClusterImp::writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
             }
         }
     }
-
-    if (0 == maxPushChannelPendingItems) {
-        maxPushChannelPendingItems = maxChannelPendingItems;
-    }
-
-    return maxPushChannelPendingItems;
 }
 
-int ClusterImp::broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob)
+void ClusterImp::broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob)
 {
-    return writeAll(blob, bmqp::EventType::e_STORAGE);
+    writeAll(blob, bmqp::EventType::e_STORAGE);
 }
 
 void ClusterImp::closeChannels()
 {
+    // first, start draining all channels
     for (bsl::list<ClusterNodeImp>::iterator it = d_nodes.begin();
          it != d_nodes.end();
          ++it) {
-        it->closeChannel();
+        it->channel().requestToStop();
+    }
+    // then, join all channels threads
+    for (bsl::list<ClusterNodeImp>::iterator it = d_nodes.begin();
+         it != d_nodes.end();
+         ++it) {
+        it->channel().stop();
     }
 }
 

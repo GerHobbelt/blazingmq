@@ -28,14 +28,10 @@ import pytest
 import blazingmq.dev.it.testconstants as tc
 from blazingmq.dev.it.fixtures import (
     Cluster,
-    Mode,
-    cluster_fixture,
-    multi_node_cluster_config,
-    single_node_cluster_config,
     test_logger,
     order,
     tweak,
-)  # pylint: disable=unused-import
+)
 from blazingmq.dev.it.process.broker import Broker
 from blazingmq.dev.it.process.client import Client
 from blazingmq.dev.it.util import wait_until
@@ -118,7 +114,7 @@ def configure_cluster(cluster: Cluster, is_fsm: bool):
             cluster_attr.is_cslmode_enabled = is_fsm
             cluster_attr.is_fsmworkflow = is_fsm
             cluster_attr.does_fsmwrite_qlist = True
-    cluster.deploy_domains()
+    cluster.deploy_clusters()
 
 
 def restart_as_fsm_mode(

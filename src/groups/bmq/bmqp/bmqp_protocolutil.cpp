@@ -23,6 +23,7 @@
 #include <bmqu_blobiterator.h>
 #include <bmqu_blobobjectproxy.h>
 #include <bmqu_memoutstream.h>
+#include <bmqu_singletonallocator.h>
 
 // BDE
 #include <bdlb_stringrefutil.h>
@@ -32,7 +33,6 @@
 #include <bsl_cstring.h>
 #include <bsl_memory.h>
 #include <bsl_utility.h>
-#include <bslma_default.h>
 #include <bslmt_once.h>
 #include <bsls_objectbuffer.h>
 
@@ -60,12 +60,12 @@ const char k_PADDING_DATA[9][8] = {
 const bdlbb::BlobBuffer& getPaddingBlobBuffer(int numPaddingBytes)
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(1 <= numPaddingBytes && numPaddingBytes <= 8);
+    BSLS_ASSERT(1 <= numPaddingBytes && numPaddingBytes <= 8);
 
     static bsls::ObjectBuffer<bdlbb::BlobBuffer> buffers[9];
     BSLMT_ONCE_DO
     {
-        bslma::Allocator* alloc = bslma::Default::globalAllocator();
+        bslma::Allocator* alloc = bmqu::SingletonAllocator::allocator();
         for (int i = 0; i < 9; ++i) {
             bsl::shared_ptr<char> data;
             data.reset(const_cast<char*>(k_PADDING_DATA[i]),
@@ -89,22 +89,20 @@ const char ProtocolUtil::k_DEFAULT_APP_ID[] = "__default";
 
 void ProtocolUtil::initialize(bslma::Allocator*)
 {
-    // No-op.  Padding blob buffers are now lazily initialized via
-    // 'getPaddingBlobBuffer'.  This method is retained for API compatibility.
+    // NOTHING - deprecate and remove
 }
 
 void ProtocolUtil::shutdown()
 {
-    // No-op.  Padding blob buffers are now lazily initialized and never
-    // destroyed.  This method is retained for API compatibility.
+    // NOTHING - deprecate and remove
 }
 
 void ProtocolUtil::appendPaddingRaw(bdlbb::Blob* destination,
                                     int          numPaddingBytes)
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(1 <= numPaddingBytes && numPaddingBytes <= 8);
-    BSLS_ASSERT_SAFE(destination->numDataBuffers() >= 1);
+    BSLS_ASSERT(1 <= numPaddingBytes && numPaddingBytes <= 8);
+    BSLS_ASSERT(destination->numDataBuffers() >= 1);
     // It doesn't make sense to add padding to an empty blob, and assuming at
     // least one buffer simplifies the logic below.
 

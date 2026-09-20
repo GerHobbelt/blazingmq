@@ -194,7 +194,6 @@ struct TestHelper {
                 mqbmock::Cluster(bmqtst::TestHelperUtil::allocator(),
                                  true,   // isClusterMember
                                  false,  // isLeader
-                                 true,   // isCSLMode
                                  true,   // isFSMWorkflow
                                  false,  // doesFSMwriteQLIST
                                  clusterNodeDefs,
@@ -222,19 +221,6 @@ struct TestHelper {
         bmqu::MemOutStream errorDescription;
         int                rc = d_cluster_mp->start(errorDescription);
         BSLS_ASSERT_OPT(rc == 0);
-    }
-
-    void setPartitionPrimary(mqbc::StorageManager* storageManager,
-                             int                   partitionId,
-                             unsigned int          leaseId,
-                             mqbnet::ClusterNode*  node)
-    {
-        d_cluster_mp->_state()->setPartitionPrimary(
-            partitionId,
-            leaseId,
-            d_cluster_mp->_clusterData()->membership().getClusterNodeSession(
-                node));
-        storageManager->setPrimaryForPartition(partitionId, node, leaseId);
     }
 
     void clearChannels()
@@ -924,7 +910,6 @@ struct TestHelper {
             &d_cluster_mp->_clusterData()->blobSpPool(),
             &d_cluster_mp->_clusterData()->stateSpPool(),
             &threadPool,
-            d_cluster_mp->isCSLModeEnabled(),
             d_cluster_mp->isFSMWorkflow(),
             d_cluster_mp->doesFSMwriteQLIST(),
             1,  // replicationFactor
@@ -968,10 +953,12 @@ struct TestHelper {
         BSLS_ASSERT_OPT(rc == 0);
 
         for (size_t pid = 0; pid < numPartitions(); ++pid) {
-            setPartitionPrimary(storageManager,
-                                pid,
-                                1,  // primaryLeaseId
-                                primaryNode);
+            d_cluster_mp->_state()->setPartitionPrimary(
+                pid,
+                1,  // primaryLeaseId
+                d_cluster_mp->_clusterData()
+                    ->membership()
+                    .getClusterNodeSession(primaryNode));
         }
         storageManager->initializeQueueKeyInfoMap(*d_cluster_mp->_state());
         for (size_t pid = 0; pid < numPartitions(); ++pid) {
@@ -1966,10 +1953,12 @@ static void test10_replicaWaitingDetectSelfPrimary()
     BSLS_ASSERT_OPT(nodeToSeqNumCtxMap.size() == 1);
 
     // Apply Detect Self Primary event to Self Node.
-    helper.setPartitionPrimary(&storageManager,
-                               k_PARTITION_ID,
-                               2,  // primaryLeaseId
-                               selfNode);
+    helper.d_cluster_mp->_state()->setPartitionPrimary(
+        k_PARTITION_ID,
+        2,  // primaryLeaseId
+        helper.d_cluster_mp->_clusterData()
+            ->membership()
+            .getClusterNodeSession(selfNode));
     storageManager.detectSelfPrimaryInPFSM(k_PARTITION_ID,
                                            selfNode,
                                            2);  // primaryLeaseId
@@ -2904,14 +2893,22 @@ static void test18_primaryHealingWatchdogRetry()
     BMQTST_ASSERT_EQ(storageManager.watchdogGeneration(k_PARTITION_ID), 0);
     BMQTST_ASSERT_EQ(storageManager.isWatchdogActive(k_PARTITION_ID), true);
 
+    ReqIdToNodeIdMap reqIdToNodeIdMap;
     for (size_t pid = 0; pid < helper.numPartitions(); ++pid) {
-        helper.verifyPrimarySendsReplicaStateRqst(selfNodeId);
+        helper.verifyPrimarySendsReplicaStateRqst(selfNodeId,
+                                                  &reqIdToNodeIdMap);
     }
     helper.clearChannels();
 
     // Transition to PRIMARY_HEALING_STG2
     BSLS_ASSERT_OPT(storageManager.nodeToSeqNumCtxMap(k_PARTITION_ID).size() ==
                     1);
+
+    const int k_PRIMARY_LEASE_ID =
+        storageManager.fileStore(k_PARTITION_ID).primaryLeaseId();
+    const int k_PRIMARY_SEQ_NUM =
+        storageManager.fileStore(k_PARTITION_ID).sequenceNumber();
+
     static const int             k_REQUEST_ID = 1;
     bmqp_ctrlmsg::ControlMessage message;
     message.rId() = k_REQUEST_ID;
@@ -2925,8 +2922,8 @@ static void test18_primaryHealingWatchdogRetry()
             .makeReplicaStateResponse();
 
     bmqp_ctrlmsg::PartitionSequenceNumber seqNum;
-    seqNum.sequenceNumber() = 1U;
-    seqNum.primaryLeaseId() = 1U;
+    seqNum.sequenceNumber() = k_PRIMARY_SEQ_NUM;
+    seqNum.primaryLeaseId() = k_PRIMARY_LEASE_ID;
 
     replicaStateResponse.partitionId()          = k_PARTITION_ID;
     replicaStateResponse.latestSequenceNumber() = seqNum;
@@ -2943,6 +2940,14 @@ static void test18_primaryHealingWatchdogRetry()
                      4U);
     BMQTST_ASSERT_EQ(storageManager.partitionHealthState(k_PARTITION_ID),
                      mqbc::PartitionFSM::State::e_PRIMARY_HEALING_STG2);
+
+    NodeIdToSeqNumMap destinationReplicas;
+    destinationReplicas.insert(bsl::make_pair(reqIdToNodeIdMap.at(1), seqNum));
+    destinationReplicas.insert(bsl::make_pair(reqIdToNodeIdMap.at(2), seqNum));
+    destinationReplicas.insert(bsl::make_pair(reqIdToNodeIdMap.at(3), seqNum));
+    helper.verifyPrimarySendsReplicaDataRqstPush(k_PARTITION_ID,
+                                                 destinationReplicas,
+                                                 seqNum);
     helper.clearChannels();
 
     // Fire the watchdog
@@ -3084,14 +3089,14 @@ static void test20_watchdogStopResetsState()
 // WATCHDOG STOP RESETS STATE
 //
 // Concerns:
-//   do_stopWatchDog (via stopPFSMs / STOP_NODE) increments generation
+//   do_stopWatchdog (via stopPFSMs / STOP_NODE) increments generation
 //   and resets retries.
 //
 // Plan:
 //  1) Create a StorageManager with numRetries = 2
 //  2) Start as primary -> PRIMARY_HEALING_STG1
 //  3) Verify initial watchdog context
-//  4) Call stopPFSMs() -> triggers STOP_NODE -> calls do_stopWatchDog
+//  4) Call stopPFSMs() -> triggers STOP_NODE -> calls do_stopWatchdog
 //  5) Verify generation incremented, retries reset, active = false
 //
 // Testing:
@@ -3140,7 +3145,7 @@ static void test20_watchdogStopResetsState()
 
     helper.clearChannels();
 
-    // Stop PFSMs -> triggers STOP_NODE -> calls do_stopWatchDog
+    // Stop PFSMs -> triggers STOP_NODE -> calls do_stopWatchdog
     storageManager.stopPFSMs();
 
     // Verify watchdog state was reset
@@ -3283,8 +3288,6 @@ int main(int argc, char* argv[])
 {
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
 
-    bmqp::ProtocolUtil::initialize(bmqtst::TestHelperUtil::allocator());
-
     switch (_testCase) {
     case 0:
         // TODO: overview the removed tests or remove this comment
@@ -3326,8 +3329,6 @@ int main(int argc, char* argv[])
         bmqtst::TestHelperUtil::testStatus() = -1;
     } break;
     }
-
-    bmqp::ProtocolUtil::shutdown();
 
     TEST_EPILOG(bmqtst::TestHelper::e_CHECK_GBL_ALLOC);
     // Can't ensure no default memory is allocated because

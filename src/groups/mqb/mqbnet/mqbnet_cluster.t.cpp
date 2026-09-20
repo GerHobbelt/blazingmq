@@ -74,8 +74,6 @@ struct ClusterNodeTestImp : bsls::ProtocolTestImp<mqbnet::ClusterNode> {
         return markDone();
     }
 
-    void closeChannel() BSLS_KEYWORD_OVERRIDE { markDone(); }
-
     bmqt::GenericResult::Enum
     write(const bsl::shared_ptr<bdlbb::Blob>& blob,
           bmqp::EventType::Enum type = bmqp::EventType::e_CONTROL)
@@ -130,17 +128,17 @@ struct ClusterTestImp : bsls::ProtocolTestImp<mqbnet::Cluster> {
         return markDone();
     }
 
-    int writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
-                 bmqp::EventType::Enum type = bmqp::EventType::e_CONTROL)
+    void writeAll(const bsl::shared_ptr<bdlbb::Blob>& blob,
+                  bmqp::EventType::Enum type = bmqp::EventType::e_CONTROL)
         BSLS_KEYWORD_OVERRIDE
     {
-        return markDone();
+        markDone();
     }
 
-    int
+    void
     broadcast(const bsl::shared_ptr<bdlbb::Blob>& blob) BSLS_KEYWORD_OVERRIDE
     {
-        return markDone();
+        markDone();
     }
 
     void closeChannels() BSLS_KEYWORD_OVERRIDE { markDone(); }
@@ -314,7 +312,6 @@ static void test2_ClusterNode()
                                             identity,
                                             bmqio::Channel::ReadCallback()));
         BSLS_PROTOCOLTEST_ASSERT(testObj, enableRead());
-        BSLS_PROTOCOLTEST_ASSERT(testObj, closeChannel());
         BSLS_PROTOCOLTEST_ASSERT(testObj, resetChannel());
         BSLS_PROTOCOLTEST_ASSERT(testObj,
                                  write(dummyBlob_sp,

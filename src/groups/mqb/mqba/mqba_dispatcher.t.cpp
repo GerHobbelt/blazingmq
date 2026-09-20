@@ -332,11 +332,9 @@ static void test3_executorsSupport()
 //   - Check that the 'executor' function returns
 //     a valid executor object, given a valid client registered on the
 //     dispatcher.
-//   - Check the correct behavior of 'post' and 'dispatch' functions on
-//     returned executors, specifically that 'post' does not block the
-//     calling thread pending completion of the submitted functor, and
-//     'dispatch' does invoke the submitted functor in-place, if called
-//     from within the processor's thread.
+//   - Check the correct behavior of 'dispatch' functions on returned
+//     executors, specifically that 'dispatch' does invoke the submitted
+//     functor in-place, if called from within the processor's thread.
 //
 // Testing:
 //   Executors support
@@ -419,24 +417,19 @@ static void test3_executorsSupport()
         bslmt::ThreadUtil::Id threadId1 = bslmt::ThreadUtil::selfId();
         bslmt::ThreadUtil::Id threadId2 = bslmt::ThreadUtil::selfId();
 
-        // submit two functors to be executed on the same processor using the
-        // executor's 'post' function, and wait for the completion of submitted
-        // functors
+        // submit two functors to be executed on the same processor, and wait
+        // for the completion of submitted functors
         bmqex::ExecutionUtil::execute(
-            bmqex::ExecutionPolicyUtil::twoWay()
-                .neverBlocking()
+            bmqex::ExecutionPolicyUtil::alwaysBlocking()
                 .useExecutor(executor1)
                 .useAllocator(bmqtst::TestHelperUtil::allocator()),
-            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId1))
-            .wait();
+            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId1));
 
         bmqex::ExecutionUtil::execute(
-            bmqex::ExecutionPolicyUtil::twoWay()
-                .neverBlocking()
+            bmqex::ExecutionPolicyUtil::alwaysBlocking()
                 .useExecutor(executor1)
                 .useAllocator(bmqtst::TestHelperUtil::allocator()),
-            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId2))
-            .wait();
+            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId2));
 
         // both functors were invoked in the same thread that is not this
         // thread
@@ -460,20 +453,16 @@ static void test3_executorsSupport()
         // executor's 'dispatch' function, and wait for the completion of
         // submitted functors
         bmqex::ExecutionUtil::execute(
-            bmqex::ExecutionPolicyUtil::twoWay()
-                .possiblyBlocking()
+            bmqex::ExecutionPolicyUtil::alwaysBlocking()
                 .useExecutor(executor2)
                 .useAllocator(bmqtst::TestHelperUtil::allocator()),
-            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId1))
-            .wait();
+            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId1));
 
         bmqex::ExecutionUtil::execute(
-            bmqex::ExecutionPolicyUtil::twoWay()
-                .possiblyBlocking()
+            bmqex::ExecutionPolicyUtil::alwaysBlocking()
                 .useExecutor(executor2)
                 .useAllocator(bmqtst::TestHelperUtil::allocator()),
-            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId2))
-            .wait();
+            bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId2));
 
         // both functors were invoked in the same thread that is not this
         // thread
@@ -488,13 +477,11 @@ static void test3_executorsSupport()
         // via the executor's 'dispatch' function and block the calling thread
         // until the nested functor completes
         bmqex::ExecutionUtil::execute(
-            bmqex::ExecutionPolicyUtil::oneWay()
-                .alwaysBlocking()
+            bmqex::ExecutionPolicyUtil::alwaysBlocking()
                 .useExecutor(executor1)
                 .useAllocator(bmqtst::TestHelperUtil::allocator()),
             bmqex::BindUtil::bindExecute(
-                bmqex::ExecutionPolicyUtil::oneWay()
-                    .alwaysBlocking()
+                bmqex::ExecutionPolicyUtil::alwaysBlocking()
                     .useExecutor(executor3)
                     .useAllocator(bmqtst::TestHelperUtil::allocator()),
                 bdlf::BindUtil::bind(LoadSelfThreadId(), &threadId1)));

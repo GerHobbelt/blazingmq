@@ -478,12 +478,6 @@ class StorageManager BSLS_KEYWORD_FINAL
 
     /// THREAD: This method is invoked in the associated Queue dispatcher
     ///         thread for the specified `partitionId`.
-    void setPrimaryForPartitionDispatched(int                  partitionId,
-                                          mqbnet::ClusterNode* primaryNode,
-                                          unsigned int         primaryLeaseId);
-
-    /// THREAD: This method is invoked in the associated Queue dispatcher
-    ///         thread for the specified `partitionId`.
     void clearPrimaryForPartitionDispatched(int                  partitionId,
                                             mqbnet::ClusterNode* primary);
 
@@ -564,9 +558,9 @@ class StorageManager BSLS_KEYWORD_FINAL
     void forceFlushFileStores();
 
     //   (virtual: mqbc::PartitionStateTableActions)
-    void do_startWatchDog(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
+    void do_startWatchdog(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
 
-    void do_stopWatchDog(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
+    void do_stopWatchdog(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
 
     void
     do_openRecoveryFileSet(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;

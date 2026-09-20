@@ -16,11 +16,9 @@
 import contextlib
 
 import blazingmq.dev.it.testconstants as tc
-from blazingmq.dev.it.fixtures import (  # pylint: disable=unused-import
+from blazingmq.dev.it.fixtures import (
     Cluster,
-    single_node,
     order,
-    multi_node,
     tweak,
 )
 from blazingmq.dev.it.util import wait_until
@@ -64,7 +62,7 @@ class TestStrongConsistency:
     strong consistency queue should not.
     """
 
-    def setup_cluster(self, cluster):
+    def setup_cluster(self, cluster, domain_urls: tc.DomainUrls = None):  # pylint: disable=unused-argument
         proxies = cluster.proxy_cycle()
         # pick proxy in datacenter opposite to the primary's
         next(proxies)

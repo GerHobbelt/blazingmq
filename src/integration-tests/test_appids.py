@@ -17,12 +17,10 @@ import time
 from typing import List
 
 import blazingmq.dev.it.testconstants as tc
-from blazingmq.dev.it.fixtures import (  # pylint: disable=unused-import
+from blazingmq.dev.it.fixtures import (
     Cluster,
-    cluster,
     test_logger,
     order,
-    multi_node,
     tweak,
 )
 from blazingmq.dev.it.process.client import Client
@@ -621,7 +619,7 @@ def test_open_authorize_restart_from_non_FSM_to_FSM(
         if len(my_clusters) > 0:
             my_clusters[0].cluster_attributes.is_cslmode_enabled = True
             my_clusters[0].cluster_attributes.is_fsmworkflow = True
-    cluster.deploy_domains()
+    cluster.deploy_clusters()
 
     cluster.start_nodes(wait_leader=True, wait_ready=True)
     # For a standard cluster, states have already been restored as part of

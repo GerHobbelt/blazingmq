@@ -206,7 +206,7 @@ void StorageManager::onWatchdogDispatched(int partitionId, int generation)
     // Decrement retry counter
     const int retriesRemaining = ctx.d_retriesRemaining--;
 
-    // Mark that watchdog has fired so that `do_startWatchDog` will schedule
+    // Mark that watchdog has fired so that `do_startWatchdog` will schedule
     // a fresh timer on the next invocation.
     ctx.d_active = false;
 
@@ -227,7 +227,7 @@ void StorageManager::onWatchdogDispatched(int partitionId, int generation)
                                   1);
         eventDataVec.back().setWatchdogGeneration(generation);
 
-        enqueuePartitionFSMEvent(PartitionFSM::Event::e_WATCH_DOG,
+        enqueuePartitionFSMEvent(PartitionFSM::Event::e_WATCHDOG,
                                  eventDataVec);
     }
     else {
@@ -381,8 +381,8 @@ void StorageManager::enqueuePartitionFSMEventDispatched(
 
     const int partitionId = eventDataVec[0].partitionId();
 
-    // For WATCH_DOG events, check generation count to ignore stale events
-    if (event == PartitionFSM::Event::e_WATCH_DOG) {
+    // For WATCHDOG events, check generation count to ignore stale events
+    if (event == PartitionFSM::Event::e_WATCHDOG) {
         const bsl::optional<int> generation =
             eventDataVec[0].watchdogGeneration();
         if (generation.has_value() &&
@@ -390,7 +390,7 @@ void StorageManager::enqueuePartitionFSMEventDispatched(
                 d_watchdogContexts[partitionId].d_generation) {
             BALL_LOG_WARN << d_clusterData_p->identity().description()
                           << " Partition [" << partitionId
-                          << "]: Ignoring stale WATCH_DOG event with "
+                          << "]: Ignoring stale WATCHDOG event with "
                           << "generation " << generation.value()
                           << ", current generation is "
                           << d_watchdogContexts[partitionId].d_generation;
@@ -445,6 +445,31 @@ void StorageManager::enqueuePartitionFSMEventDispatched(
                         controlMsg,
                         evt.source());
                 }
+                return;
+            }
+
+            // Drop redundant CSL-originated DETECT events where
+            // primary + leaseId is identical to current state.  REAPPLY
+            // events must not be dropped here -- they carry the same
+            // primary + leaseId intentionally (retry after watchdog
+            // timeout or error recovery).
+            const bool isIdentical = evt.primaryLeaseId() ==
+                                         pinfo.primaryLeaseId() &&
+                                     evt.primary() && pinfo.primary() &&
+                                     evt.primary()->nodeId() ==
+                                         pinfo.primary()->nodeId();
+            const bool isDetectEvent =
+                (event == PartitionFSM::Event::e_DETECT_SELF_PRIMARY ||
+                 event == PartitionFSM::Event::e_DETECT_SELF_REPLICA);
+
+            if (isIdentical && isDetectEvent) {
+                BALL_LOG_INFO << d_clusterData_p->identity().description()
+                              << " Partition [" << partitionId
+                              << "]: dropping redundant DETECT event with"
+                              << " identical primary ["
+                              << evt.primary()->nodeDescription()
+                              << "] and leaseId [" << evt.primaryLeaseId()
+                              << "]";
                 return;
             }
         }
@@ -512,32 +537,6 @@ void StorageManager::setPrimaryStatusForPartitionDispatched(
             d_recoveryStatusCb(0);
         }
     }
-}
-
-void StorageManager::setPrimaryForPartitionDispatched(
-    int                  partitionId,
-    mqbnet::ClusterNode* primaryNode,
-    unsigned int         primaryLeaseId)
-{
-    // executed by *QUEUE_DISPATCHER* thread associated with 'partitionId'
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
-    BSLS_ASSERT_SAFE(d_fileStores[partitionId]->inDispatcherThread());
-    BSLS_ASSERT_SAFE(primaryNode);
-
-    PartitionInfo& pinfo = d_partitionInfoVec[partitionId];
-    if (pinfo.primary() &&
-        (pinfo.primary()->nodeId() == primaryNode->nodeId())) {
-        // Primary node did not change
-        pinfo.setPrimaryLeaseId(primaryLeaseId);
-        return;  // RETURN
-    }
-
-    pinfo.setPrimary(primaryNode);
-    pinfo.setPrimaryLeaseId(primaryLeaseId);
-    pinfo.setPrimaryStatus(bmqp_ctrlmsg::PrimaryStatus::E_PASSIVE);
 }
 
 void StorageManager::clearPrimaryForPartitionDispatched(
@@ -1217,7 +1216,7 @@ void StorageManager::forceFlushFileStores()
     StorageUtil::forceFlushFileStores(&d_fileStores);
 }
 
-void StorageManager::do_startWatchDog(const EventWithData& event)
+void StorageManager::do_startWatchdog(const EventWithData& event)
 {
     // executed by the *QUEUE DISPATCHER* thread associated with the
     // paritionId contained in 'event'
@@ -1230,9 +1229,9 @@ void StorageManager::do_startWatchDog(const EventWithData& event)
 
     // Only start a new timer if no timer is currently active.  This
     // prevents resetting the timer during error retries (e.g.,
-    // ERROR_RECEIVING_DATA_CHUNKS transitions that reapply
-    // DETECT_SELF_PRIMARY without stopping the watchdog).  After a
-    // watchdog fires, `onWatchDogDispatched` sets `d_active` to false,
+    // ERROR_RECEIVING_DATA_CHUNKS transitions that enqueue
+    // REAPPLY_SELF_PRIMARY without stopping the watchdog).  After a
+    // watchdog fires, `onWatchdogDispatched` sets `d_active` to false,
     // so a subsequent call here will start a fresh timer for the retry.
     if (!ctx.d_active) {
         ctx.d_eventHandle.release();
@@ -1250,7 +1249,7 @@ void StorageManager::do_startWatchDog(const EventWithData& event)
     }
 }
 
-void StorageManager::do_stopWatchDog(const EventWithData& event)
+void StorageManager::do_stopWatchdog(const EventWithData& event)
 {
     // executed by the *QUEUE DISPATCHER* thread associated with the
     // paritionId contained in 'event'
@@ -1272,7 +1271,7 @@ void StorageManager::do_stopWatchDog(const EventWithData& event)
     if (rc != 0) {
         BALL_LOG_ERROR << d_clusterData_p->identity().description()
                        << " Partition [" << partitionId
-                       << "]: " << "Failed to cancel WatchDog, rc: " << rc;
+                       << "]: " << "Failed to cancel Watchdog, rc: " << rc;
     }
 }
 
@@ -3516,8 +3515,7 @@ void StorageManager::do_reapplyDetectSelfPrimary(const EventWithData& event)
 
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
-    BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->state() ==
-                     PartitionFSM::State::e_UNKNOWN);
+    BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfPrimary());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "
@@ -3531,7 +3529,7 @@ void StorageManager::do_reapplyDetectSelfPrimary(const EventWithData& event)
         1,
         d_partitionInfoVec[partitionId].primary(),
         d_partitionInfoVec[partitionId].primaryLeaseId());
-    enqueuePartitionFSMEvent(PartitionFSM::Event::e_DETECT_SELF_PRIMARY,
+    enqueuePartitionFSMEvent(PartitionFSM::Event::e_REAPPLY_SELF_PRIMARY,
                              eventDataVecOut);
 }
 
@@ -3546,10 +3544,7 @@ void StorageManager::do_reapplyDetectSelfReplica(const EventWithData& event)
 
     BSLS_ASSERT_SAFE(0 <= partitionId &&
                      partitionId < static_cast<int>(d_fileStores.size()));
-    BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->state() ==
-                         PartitionFSM::State::e_UNKNOWN ||
-                     d_partitionFSMVec[partitionId]->state() ==
-                         PartitionFSM::State::e_REPLICA_HEALING);
+    BSLS_ASSERT_SAFE(d_partitionFSMVec[partitionId]->isSelfReplica());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "
@@ -3563,7 +3558,7 @@ void StorageManager::do_reapplyDetectSelfReplica(const EventWithData& event)
         1,
         d_partitionInfoVec[partitionId].primary(),
         d_partitionInfoVec[partitionId].primaryLeaseId());
-    enqueuePartitionFSMEvent(PartitionFSM::Event::e_DETECT_SELF_REPLICA,
+    enqueuePartitionFSMEvent(PartitionFSM::Event::e_REAPPLY_SELF_REPLICA,
                              eventDataVecOut);
 }
 
@@ -3662,8 +3657,7 @@ StorageManager::StorageManager(
     BSLS_ASSERT_SAFE(d_cluster_p);
     BSLS_ASSERT_SAFE(d_recoveryStatusCb);
     BSLS_ASSERT_SAFE(d_partitionPrimaryStatusCb);
-    BSLS_ASSERT_SAFE(d_clusterConfig.clusterAttributes().isCSLModeEnabled() &&
-                     d_clusterConfig.clusterAttributes().isFSMWorkflow());
+    BSLS_ASSERT_SAFE(d_clusterConfig.clusterAttributes().isFSMWorkflow());
 
     const mqbcfg::PartitionConfig& partitionCfg =
         d_clusterConfig.partitionConfig();
@@ -4163,27 +4157,15 @@ void StorageManager::resetQueue(const bmqt::Uri& uri,
     fs->dispatchEvent(bslmf::MovableRefUtil::move(event_sp));
 }
 
-void StorageManager::setPrimaryForPartition(int                  partitionId,
-                                            mqbnet::ClusterNode* primaryNode,
-                                            unsigned int primaryLeaseId)
+void StorageManager::setPrimaryForPartition(int,
+                                            mqbnet::ClusterNode*,
+                                            unsigned int)
 {
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
-    BSLS_ASSERT_SAFE(primaryNode);
-
-    mqbs::FileStore* fs = d_fileStores[partitionId].get();
-    BSLS_ASSERT_SAFE(fs);
-
-    fs->execute(
-        bdlf::BindUtil::bind(&StorageManager::setPrimaryForPartitionDispatched,
-                             this,
-                             partitionId,
-                             primaryNode,
-                             primaryLeaseId));
+    // In FSM mode, d_partitionInfoVec is managed exclusively by the
+    // Partition FSM's 'do_setPrimary' action.  This method must not be
+    // called.
+    BSLS_ASSERT_SAFE(false &&
+                     "This method can only be invoked in non-CSL mode");
 }
 
 void StorageManager::clearPrimaryForPartition(int                  partitionId,
