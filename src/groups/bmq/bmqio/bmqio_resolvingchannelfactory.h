@@ -138,6 +138,8 @@ class ResolvingChannelFactoryConfig {
 class ResolvingChannelFactory_Channel : public DecoratingChannelPartialImp {
   private:
     // PRIVATE DATA
+    bsl::string d_basePeerUri;
+
     bsl::string d_resolvedPeerUri;
 
     bsls::AtomicPointer<const bsl::string> d_peerUri;
@@ -177,7 +179,7 @@ class ResolvingChannelFactory_Channel : public DecoratingChannelPartialImp {
 
     /// Return our base Channel's peerUri until our resolution is done, and
     /// start returning the resolved peerUri after that.
-    const bsl::string& peerUri() const BSLS_KEYWORD_OVERRIDE;
+    bsl::string peerUri() const BSLS_KEYWORD_OVERRIDE;
 };
 
 // =============================
