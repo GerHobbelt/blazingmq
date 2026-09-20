@@ -49,6 +49,7 @@
 #include <bsl_algorithm.h>
 #include <bsl_queue.h>
 #include <bsla_annotations.h>
+#include <bslmt_once.h>
 #include <bsls_performancehint.h>
 
 namespace BloombergLP {
@@ -328,8 +329,15 @@ void StorageManager::onPartitionRecovery(int partitionId)
         d_recoveryStartTimes[partitionId]);
     BALL_LOG_INFO << out.str();
 
-    if (++d_numPartitionsRecoveredFully ==
+    if (++d_numPartitionsRecoveredFully !=
         static_cast<int>(d_fileStores.size())) {
+        BSLS_ASSERT_SAFE(d_numPartitionsRecoveredFully <
+                         static_cast<int>(d_fileStores.size()));
+        return;  // RETURN
+    }
+
+    BSLMT_ONCE_DO
+    {
         // First time healing logic
 
         out.reset();
@@ -341,20 +349,9 @@ void StorageManager::onPartitionRecovery(int partitionId)
         BALL_LOG_INFO << out.str();
 
         if (success) {
-            // All partitions have opened successfully.  Schedule a recurring
-            // event in StorageMgr, which will in turn enqueue an event in each
-            // partition's dispatcher thread for GC'ing expired messages as
-            // well as cleaning history.
-
-            d_clusterData_p->scheduler().scheduleRecurringEvent(
-                &d_gcMessagesEventHandle,
-                bsls::TimeInterval(k_GC_MESSAGES_INTERVAL_SECONDS),
-                bdlf::BindUtil::bind(&StorageManager::forceFlushFileStores,
-                                     this));
-
-            // Even though Cluster FSM and all Partition FSMs are now healed,
-            // we must check that all partitions have an active primary before
-            // transitioning ourself to E_AVAILABLE.
+            // Even though Cluster FSM and all Partition FSMs are now
+            // healed, we must check that all partitions have an active
+            // primary before transitioning ourself to E_AVAILABLE.
             if (allPartitionsAvailable()) {
                 d_recoveryStatusCb(0);
             }
@@ -805,6 +802,8 @@ void StorageManager::sendReplicaDataRequestPush(
 
         RequestManagerType::RequestSp request =
             d_clusterData_p->requestManager().createRequest();
+        request->setComponentId(
+            bmqp::RequestManagerComponentId::partitionFSM(partitionId));
         bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRqst =
             request->request()
                 .choice()
@@ -877,6 +876,8 @@ void StorageManager::sendReplicaDataRequestDrop(
 
         RequestManagerType::RequestSp request =
             d_clusterData_p->requestManager().createRequest();
+        request->setComponentId(
+            bmqp::RequestManagerComponentId::partitionFSM(partitionId));
         bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRqst =
             request->request()
                 .choice()
@@ -1201,11 +1202,51 @@ void StorageManager::processReplicaDataRequestDrop(
                      bmqp_ctrlmsg::ReplicaDataType::E_DROP);
 
     const int partitionId = replicaDataRequest.partitionId();
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
-    BSLS_ASSERT_SAFE(
-        source->nodeId() ==
-        d_clusterState_p->partitionsInfo().at(partitionId).primaryNodeId());
+    if (partitionId < 0 ||
+        partitionId >= static_cast<int>(d_fileStores.size())) {
+        BALL_LOG_ERROR
+            << d_clusterData_p->identity().description()
+            << " Received ReplicaDataRequestDrop: " << message << " from "
+            << source->nodeDescription()
+            << " with invalid partitionId.  Sending failure response.";
+
+        bmqp_ctrlmsg::ControlMessage controlMsg;
+        controlMsg.rId() = message.rId();
+
+        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
+        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
+        status.code()                = mqbi::ClusterErrorCode::e_NO_PARTITION;
+        status.message()             = "Invalid partitionId";
+
+        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
+                                                              source);
+        return;  // RETURN
+    }
+    if (source->nodeId() !=
+        d_clusterState_p->partitionsInfo().at(partitionId).primaryNodeId()) {
+        const mqbnet::ClusterNode* primaryNode =
+            d_clusterState_p->partitionsInfo().at(partitionId).primaryNode();
+        BALL_LOG_ERROR << d_clusterData_p->identity().description()
+                       << " Partition [" << partitionId << "]: "
+                       << " Received ReplicaDataRequestDrop: " << message
+                       << " from " << source->nodeDescription()
+                       << " but self's perceived primary is "
+                       << (primaryNode ? primaryNode->nodeDescription()
+                                       : " ** NULL **")
+                       << ".  Sending failure response.";
+
+        bmqp_ctrlmsg::ControlMessage controlMsg;
+        controlMsg.rId() = message.rId();
+
+        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
+        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
+        status.code()    = mqbi::ClusterErrorCode::e_SOURCE_NOT_PRIMARY;
+        status.message() = "Source node is not recognized as the primary";
+
+        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
+                                                              source);
+        return;  // RETURN
+    }
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId
@@ -2052,6 +2093,8 @@ void StorageManager::do_replicaStateRequest(const EventWithData& event)
         getSelfFirstSyncPointAfterRolloverPSN(partitionId);
 
     contextSp->setDestinationNodes(replicas);
+    contextSp->setComponentId(
+        bmqp::RequestManagerComponentId::partitionFSM(partitionId));
     contextSp->setResponseCb(
         bdlf::BindUtil::bind(&StorageManager::processReplicaStateResponse,
                              this,
@@ -2288,6 +2331,8 @@ void StorageManager::do_primaryStateRequest(const EventWithData& event)
 
     RequestManagerType::RequestSp request =
         d_clusterData_p->requestManager().createRequest();
+    request->setComponentId(
+        bmqp::RequestManagerComponentId::partitionFSM(partitionId));
 
     bmqp_ctrlmsg::PrimaryStateRequest& primaryStateRequest =
         request->request()
@@ -2491,6 +2536,8 @@ void StorageManager::do_replicaDataRequestPull(const EventWithData& event)
 
     RequestManagerType::RequestSp request =
         d_clusterData_p->requestManager().createRequest();
+    request->setComponentId(
+        bmqp::RequestManagerComponentId::partitionFSM(partitionId));
 
     bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRequest =
         request->request()
@@ -3004,15 +3051,55 @@ void StorageManager::do_cleanupMetadata(const EventWithData& event)
                      d_partitionFSMVec[partitionId]->state() ==
                          PartitionFSM::State::e_STOPPED);
 
+    d_nodeToPSNCtxMapVec[partitionId].clear();
+    d_numReplicaDataResponsesReceivedVec[partitionId] = 0;
+    d_recoveryManager_mp->resetReceiveDataCtx(partitionId);
+}
+
+void StorageManager::do_clearPrimary(const EventWithData& event)
+{
+    // executed by the *QUEUE DISPATCHER* thread associated with the
+    // paritionId contained in 'event'
+
+    const EventData& eventDataVec = event.second;
+    BSLS_ASSERT_SAFE(eventDataVec.size() == 1);
+
+    const PartitionFSMEventData& eventData   = eventDataVec[0];
+    const int                    partitionId = eventData.partitionId();
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(0 <= partitionId &&
+                     partitionId < static_cast<int>(d_fileStores.size()));
+    BSLS_ASSERT_SAFE(d_fileStores[partitionId]->inDispatcherThread());
+
     StorageUtil::clearPrimaryForPartition(
         d_fileStores[partitionId].get(),
         &d_partitionInfoVec[partitionId],
         d_clusterData_p->identity().description(),
         partitionId);
+}
 
-    d_nodeToPSNCtxMapVec[partitionId].clear();
-    d_numReplicaDataResponsesReceivedVec[partitionId] = 0;
-    d_recoveryManager_mp->resetReceiveDataCtx(partitionId);
+void StorageManager::do_cancelRequests(const EventWithData& event)
+{
+    // executed by the *QUEUE DISPATCHER* thread associated with the
+    // paritionId contained in 'event'
+
+    const EventData& eventDataVec = event.second;
+    BSLS_ASSERT_SAFE(eventDataVec.size() == 1);
+
+    const int partitionId = eventDataVec[0].partitionId();
+    BSLS_ASSERT_SAFE(0 <= partitionId &&
+                     partitionId < static_cast<int>(d_fileStores.size()));
+
+    bmqp_ctrlmsg::ControlMessage response;
+    bmqp_ctrlmsg::Status&        failure = response.choice().makeStatus();
+    failure.category() = bmqp_ctrlmsg::StatusCategory::E_CANCELED;
+    failure.code()     = mqbi::ClusterErrorCode::e_UNKNOWN;
+    failure.message()  = "Cancellation by Partition FSM";
+
+    d_clusterData_p->requestManager().cancelComponentRequests(
+        response,
+        bmqp::RequestManagerComponentId::partitionFSM(partitionId));
 }
 
 void StorageManager::do_setExpectedDataChunkRange(const EventWithData& event)
@@ -3831,6 +3918,26 @@ void StorageManager::onTransitionToReplicaHealed(
     onPartitionRecovery(partitionId);
 }
 
+void StorageManager::onTransitionOutOfHealed(
+    int               partitionId,
+    BSLA_MAYBE_UNUSED PartitionStateTableState::Enum oldState)
+{
+    // executed by *QUEUE_DISPATCHER* thread associated with 'partitionId'
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(0 <= partitionId &&
+                     partitionId < static_cast<int>(d_fileStores.size()));
+    BSLS_ASSERT_SAFE(d_fileStores[partitionId]->inDispatcherThread());
+
+    BALL_LOG_INFO << d_clusterData_p->identity().description()
+                  << " Partition [" << partitionId
+                  << "]: Transitioned out of healed state '" << oldState
+                  << "'.";
+
+    --d_numPartitionsRecoveredFully;
+    BSLS_ASSERT_SAFE(d_numPartitionsRecoveredFully >= 0);
+}
+
 // MANIPULATORS
 int StorageManager::start(bsl::ostream& errorDescription)
 {
@@ -3994,6 +4101,14 @@ int StorageManager::start(bsl::ostream& errorDescription)
                              d_clusterData_p->identity().description(),
                              d_clusterConfig.partitionConfig()));
 
+    // Schedule a periodic event which will in turn enqueue an event in each
+    // partition's dispatcher thread for GC'ing expired messages as well as
+    // cleaning history.
+    d_clusterData_p->scheduler().scheduleRecurringEvent(
+        &d_gcMessagesEventHandle,
+        bsls::TimeInterval(k_GC_MESSAGES_INTERVAL_SECONDS),
+        bdlf::BindUtil::bind(&StorageManager::forceFlushFileStores, this));
+
     d_isStarted = true;
     return rc_SUCCESS;
 }
@@ -4043,6 +4158,8 @@ void StorageManager::stop()
                              this,
                              bdlf::PlaceHolders::_1,    // partitionId
                              bdlf::PlaceHolders::_2));  // latch
+
+    d_miscWorkThreadPool.stop();
 }
 
 void StorageManager::initializeQueueKeyInfoMap(
@@ -4162,31 +4279,6 @@ int StorageManager::updateQueuePrimary(const bmqt::Uri& uri,
                                            uri,
                                            addedIdKeyPairs,
                                            removedIdKeyPairs);
-}
-
-void StorageManager::resetQueue(const bmqt::Uri& uri,
-                                int              partitionId,
-                                const bsl::shared_ptr<mqbi::Queue>& queue_sp)
-{
-    // executed by the *CLUSTER DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-    BSLS_ASSERT_SAFE(uri.isValid());
-
-    mqbs::FileStore* fs = d_fileStores[partitionId].get();
-
-    bsl::shared_ptr<mqbevt::DispatcherEvent> event_sp =
-        d_cluster_p->getEvent<mqbevt::DispatcherEvent>();
-    (*event_sp).setCallback(
-        bdlf::BindUtil::bind(&StorageUtil::resetQueueDispatched,
-                             &d_storages[partitionId],
-                             d_storageLockVec[partitionId].get(),
-                             bsl::string(fs->description(), d_allocator_p),
-                             uri,
-                             queue_sp));
-
-    fs->dispatchEvent(bslmf::MovableRefUtil::move(event_sp));
 }
 
 void StorageManager::setPrimaryForPartition(int,

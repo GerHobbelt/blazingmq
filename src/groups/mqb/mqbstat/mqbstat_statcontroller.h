@@ -28,8 +28,10 @@
 
 // MQB
 #include <mqbcmd_messages.h>
+#include <mqbstat_flatjsonprinter.h>
 #include <mqbstat_jsonprinter.h>
 #include <mqbstat_statmonitor.h>
+#include <mqbstat_statsfilelogger.h>
 #include <mqbstat_tableprinter.h>
 
 #include <bmqma_countingallocatorstore.h>
@@ -51,7 +53,7 @@
 #include <bslma_usesbslmaallocator.h>
 #include <bslmf_nestedtraitdeclaration.h>
 #include <bsls_assert.h>
-#include <bsls_cpp11.h>
+#include <bsls_keyword.h>
 #include <bsls_types.h>
 
 namespace BloombergLP {
@@ -71,9 +73,6 @@ class StatResult;
 }
 namespace mqbplug {
 class PluginManager;
-}
-namespace mqbplug {
-class StatPublisher;
 }
 namespace mqbplug {
 class StatConsumer;
@@ -127,9 +126,35 @@ class StatController {
     typedef bsl::shared_ptr<bmqst::StatContext>           StatContextSp;
     typedef bslma::ManagedPtr<mqbstat::StatMonitor>       SystemStatMonitorMp;
     typedef bslma::ManagedPtr<TablePrinter>               TablePrinterMp;
+    typedef bslma::ManagedPtr<StatsFileLogger>            StatsFileLoggerMp;
+    typedef bslma::ManagedPtr<FlatJsonPrinter>            FlatJsonPrinterMp;
     typedef bslma::ManagedPtr<JsonPrinter>                JsonPrinterMp;
-    typedef bslma::ManagedPtr<mqbplug::StatPublisher>     StatPublisherMp;
     typedef bslma::ManagedPtr<mqbplug::StatConsumer>      StatConsumerMp;
+
+    /// Tracks snapshot IDs and the action counter that determines when
+    /// periodic stats output should be produced.
+    class SnapshotTracker {
+        // DATA
+        int d_actionInterval;
+
+        int d_actionCounter;
+        int d_statId;
+
+      public:
+        // CREATORS
+        SnapshotTracker();
+
+        // MANIPULATORS
+        void initialize(int printInterval, int snapshotInterval);
+        void onSnapshot();
+
+        // ACCESSORS
+        bool isEnabled() const;
+        int  actionInterval() const;
+
+        bool willPrintOnNextSnapshot() const;
+        int  statId() const;
+    };
 
     /// Struct containing a statcontext and bool specifying if the
     /// statcontext is managed.
@@ -204,11 +229,25 @@ class StatController {
     /// from a command processor plugin.
     CommandProcessorFn d_commandProcessorFn;
 
-    /// Console and log file stats printer
+    /// Tracks snapshot IDs and print interval countdown.
+    SnapshotTracker d_snapshotTracker;
+
+    /// Stats formatter for console and admin commands
     TablePrinterMp d_tablePrinter_mp;
+
+    /// File logger for periodic table stats output.
+    /// Null if TABLE stats logging is disabled.
+    StatsFileLoggerMp d_tableStatsFileLogger_mp;
+
+    /// File logger for periodic JSON stats output.
+    /// Null if JSON stats logging is disabled.
+    StatsFileLoggerMp d_jsonStatsFileLogger_mp;
 
     /// JsonPrinter used for admin commands processing
     JsonPrinterMp d_jsonPrinter_mp;
+
+    /// FlatJsonPrinter for periodic flat JSON stats file output
+    FlatJsonPrinterMp d_flatJsonPrinter_mp;
 
     /// Registered stat consumers
     bsl::vector<StatConsumerMp> d_statConsumers;
@@ -278,8 +317,9 @@ class StatController {
 
   private:
     // NOT IMPLEMENTED
-    StatController(const StatController& other) BSLS_CPP11_DELETED;
-    StatController& operator=(const StatController& other) BSLS_CPP11_DELETED;
+    StatController(const StatController& other) BSLS_KEYWORD_DELETED;
+    StatController&
+    operator=(const StatController& other) BSLS_KEYWORD_DELETED;
 
   public:
     // TRAITS

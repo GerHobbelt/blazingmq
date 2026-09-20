@@ -532,7 +532,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
                          const MappedFileDescriptor& file,
                          const bsl::string&          fileName,
                          bsls::Types::Uint64         currentSize,
-                         unsigned int                requestedSpace);
+                         bsls::Types::Uint64         requestedSpace);
 
     /// Write a QUEUE_OP record to the journal with the specified
     /// `queueKey`, optional `appKey`, `timestamp`, `opValue` and `subValue`
@@ -547,6 +547,18 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
                            bsls::Types::Uint64     timestamp,
                            unsigned int            startPrimaryLeaseId,
                            bsls::Types::Uint64     startSequenceNum);
+
+    /// Write a QUEUE_OP record to the journal for the specified `queueKey`,
+    /// optional `appKey`, `queueOpFlag`, `timestamp`,
+    /// `startPrimaryLeaseId`, and `startSequenceNum`.  Performs the actual
+    /// writing after all checks have been done by the caller.
+    void writeQueueOpRecordImpl(DataStoreRecordHandle*  handle,
+                                const mqbu::StorageKey& queueKey,
+                                const mqbu::StorageKey& appKey,
+                                QueueOpType::Enum       queueOpFlag,
+                                bsls::Types::Uint64     timestamp,
+                                unsigned int            startPrimaryLeaseId,
+                                bsls::Types::Uint64     startSequenceNum);
 
     /// Rollover over the specified `record` from `oldFileSet` to the
     /// `newFileSet`, and if it is a message record, update the counter of
@@ -580,9 +592,14 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// THREAD: This method executes in the partition dispatcher thread.
     void issueSyncPointDispatched(int partitionId);
 
+    /// Issue a regular sync point if a new record has been published since
+    /// the last one.
+    void issueSyncPointIfNeeded();
+
+    /// Write the specified `syncPoint` of the specified `type` to the
+    /// journal, replicate it to followers, and record it in `d_syncPoints`.
     int issueSyncPointInternal(SyncPointType::Enum            type,
-                               bool                           immediateFlush,
-                               const bmqp_ctrlmsg::SyncPoint* syncPoint = 0);
+                               const bmqp_ctrlmsg::SyncPoint& syncPoint);
 
     int writeMessageRecord(const bmqp::StorageHeader&          header,
                            const mqbs::RecordHeader&           recHeader,
@@ -867,6 +884,10 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     void
     removeRecordRaw(const DataStoreRecordHandle& handle) BSLS_KEYWORD_OVERRIDE;
 
+    /// Attempt to rollover the journal if needed after a purge has cleared
+    /// outstanding records.
+    void onPurgeComplete() BSLS_KEYWORD_OVERRIDE;
+
     /// Process the specified storage event `blob` containing one or more
     /// storage messages.  The behavior is undefined unless each message in
     /// the event belongs to this partition, and has same primary and
@@ -896,7 +917,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// -------------------
 
     /// Request the data store to issue a SyncPt.
-    int issueSyncPoint() BSLS_KEYWORD_OVERRIDE;
+    int issueSyncPoint();
 
     /// Set the specified `primaryNode` with the specified `primaryLeaseId`
     /// as the active primary for this data store partition.  Note that

@@ -696,6 +696,10 @@ class StorageManager BSLS_KEYWORD_FINAL
 
     void do_cleanupMetadata(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
 
+    void do_cancelRequests(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
+
+    void do_clearPrimary(const EventWithData& event) BSLS_KEYWORD_OVERRIDE;
+
     void do_setExpectedDataChunkRange(const EventWithData& event)
         BSLS_KEYWORD_OVERRIDE;
 
@@ -798,6 +802,10 @@ class StorageManager BSLS_KEYWORD_FINAL
         int                                  partitionId,
         mqbc::PartitionStateTableState::Enum oldState) BSLS_KEYWORD_OVERRIDE;
 
+    void onTransitionOutOfHealed(int                            partitionId,
+                                 PartitionStateTableState::Enum oldState)
+        BSLS_KEYWORD_OVERRIDE;
+
     // MANIPULATORS
 
     /// Start this storage manager.  Return 0 on success, or a non-zero rc
@@ -850,15 +858,6 @@ class StorageManager BSLS_KEYWORD_FINAL
                            int              partitionId,
                            const AppInfos&  addedIdKeyPairs,
                            const AppInfos&  removedIdKeyPairs)
-        BSLS_KEYWORD_OVERRIDE;
-
-    /// Reset the queue instance associated with the file-backed storage for
-    /// the specified `uri` mapped to the specified `partitionId` to the
-    /// specified `queue` value.  The specified `queue_sp` keeps the queue
-    /// until the reset is complete.
-    void resetQueue(const bmqt::Uri&                    uri,
-                    int                                 partitionId,
-                    const bsl::shared_ptr<mqbi::Queue>& queue_sp)
         BSLS_KEYWORD_OVERRIDE;
 
     /// Behavior is undefined unless the specified 'partitionId' is in range

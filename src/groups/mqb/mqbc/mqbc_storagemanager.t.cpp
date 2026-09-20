@@ -19,6 +19,7 @@
 #include <bmqp_crc32c.h>
 #include <bmqp_ctrlmsg_messages.h>
 #include <bmqp_event.h>
+#include <bmqp_storageeventbuilder.h>
 #include <bmqp_storagemessageiterator.h>
 #include <bmqt_compressionalgorithmtype.h>
 
@@ -29,6 +30,8 @@
 #include <mqbc_partitionfsmobserver.h>
 #include <mqbc_storageutil.h>
 #include <mqbcfg_messages.h>
+#include <mqbevt_storageevent.h>
+#include <mqbi_cluster.h>
 #include <mqbi_storage.h>
 #include <mqbmock_cluster.h>
 #include <mqbnet_mockcluster.h>
@@ -3279,6 +3282,311 @@ static void test21_watchdogMultipleRetries()
     helper.d_cluster_mp->stop();
 }
 
+static void test22_rstUnknownCancelsInFlightRequests()
+// ------------------------------------------------------------------------
+// RST_UNKNOWN CANCELS IN-FLIGHT REQUESTS
+//
+// Concerns:
+//   When a partition receives RST_UNKNOWN while in a healing state,
+//   in-flight requests for that partition are cancelled so that stale
+//   responses are not processed by a subsequent healing session.
+//
+// Plan:
+//  1) Start as primary -> PRIMARY_HEALING_STG1 (sends ReplicaStateRequests)
+//  2) Collect the request IDs of those in-flight requests
+//  3) Trigger RST_UNKNOWN via detectPrimaryLossInPFSM
+//  4) Verify processResponse returns non-zero for the old request IDs
+//     (proving they were removed from the RequestManager)
+//
+// Testing:
+//   do_cancelRequests via RST_UNKNOWN transition
+// ------------------------------------------------------------------------
+{
+    bmqtst::TestHelper::printTestName(
+        "RST_UNKNOWN CANCELS IN-FLIGHT REQUESTS");
+
+    TestHelper helper;
+
+    mqbc::StorageManager storageManager(
+        helper.d_cluster_mp->_clusterDefinition(),
+        helper.d_cluster_mp.get(),
+        helper.d_cluster_mp->_clusterData(),
+        helper.d_cluster_mp->_state(),
+        helper.d_cluster_mp->_clusterData()->domainFactory(),
+        helper.d_cluster_mp->dispatcher(),
+        k_WATCHDOG_TIMEOUT_DURATION,
+        k_WATCHDOG_NUM_RETRIES,
+        mockOnRecoveryStatus,
+        mockOnPartitionPrimaryStatus,
+        bmqtst::TestHelperUtil::allocator());
+
+    static const int k_PARTITION_ID = 0;
+    const int        selfNodeId     = helper.d_cluster_mp->_clusterData()
+                               ->membership()
+                               .netCluster()
+                               ->selfNodeId();
+    mqbnet::ClusterNode* selfNode = helper.d_cluster_mp->_clusterData()
+                                        ->membership()
+                                        .netCluster()
+                                        ->lookupNode(selfNodeId);
+
+    helper.startStorageManager(&storageManager, selfNode);
+    helper.relaxFileStoreThreadChecks(&storageManager);
+
+    BMQTST_ASSERT_EQ(storageManager.partitionHealthState(k_PARTITION_ID),
+                     mqbc::PartitionFSM::State::e_PRIMARY_HEALING_STG1);
+
+    // Collect request IDs from the ReplicaStateRequests sent to peers
+    bsl::vector<int> requestIds;
+    for (TestChannelMapCIter cit = helper.d_cluster_mp->_channels().cbegin();
+         cit != helper.d_cluster_mp->_channels().cend();
+         ++cit) {
+        if (cit->first->nodeId() != selfNodeId) {
+            bmqio::TestChannel::WriteCall writeCall;
+            BMQTST_ASSERT(cit->second->getWriteCall(&writeCall, 0));
+
+            bmqp_ctrlmsg::ControlMessage message;
+            mqbc::ClusterUtil::extractMessage(
+                &message,
+                writeCall.d_blob,
+                bmqtst::TestHelperUtil::allocator());
+            BMQTST_ASSERT(message.rId().has_value());
+            requestIds.push_back(message.rId().value());
+        }
+    }
+    helper.clearChannels();
+
+    // Trigger RST_UNKNOWN -> calls do_cancelRequests
+    storageManager.detectPrimaryLossInPFSM(k_PARTITION_ID);
+    BMQTST_ASSERT_EQ(storageManager.partitionHealthState(k_PARTITION_ID),
+                     mqbc::PartitionFSM::State::e_UNKNOWN);
+
+    // Verify that the old requests were cancelled: processResponse should
+    // return non-zero for each request ID (meaning the request is no longer
+    // in the RequestManager's map).
+    for (size_t i = 0; i < requestIds.size(); ++i) {
+        bmqp_ctrlmsg::ControlMessage fakeResponse;
+        fakeResponse.rId() = requestIds[i];
+        fakeResponse.choice()
+            .makeClusterMessage()
+            .choice()
+            .makePartitionMessage()
+            .choice()
+            .makeReplicaStateResponse();
+
+        const int rc = helper.d_cluster_mp->requestManager().processResponse(
+            fakeResponse);
+        BMQTST_ASSERT_NE_D("requestId " << requestIds[i], rc, 0);
+    }
+
+    // Cleanup
+    storageManager.stopPFSMs();
+    storageManager.stop();
+    helper.d_cluster_mp->stop();
+}
+
+static void test23_replicaHealingReceivesReplicaDataRqstDropInvalidPid()
+// ------------------------------------------------------------------------
+// REPLICA HEALING RECEIVES REPLICA DATA REQUEST DROP WITH INVALID PID
+//
+// Concerns:
+//   When a replica in e_REPLICA_HEALING receives a ReplicaDataRequestDrop
+//   with an invalid partitionId, it must:
+//     a) Send a failure response.
+//     b) Remain in e_REPLICA_HEALING.
+//     c) Continue to buffer incoming PUT messages.
+//
+// Plan:
+//  1) Transition to REPLICA_WAITING, then to REPLICA_HEALING.
+//  2) Send ReplicaDataRequestDrop with invalid partitionId (-1).
+//  3) Verify failure response sent to source.
+//  4) Verify state remains e_REPLICA_HEALING.
+//  5) Send a storage event (PUT) and verify it is buffered, not processed.
+//
+// Testing:
+//   processReplicaDataRequestDrop invalid partition validation
+// ------------------------------------------------------------------------
+{
+    bmqtst::TestHelper::printTestName(
+        "REPLICA HEALING RECEIVES REPLICA DATA REQUEST DROP "
+        "WITH INVALID PARTITION ID");
+
+    TestHelper helper;
+
+    bmqp_ctrlmsg::PartitionSequenceNumber selfSeqNum;
+    mqbs::DataStoreRecordHandle           handle;
+    helper.initializeRecords(&handle, 1, &selfSeqNum);
+
+    mqbc::StorageManager storageManager(
+        helper.d_cluster_mp->_clusterDefinition(),
+        helper.d_cluster_mp.get(),
+        helper.d_cluster_mp->_clusterData(),
+        helper.d_cluster_mp->_state(),
+        helper.d_cluster_mp->_clusterData()->domainFactory(),
+        helper.d_cluster_mp->dispatcher(),
+        k_WATCHDOG_TIMEOUT_DURATION,
+        k_WATCHDOG_NUM_RETRIES,
+        mockOnRecoveryStatus,
+        mockOnPartitionPrimaryStatus,
+        bmqtst::TestHelperUtil::allocator());
+
+    static const int k_PARTITION_ID = 0;
+
+    BSLS_ASSERT_OPT(storageManager.partitionHealthState(k_PARTITION_ID) ==
+                    mqbc::PartitionFSM::State::e_UNKNOWN);
+
+    const int selfNodeId = helper.d_cluster_mp->_clusterData()
+                               ->membership()
+                               .netCluster()
+                               ->selfNodeId();
+    const int primaryNodeId = selfNodeId + 1;
+
+    mqbnet::ClusterNode* primaryNode = helper.d_cluster_mp->_clusterData()
+                                           ->membership()
+                                           .netCluster()
+                                           ->lookupNode(primaryNodeId);
+
+    // 1. Transition to REPLICA_WAITING, then to REPLICA_HEALING.
+    helper.startStorageManager(&storageManager, primaryNode);
+
+    BSLS_ASSERT_OPT(storageManager.partitionHealthState(k_PARTITION_ID) ==
+                    mqbc::PartitionFSM::State::e_REPLICA_WAITING);
+
+    for (size_t pid = 0; pid < helper.numPartitions(); ++pid) {
+        helper.verifyReplicaSendsPrimaryStateRqst(primaryNodeId);
+    }
+    helper.clearChannels();
+
+    static const int             k_PRIMARY_REQUEST_ID = 1;
+    bmqp_ctrlmsg::ControlMessage pstMessage;
+    pstMessage.rId() = k_PRIMARY_REQUEST_ID;
+    bmqp_ctrlmsg::PrimaryStateResponse& primaryStateResponse =
+        pstMessage.choice()
+            .makeClusterMessage()
+            .choice()
+            .makePartitionMessage()
+            .choice()
+            .makePrimaryStateResponse();
+
+    bmqp_ctrlmsg::PartitionSequenceNumber PSN;
+    PSN.sequenceNumber() = 1U;
+    PSN.primaryLeaseId() = 1U;
+
+    primaryStateResponse.partitionId()          = k_PARTITION_ID;
+    primaryStateResponse.latestSequenceNumber() = PSN;
+
+    helper.d_cluster_mp->requestManager().processResponse(pstMessage);
+
+    BMQTST_ASSERT_EQ(storageManager.partitionHealthState(k_PARTITION_ID),
+                     mqbc::PartitionFSM::State::e_REPLICA_HEALING);
+
+    helper.clearChannels();
+
+    // 2. Send ReplicaDataRequestDrop with invalid partitionId
+    static const int             k_DROP_REQUEST_ID = 42;
+    static const int             k_INVALID_PID     = -1;
+    bmqp_ctrlmsg::ControlMessage dropMessage;
+    dropMessage.rId() = k_DROP_REQUEST_ID;
+    bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRequest =
+        dropMessage.choice()
+            .makeClusterMessage()
+            .choice()
+            .makePartitionMessage()
+            .choice()
+            .makeReplicaDataRequest();
+
+    replicaDataRequest.replicaDataType() =
+        bmqp_ctrlmsg::ReplicaDataType::E_DROP;
+    replicaDataRequest.partitionId() = k_INVALID_PID;
+
+    storageManager.processReplicaDataRequest(dropMessage, primaryNode);
+
+    // 3. Verify failure response sent to source (primaryNode)
+    for (TestChannelMapCIter cit = helper.d_cluster_mp->_channels().cbegin();
+         cit != helper.d_cluster_mp->_channels().cend();
+         ++cit) {
+        if (cit->first->nodeId() == primaryNodeId) {
+            bmqio::TestChannel::WriteCall writeCall;
+            BMQTST_ASSERT(cit->second->getWriteCall(&writeCall, 0));
+
+            bmqp_ctrlmsg::ControlMessage response;
+            mqbc::ClusterUtil::extractMessage(
+                &response,
+                writeCall.d_blob,
+                bmqtst::TestHelperUtil::allocator());
+
+            BMQTST_ASSERT_EQ(response.rId(), k_DROP_REQUEST_ID);
+            BMQTST_ASSERT(response.choice().isStatusValue());
+
+            const bmqp_ctrlmsg::Status& status = response.choice().status();
+            BMQTST_ASSERT_EQ(status.category(),
+                             bmqp_ctrlmsg::StatusCategory::E_REFUSED);
+            BMQTST_ASSERT_EQ(status.code(),
+                             mqbi::ClusterErrorCode::e_NO_PARTITION);
+        }
+        else {
+            BMQTST_ASSERT(!cit->second->waitFor(1));
+        }
+    }
+
+    // 4. Verify state remains e_REPLICA_HEALING
+    BMQTST_ASSERT_EQ(storageManager.partitionHealthState(k_PARTITION_ID),
+                     mqbc::PartitionFSM::State::e_REPLICA_HEALING);
+
+    helper.clearChannels();
+
+    // 5. Send a storage event (PUT) and verify it is buffered, not processed
+    const bsls::Types::Uint64 seqNumBefore =
+        storageManager.fileStore(k_PARTITION_ID).sequenceNumber();
+
+    bmqp::StorageEventBuilder seb(mqbs::FileStoreProtocol::k_VERSION,
+                                  bmqp::EventType::e_STORAGE,
+                                  helper.d_cluster_mp->_blobSpPool(),
+                                  bmqtst::TestHelperUtil::allocator());
+
+    char journalBuf[mqbs::FileStoreProtocol::k_JOURNAL_RECORD_SIZE];
+    bsl::memset(journalBuf, 0, sizeof(journalBuf));
+    bsl::shared_ptr<char> journalSp(journalBuf,
+                                    bslstl::SharedPtrNilDeleter(),
+                                    bmqtst::TestHelperUtil::allocator());
+    bdlbb::BlobBuffer     journalBlobBuf(journalSp, sizeof(journalBuf));
+
+    char dataBuf[bmqp::Protocol::k_WORD_SIZE];
+    bsl::memset(dataBuf, 0, sizeof(dataBuf));
+    bsl::shared_ptr<char> dataSp(dataBuf,
+                                 bslstl::SharedPtrNilDeleter(),
+                                 bmqtst::TestHelperUtil::allocator());
+    bdlbb::BlobBuffer     dataBlobBuf(dataSp, sizeof(dataBuf));
+
+    bmqt::EventBuilderResult::Enum rc = seb.packMessage(
+        bmqp::StorageMessageType::e_DATA,
+        k_PARTITION_ID,
+        0,     // flags
+        1000,  // journalOffsetWords (non-zero, required by builder)
+        journalBlobBuf,
+        dataBlobBuf);
+    BSLS_ASSERT_OPT(rc == bmqt::EventBuilderResult::e_SUCCESS);
+
+    mqbevt::StorageEvent storageEvent(bmqtst::TestHelperUtil::allocator());
+    storageEvent.setBlob(seb.blob());
+    storageEvent.setClusterNode(primaryNode);
+
+    storageManager.processStorageEvent(storageEvent);
+
+    // Sequence number has not advanced; this proves that we did not process
+    // the PUT.
+    BMQTST_ASSERT_EQ(storageManager.fileStore(k_PARTITION_ID).sequenceNumber(),
+                     seqNumBefore);
+
+    BMQTST_ASSERT_EQ(storageManager.partitionHealthState(k_PARTITION_ID),
+                     mqbc::PartitionFSM::State::e_REPLICA_HEALING);
+
+    // Cleanup
+    storageManager.stopPFSMs();
+    storageManager.stop();
+    helper.d_cluster_mp->stop();
+}
+
 // ============================================================================
 //                                 MAIN PROGRAM
 // ----------------------------------------------------------------------------
@@ -3296,6 +3604,10 @@ int main(int argc, char* argv[])
         //      - test21_replicaHealingReceivesReplicaDataRqstDrop();
         //      - test20_replicaHealingReceivesReplicaDataRqstPush();
         //      - test19_primaryHealedSendsDataChunks();
+    case 23:
+        test23_replicaHealingReceivesReplicaDataRqstDropInvalidPid();
+        break;
+    case 22: test22_rstUnknownCancelsInFlightRequests(); break;
     case 21: test21_watchdogMultipleRetries(); break;
     case 20: test20_watchdogStopResetsState(); break;
     case 19: test19_replicaWaitingWatchdogRetry(); break;

@@ -675,6 +675,10 @@ class DataStore : public mqbi::DispatcherClient {
     /// data store.
     virtual void removeRecordRaw(const DataStoreRecordHandle& handle) = 0;
 
+    /// Attempt to rollover the journal if needed after a purge has cleared
+    /// outstanding records.
+    virtual void onPurgeComplete() = 0;
+
     /// Process the specified storage event `blob` containing one or more
     /// storage messages.  The behavior is undefined unless each message in
     /// the event belongs to this partition, and has same primary and
@@ -700,9 +704,6 @@ class DataStore : public mqbi::DispatcherClient {
 
     /// Replication related
     /// -------------------
-
-    /// Request the data store to issue a SyncPt.
-    virtual int issueSyncPoint() = 0;
 
     /// Set the specified `primaryNode` with the specified `primaryLeaseId`
     /// as the active primary for this data store partition.  Note that

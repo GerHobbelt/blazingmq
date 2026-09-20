@@ -29,9 +29,13 @@
 #include <bmqst_statcontext.h>
 
 // BDE
+#include <bsl_ostream.h>
 #include <bsl_string.h>
 #include <bsl_unordered_map.h>
 #include <bslma_allocator.h>
+#include <bslma_usesbslmaallocator.h>
+#include <bslmf_nestedtraitdeclaration.h>
+#include <bsls_keyword.h>
 
 namespace BloombergLP {
 
@@ -53,10 +57,13 @@ class JsonPrinter {
 
   private:
     // NOT IMPLEMENTED
-    JsonPrinter(const JsonPrinter& other) BSLS_CPP11_DELETED;
-    JsonPrinter& operator=(const JsonPrinter& other) BSLS_CPP11_DELETED;
+    JsonPrinter(const JsonPrinter& other) BSLS_KEYWORD_DELETED;
+    JsonPrinter& operator=(const JsonPrinter& other) BSLS_KEYWORD_DELETED;
 
   public:
+    // TRAITS
+    BSLMF_NESTED_TRAIT_DECLARATION(JsonPrinter, bslma::UsesBslmaAllocator)
+
     // PUBLIC TYPES
     typedef bsl::unordered_map<bsl::string, bmqst::StatContext*>
         StatContextsMap;
@@ -68,15 +75,14 @@ class JsonPrinter {
     explicit JsonPrinter(const StatContextsMap& statContextsMap,
                          bslma::Allocator*      allocator = 0);
 
-    // ACCESSORS
+    // MANIPULATORS
 
-    /// Print the JSON-encoded stats to the specified `out`.
+    /// Print the JSON-encoded stats to the specified `stream`.
     /// If the specified `compact` flag is `true`, the JSON is printed in
     /// compact form, otherwise the JSON is printed in pretty form.
-    /// Return `0` on success, and non-zero return code on failure.
     ///
-    /// THREAD: This method is called in the *StatController scheduler* thread.
-    int printStats(bsl::string* out, bool compact) const;
+    /// THREAD: This method is called in the `snapshot` thread.
+    void printStats(bsl::ostream& stream, bool compact);
 };
 
 }  // close package namespace

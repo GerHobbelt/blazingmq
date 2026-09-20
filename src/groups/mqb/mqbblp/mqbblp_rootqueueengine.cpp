@@ -159,7 +159,6 @@ void RootQueueEngine::deliverMessages(AppState* app)
     BSLS_ASSERT_SAFE(d_queueState_p->queue()->inDispatcherThread());
 
     BSLS_ASSERT_SAFE(d_queueState_p->storage());
-    BSLS_ASSERT_SAFE(d_apps.find(app->appId()) != d_apps.end());
 
     if (!app->isAuthorized()) {
         return;  // RETURN
@@ -169,6 +168,8 @@ void RootQueueEngine::deliverMessages(AppState* app)
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         return;  // RETURN
     }
+
+    BSLS_ASSERT_SAFE(d_apps.find(app->appId()) != d_apps.end());
 
     bsls::TimeInterval delay;
     size_t             numMessages = app->processDeliveryLists(&delay,
@@ -556,6 +557,13 @@ int RootQueueEngine::initializeAppId(const bsl::string& appId,
     return 0;
 }
 
+void RootQueueEngine::close()
+{
+    d_scheduler_p->cancelEventAndWait(&d_flowControlEventHandle);
+
+    d_consumptionMonitor.reset();
+}
+
 void RootQueueEngine::resetState(bool isShuttingDown)
 {
     // executed by the *QUEUE DISPATCHER* thread
@@ -563,16 +571,12 @@ void RootQueueEngine::resetState(bool isShuttingDown)
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_queueState_p->queue()->inDispatcherThread());
 
-    if (d_flowControlEventHandle) {
-        d_scheduler_p->cancelEventAndWait(&d_flowControlEventHandle);
-    }
+    close();
 
     for (Apps::iterator it = d_apps.begin(); it != d_apps.end(); ++it) {
         it->second->undoRouting();
         it->second->routing()->reset();
     }
-
-    d_consumptionMonitor.reset();
 
     if (!isShuttingDown) {
         d_apps.clear();
@@ -1048,10 +1052,9 @@ void RootQueueEngine::configureHandle(
     const bsl::shared_ptr<Routers::AppContext> previous =
         affectedApp->routing();
 
-    affectedApp->routing().reset(new (*d_allocator_p) Routers::AppContext(
-                                     d_queueState_p->routingContext(),
-                                     d_allocator_p),
-                                 d_allocator_p);
+    affectedApp->routing() = bsl::allocate_shared<Routers::AppContext>(
+        d_allocator_p,
+        &d_queueState_p->routingContext());
 
     d_queueState_p->handleCatalog().iterateConsumers(
         bdlf::BindUtil::bind(&RootQueueEngine::rebuildSelectedApp,
@@ -1272,10 +1275,9 @@ void RootQueueEngine::releaseHandle(
                     // Create new Routing from scratch using Subscription Ids
                     // from the old routing.
                     bsl::shared_ptr<Routers::AppContext> replacement(
-                        new (*d_allocator_p) Routers::AppContext(
-                            d_queueState_p->routingContext(),
-                            d_allocator_p),
-                        d_allocator_p);
+                        bsl::allocate_shared<Routers::AppContext>(
+                            d_allocator_p,
+                            &d_queueState_p->routingContext()));
 
                     bmqu::MemOutStream errorStream(d_allocator_p);
                     app->rebuildConsumers(currSubStreamInfo.appId().c_str(),
@@ -1840,10 +1842,10 @@ RootQueueEngine::logAppSubscriptionInfo(bsl::ostream&     stream,
            << "\n\n";
 
     // Log consumer subscriptions
-    mqbblp::Routers::QueueRoutingContext& routingContext =
-        appState->routing()->d_queue;
+    mqbblp::Routers::QueueRoutingContext* routingContext_p =
+        appState->routing()->d_queue_p;
     mqbcmd::Routing routing;
-    routingContext.loadInternals(&routing);
+    routingContext_p->loadInternals(&routing);
     const bsl::vector<mqbcmd::SubscriptionGroup>& subscrGroups =
         routing.subscriptionGroups();
     if (!subscrGroups.empty()) {

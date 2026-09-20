@@ -297,6 +297,10 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
         /// object.  Note that `uri` is left untouched because it is an
         /// invariant member of a given instance of such a QueueInfo object.
         void resetButKeepPending();
+
+        // ACCESSORS
+        /// Return `false` if there is a handle or handle creation in progress.
+        bool isIdle() const;
     };
 
     typedef bsl::unordered_map<const mqbnet::ClusterNode*,
@@ -690,11 +694,11 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
                      mqbi::Domain*                       domain,
                      const bmqp_ctrlmsg::ControlMessage& request,
                      mqbc::ClusterNodeSession*           requester,
-                     int                                 peerInstanceId);
+                     int                                 requesterId);
 
     /// Callback invoked in response to an open domain query (in the
     /// specified `request`) made to the domain factory on behalf of the
-    /// specified `requester` with the specified `peerInstanceId`.  If the
+    /// specified `requester` with the specified `requesterId`.  If the
     /// specified `status` is SUCCESS, the request was success and the
     /// specified `domain` contains a pointer to the result; otherwise
     /// `status` contains the category, error code and description of the
@@ -703,7 +707,7 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
                                mqbi::Domain*                       domain,
                                const bmqp_ctrlmsg::ControlMessage& request,
                                mqbc::ClusterNodeSession*           requester,
-                               const int peerInstanceId);
+                               const int requesterId);
 
     void onGetQueueHandle(
         const bmqp_ctrlmsg::Status&                status,
@@ -716,7 +720,7 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
     /// (in the specified `request`).  If the specified `status` is SUCCESS,
     /// the request was success and the specified `queueHandle` contains the
     /// handle representing the queue that was allocated for this specified
-    /// `requester` session having the specified `peerInstanceId`, and the
+    /// `requester` session having the specified `requesterId`, and the
     /// specified `confirmationCookie` a cookie that must be set to `true`
     /// to indicate receiving and processing of that response; otherwise
     /// `status` contains the category, error code and description of the
@@ -728,7 +732,7 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
         const mqbi::OpenQueueConfirmationCookieSp& confirmationCookie,
         const bmqp_ctrlmsg::ControlMessage&        request,
         mqbc::ClusterNodeSession*                  requester,
-        const int                                  peerInstanceId);
+        const int                                  requesterId);
 
     void
     reconfigureCallback(const bmqp_ctrlmsg::Status&           status,
@@ -907,9 +911,11 @@ class ClusterQueueHelper BSLS_KEYWORD_FINAL
         const bmqp_ctrlmsg::OpenQueueResponse&     openQueueResponse,
         const mqbi::OpenQueueConfirmationCookieSp& confirmationCookie);
 
-    void setAsClosed(const QueueContextSp& queueContextSp);
+    void setStreamState(const QueueContextSp& queueContextSp,
+                        SubQueueContext::Enum state);
 
-    void setAsClosed(SubQueueContext* subQueueContext);
+    void setStreamState(SubQueueContext*      subQueueContext,
+                        SubQueueContext::Enum state);
 
     // PRIVATE MANIPULATORS
     //   (virtual: mqbc::ClusterMembershipObserver)
@@ -1148,6 +1154,16 @@ inline ClusterQueueHelper::StopContext::StopContext(
 {
 }
 
+// -----------------------------------------
+// struct ClusterQueueHelper::QueueLiveState
+// -----------------------------------------
+
+inline bool ClusterQueueHelper::QueueLiveState::isIdle() const
+{
+    return d_numQueueHandles == 0 && d_numHandleCreationsInProgress == 0 &&
+           d_inFlight == 0;
+}
+
 // ---------------------------------------
 // struct ClusterQueueHelper::QueueContext
 // ---------------------------------------
@@ -1245,9 +1261,10 @@ ClusterQueueHelper::startPartitionReopen(int                 partitionId,
     }
 
     // Start new restore cycle
-    cycle.reset(new (*d_allocator_p)
-                    PartitionReopenCycle(this, generationCount, partitionId),
-                d_allocator_p);
+    cycle = bsl::allocate_shared<PartitionReopenCycle>(d_allocator_p,
+                                                       this,
+                                                       generationCount,
+                                                       partitionId);
     d_reopenCycles[partitionId] = cycle;
 
     return cycle;

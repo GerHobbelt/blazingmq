@@ -58,6 +58,7 @@
 #include <bsl_utility.h>
 #include <bsl_vector.h>
 #include <bsla_annotations.h>
+#include <bsla_unreachable.h>
 #include <bsls_assert.h>
 #include <bsls_performancehint.h>
 #include <bsls_timeinterval.h>
@@ -253,7 +254,12 @@ bool isConfigureErrorPermanent(
     case bmqp_ctrlmsg::StatusCategory::E_NOT_READY: {
         return false;
     }
+    default: {
+        BSLS_ASSERT_OPT_UNREACHABLE("Unknown error kind");
+        break;
     }
+    }
+    BSLA_UNREACHABLE;
 }
 
 }  // close unnamed namespace
@@ -1057,6 +1063,11 @@ int RelayQueueEngine::configure(
     return 0;
 }
 
+void RelayQueueEngine::close()
+{
+    // NOTHING
+}
+
 void RelayQueueEngine::resetState(bool isShuttingDown)
 {
     for (AppsMap::iterator it = d_apps.begin(); it != d_apps.end(); ++it) {
@@ -1606,11 +1617,10 @@ int RelayQueueEngine::onRejectMessage(
         result = rda.counter();
 
         if (d_throttledRejectedMessages.requestPermission()) {
-            BMQ_LOGTHROTTLE_INFO
-                << "Queue '" << d_queueState_p->uri()
-                << "' rejecting PUSH [GUID: '" << msgGUID
-                << "', subQueueId: " << app->upstreamSubQueueId()
-                << "] with the counter: [" << rda << "]";
+            BALL_LOG_INFO << "Queue '" << d_queueState_p->uri()
+                          << "' rejecting PUSH [GUID: '" << msgGUID
+                          << "', subQueueId: " << app->upstreamSubQueueId()
+                          << "] with the counter: [" << rda << "]";
         }
 
         if (!rda.isUnlimited()) {
@@ -1636,10 +1646,10 @@ int RelayQueueEngine::onRejectMessage(
         }
     }
     else if (d_throttledRejectedMessages.requestPermission()) {
-        BMQ_LOGTHROTTLE_INFO
-            << "Queue '" << d_queueState_p->uri()
-            << "' got reject for an unknown message [GUID: '" << msgGUID
-            << "', subQueueId: " << app->upstreamSubQueueId() << "]";
+        BALL_LOG_INFO << "Queue '" << d_queueState_p->uri()
+                      << "' got reject for an unknown message [GUID: '"
+                      << msgGUID
+                      << "', subQueueId: " << app->upstreamSubQueueId() << "]";
     }
 
     return result;
@@ -1892,7 +1902,6 @@ bool RelayQueueEngine::subscriptionId2upstreamSubQueueId(
     }
     return true;
 }
-
 
 //              InOrder             OutOfOrder
 //

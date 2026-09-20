@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "bmqu_atomicvalidator.h"
 #include <bmqio_reconnectingchannelfactory.h>
 
 #include <bmqscm_version.h>
@@ -487,8 +488,22 @@ int ReconnectingChannelFactory::start()
 
 void ReconnectingChannelFactory::stop()
 {
-    d_validator.invalidate();
+    // Support multiple 'stop'
+    {
+        bmqu::AtomicValidatorGuard guard(&d_validator);
 
+        if (guard.isValid()) {
+            bmqu::AtomicValidatorGuardUtil::releaseAndInvalidate(&guard);
+
+            cancelAllHandles();
+        }
+    }
+
+    d_config.d_base_p->stop();
+}
+
+void ReconnectingChannelFactory::cancelAllHandles()
+{
     // Canceling a handle involves acquiring the factory's lock, so need to
     // call 'cancel' on the handles outside of the lock. This swap enables
     // doing that in a thread-safe manner.
@@ -503,13 +518,13 @@ void ReconnectingChannelFactory::stop()
          ++iter) {
         iter->second->cancel();
     }
-
-    d_config.d_base_p->stop();
 }
 
 void ReconnectingChannelFactory::disableReconnect()
 {
     d_isReconnectEnabled = false;
+
+    cancelAllHandles();
 }
 
 void ReconnectingChannelFactory::listen(Status*                      status,

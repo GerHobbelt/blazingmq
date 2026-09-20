@@ -107,12 +107,31 @@ const int k_NAGLE_PACKET_COUNT = 100;
 
 const int k_KEY_LEN = FileStoreProtocol::k_KEY_LENGTH;
 
-const unsigned int k_REQUESTED_JOURNAL_SPACE =
-    3 * FileStoreProtocol::k_JOURNAL_RECORD_SIZE;
-// Above, 3 == 1 journal record being written +
-//             1 journal sync point if rolling over +
-//             1 journal sync point if self needs to issue another sync point
-//             in 'setActivePrimary' with old values
+/// k_RESERVED1_SYNC_POINT_SIZE is the space in the end of the JOURNAL file
+/// reserved for SYNC POINTS:
+/// 1 journal sync point if rolling over +
+/// 1 journal sync point if self needs to issue another sync point in
+///   'setActivePrimary' with old values
+const bsls::Types::Uint64 k_RESERVED1_SYNC_POINT_SIZE =
+    2 * FileStoreProtocol::k_JOURNAL_RECORD_SIZE;
+
+/// k_RESERVED2_PURGE_SIZE is the space in the end of the JOURNAL file reserved
+/// for PURGE records if JOURNAL file is not available
+const bsls::Types::Uint64 k_RESERVED2_PURGE_SIZE =
+    k_RESERVED1_SYNC_POINT_SIZE +
+    16 * FileStoreProtocol::k_JOURNAL_RECORD_SIZE;
+
+/// k_REQUESTED_JOURNAL_SPACE is the minimum required space in JOURNAL to write
+/// a next common record
+const bsls::Types::Uint64 k_REQUESTED_JOURNAL_SPACE =
+    FileStoreProtocol::k_JOURNAL_RECORD_SIZE + k_RESERVED2_PURGE_SIZE;
+
+/// Reserved areas of the JOURNAL file (not in scale):
+/// [start ======================= JOURNAL FILE ========================== end]
+/// k_RESERVED1_SYNC_POINT_SIZE                                            [==]
+/// k_RESERVED2_PURGE_SIZE                                     [==============]
+/// k_REQUESTED_JOURNAL_SPACE                                 [===============]
+/// [========= normal JOURNAL records ========================]
 
 /// Return a rounded (down) percentage value (range [0-100]) representing
 /// the space in use on a file with the specified `capacity`, currently
@@ -926,13 +945,13 @@ int FileStore::openInRecoveryMode(bsl::ostream&    errorDescription,
     // to bump the journal file size.
 
     if (d_config.maxJournalFileSize() <
-        (journalFileOffset + 2 * FileStoreProtocol::k_JOURNAL_RECORD_SIZE)) {
+        (journalFileOffset + k_RESERVED1_SYNC_POINT_SIZE)) {
         BALL_LOG_ERROR << partitionDesc() << "Journal does not have enough "
                        << "space. Journal offset: " << journalFileOffset
                        << ", max journal file size per config: "
                        << d_config.maxJournalFileSize()
                        << ", additional space (in bytes) required in journal: "
-                       << (2 * FileStoreProtocol::k_JOURNAL_RECORD_SIZE);
+                       << k_RESERVED1_SYNC_POINT_SIZE;
         return rc_PARTITION_FULL;  // RETURN
     }
 
@@ -1015,7 +1034,7 @@ int FileStore::openInRecoveryMode(bsl::ostream&    errorDescription,
 
         bmqp_ctrlmsg::SyncPoint syncPoint;
         syncPoint.primaryLeaseId()       = d_primaryLeaseId;
-        syncPoint.sequenceNum()          = ++currentSeqNumRef();
+        syncPoint.sequenceNum()          = currentSeqNumRef() + 1;
         syncPoint.dataFileOffsetDwords() = fileSetSp->d_dataFilePosition /
                                            bmqp::Protocol::k_DWORD_SIZE;
         syncPoint.qlistFileOffsetWords() =
@@ -1023,9 +1042,7 @@ int FileStore::openInRecoveryMode(bsl::ostream&    errorDescription,
                 ? fileSetSp->d_qlistFilePosition / bmqp::Protocol::k_WORD_SIZE
                 : 0;
 
-        rc = issueSyncPointInternal(SyncPointType::e_REGULAR,
-                                    true,
-                                    &syncPoint);
+        rc = issueSyncPointInternal(SyncPointType::e_REGULAR, syncPoint);
         if (0 != rc) {
             BALL_LOG_ERROR << partitionDesc() << "Failed to issue above sync "
                            << "point, rc: " << rc;
@@ -3034,7 +3051,7 @@ int FileStore::rolloverIfNeeded(FileType::Enum              fileType,
                                 const MappedFileDescriptor& file,
                                 const bsl::string&          fileName,
                                 bsls::Types::Uint64         currentSize,
-                                unsigned int                requestedSpace)
+                                bsls::Types::Uint64         requestedSpace)
 {
     FileSet* activeFileSet = d_fileSets[0].get();
     BSLS_ASSERT_SAFE(activeFileSet);
@@ -3293,7 +3310,7 @@ int FileStore::rollover()
 
     bmqp_ctrlmsg::SyncPoint syncPt;
     syncPt.primaryLeaseId()       = d_primaryLeaseId;
-    syncPt.sequenceNum()          = ++currentSeqNumRef();
+    syncPt.sequenceNum()          = currentSeqNumRef() + 1;
     syncPt.dataFileOffsetDwords() = activeFileSet->d_dataFilePosition /
                                     bmqp::Protocol::k_DWORD_SIZE;
     syncPt.qlistFileOffsetWords() = d_qListAware
@@ -3301,7 +3318,7 @@ int FileStore::rollover()
                                               bmqp::Protocol::k_WORD_SIZE
                                         : 0;
 
-    rc = issueSyncPointInternal(SyncPointType::e_ROLLOVER, true, &syncPt);
+    rc = issueSyncPointInternal(SyncPointType::e_ROLLOVER, syncPt);
     if (0 != rc) {
         return 10 * rc + rc_SYNC_POINT_FAILURE;  // RETURN
     }
@@ -3654,7 +3671,43 @@ int FileStore::writeQueueOpRecord(DataStoreRecordHandle*  handle,
     }
 
     if (!activeFileSet->d_journalFileAvailable) {
-        return rc_UNAVAILABLE;  // RETURN
+        if (QueueOpType::e_PURGE != queueOpFlag) {
+            // Nothing else we can do unless it is a PURGE record
+            return rc_UNAVAILABLE;  // RETURN
+        }
+        if (!appKey.isNull()) {
+            // Per-appId purge requires writing message deletion records to
+            // journal, but we don't have space for it. Only full queue purges
+            // are supported on unavailable journal.
+            return rc_UNAVAILABLE;  // RETURN
+        }
+
+        const bool useSyncPointReservedArea =
+            (activeFileSet->d_journalFile.fileSize() <
+             FileStoreProtocol::k_JOURNAL_RECORD_SIZE +
+                 activeFileSet->d_journalFilePosition +
+                 k_RESERVED1_SYNC_POINT_SIZE);
+        if (useSyncPointReservedArea) {
+            // This is a PURGE record, but we cannot write it because this
+            // record will use space reserved for SYNC POINTS in the end of the
+            // JOURNAL file
+            return rc_UNAVAILABLE;  // RETURN
+        }
+
+        BALL_LOG_WARN << partitionDesc()
+                      << "Writing PURGE record for queueKey [" << queueKey
+                      << "] to journal despite partition being"
+                      << " unavailable";
+
+        writeQueueOpRecordImpl(handle,
+                               queueKey,
+                               appKey,
+                               queueOpFlag,
+                               timestamp,
+                               startPrimaryLeaseId,
+                               startSequenceNum);
+
+        return rc_SUCCESS;  // RETURN
     }
 
     // Roll over if needed
@@ -3667,19 +3720,35 @@ int FileStore::writeQueueOpRecord(DataStoreRecordHandle*  handle,
         return 10 * rc + rc_ROLLOVER_FAILURE;  // RETURN
     }
 
-    // Update 'activeFileSet' as it may have rolled over above.
-    activeFileSet = d_fileSets[0].get();
+    writeQueueOpRecordImpl(handle,
+                           queueKey,
+                           appKey,
+                           queueOpFlag,
+                           timestamp,
+                           startPrimaryLeaseId,
+                           startSequenceNum);
 
-    // Local refs for convenience.
+    return rc_SUCCESS;
+}
+
+void FileStore::writeQueueOpRecordImpl(DataStoreRecordHandle*  handle,
+                                       const mqbu::StorageKey& queueKey,
+                                       const mqbu::StorageKey& appKey,
+                                       QueueOpType::Enum       queueOpFlag,
+                                       bsls::Types::Uint64     timestamp,
+                                       unsigned int        startPrimaryLeaseId,
+                                       bsls::Types::Uint64 startSequenceNum)
+{
+    FileSet* activeFileSet = d_fileSets[0].get();
+    BSLS_ASSERT_SAFE(activeFileSet);
+
     MappedFileDescriptor& journal    = activeFileSet->d_journalFile;
     bsls::Types::Uint64&  journalPos = activeFileSet->d_journalFilePosition;
 
-    BSLS_ASSERT_SAFE(journal.fileSize() >=
-                     (journalPos + k_REQUESTED_JOURNAL_SPACE));
-    // JOURNAL has been successfully rolled over, so above assert should
-    // not fire.
+    BSLS_ASSERT_SAFE(journalPos + k_RESERVED1_SYNC_POINT_SIZE +
+                         FileStoreProtocol::k_JOURNAL_RECORD_SIZE <=
+                     journal.fileSize());
 
-    // Append queueOp record to journal.
     bsls::Types::Uint64      recordOffset = journalPos;
     OffsetPtr<QueueOpRecord> qRec(journal.block(), journalPos);
     new (qRec.get()) QueueOpRecord();
@@ -3701,8 +3770,6 @@ int FileStore::writeQueueOpRecord(DataStoreRecordHandle*  handle,
                                       bmqp::StorageMessageType::e_QUEUE_OP,
                                       RecordType::e_QUEUE_OP,
                                       recordOffset);
-
-    return rc_SUCCESS;
 }
 
 void FileStore::writeRolledOverRecord(DataStoreRecord*    record,
@@ -4000,63 +4067,64 @@ void FileStore::issueSyncPointDispatched(BSLA_MAYBE_UNUSED int partitionId)
     // attempts to issue a SyncPt if applicable (see 'issueSyncPointCb'), which
     // means that there must be space for at least 2 journal records.
 
-    issueSyncPointInternal(SyncPointType::e_REGULAR,
-                           true);  // ImmediateFlush flag
+    issueSyncPointIfNeeded();
 }
 
-int FileStore::issueSyncPointInternal(SyncPointType::Enum type,
-                                      bool                immediateFlush,
-                                      const bmqp_ctrlmsg::SyncPoint* syncPoint)
+void FileStore::issueSyncPointIfNeeded()
 {
-    enum { rc_SUCCESS = 0, rc_WRITE_FAILURE = -1 };
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(inDispatcherThread());
 
-    bmqp_ctrlmsg::SyncPoint        sp;
-    const bmqp_ctrlmsg::SyncPoint* spptr = syncPoint;
-    const FileSet*                 fs    = d_fileSets[0].get();
-
-    if (!syncPoint) {
-        // No SyncPt has been explicitly specified.  Check if we need to issue
-        // one.
-
-        if (!d_syncPoints.empty()) {
-            const bmqp_ctrlmsg::SyncPoint& syncPt =
-                d_syncPoints.back().syncPoint();
-            if (syncPt.primaryLeaseId() == d_primaryLeaseId) {
-                if (syncPt.sequenceNum() == sequenceNumber()) {
-                    // No new message has been published.
-                    return rc_SUCCESS;  // RETURN
-                }
-
-                BSLS_ASSERT_SAFE(syncPt.sequenceNum() < sequenceNumber());
+    if (!d_syncPoints.empty()) {
+        const bmqp_ctrlmsg::SyncPoint& syncPt =
+            d_syncPoints.back().syncPoint();
+        if (syncPt.primaryLeaseId() == d_primaryLeaseId) {
+            if (syncPt.sequenceNum() == sequenceNumber()) {
+                // No new message has been published.
+                return;  // RETURN
             }
-            else {
-                BSLS_ASSERT_SAFE(syncPt.primaryLeaseId() < d_primaryLeaseId);
 
-                if (0 == sequenceNumber()) {
-                    // New primary and no force issue requested.  Currently,
-                    // this check is redundant because we always force issue a
-                    // sync point when a primary is chosen (see
-                    // 'setActivePrimary()'), which always bumps up
-                    // the sequence number to 1.
+            BSLS_ASSERT_SAFE(syncPt.sequenceNum() < sequenceNumber());
+        }
+        else {
+            BSLS_ASSERT_SAFE(syncPt.primaryLeaseId() < d_primaryLeaseId);
 
-                    return rc_SUCCESS;  // RETURN
-                }
+            if (0 == sequenceNumber()) {
+                // New primary and no force issue requested.  Currently,
+                // this check is redundant because we always force issue a
+                // sync point when a primary is chosen (see
+                // 'setActivePrimary()'), which always bumps up
+                // the sequence number to 1.
+
+                return;  // RETURN
             }
         }
-
-        sp.primaryLeaseId()       = d_primaryLeaseId;
-        sp.sequenceNum()          = ++currentSeqNumRef();
-        sp.dataFileOffsetDwords() = fs->d_dataFilePosition /
-                                    bmqp::Protocol::k_DWORD_SIZE;
-        if (d_qListAware) {
-            sp.qlistFileOffsetWords() = fs->d_qlistFilePosition /
-                                        bmqp::Protocol::k_WORD_SIZE;
-        }
-
-        spptr = &sp;
     }
 
-    BSLS_ASSERT_SAFE(spptr);
+    const FileSet* fs = d_fileSets[0].get();
+
+    bmqp_ctrlmsg::SyncPoint sp;
+    sp.primaryLeaseId()       = d_primaryLeaseId;
+    sp.sequenceNum()          = currentSeqNumRef() + 1;
+    sp.dataFileOffsetDwords() = fs->d_dataFilePosition /
+                                bmqp::Protocol::k_DWORD_SIZE;
+    if (d_qListAware) {
+        sp.qlistFileOffsetWords() = fs->d_qlistFilePosition /
+                                    bmqp::Protocol::k_WORD_SIZE;
+    }
+
+    issueSyncPointInternal(SyncPointType::e_REGULAR, sp);
+}
+
+int FileStore::issueSyncPointInternal(SyncPointType::Enum            type,
+                                      const bmqp_ctrlmsg::SyncPoint& syncPoint)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(inDispatcherThread());
+
+    enum { rc_SUCCESS = 0, rc_WRITE_FAILURE = -1 };
+
+    const FileSet* fs = d_fileSets[0].get();
 
     if (SyncPointType::e_REGULAR == type) {
         // Since the caller has requested a 'regular' SyncPt, journal must have
@@ -4069,17 +4137,17 @@ int FileStore::issueSyncPointInternal(SyncPointType::Enum type,
     }
 
     // Write to self.
-    int rc = writeSyncPointRecord(*spptr, type);
+    int rc = writeSyncPointRecord(syncPoint, type);
     if (0 != rc) {
         BMQTSK_ALARMLOG_ALARM("FILE_IO")
-            << partitionDesc() << "Failed to write sync point: " << *spptr
+            << partitionDesc() << "Failed to write sync point: " << syncPoint
             << ", rc: " << rc << BMQTSK_ALARMLOG_END;
 
         // Don't broadcast sync point because we failed to apply it to self
         return 10 * rc + rc_WRITE_FAILURE;  // RETURN
     }
 
-    BALL_LOG_INFO << partitionDesc() << "Issued a sync point: " << *spptr;
+    BALL_LOG_INFO << partitionDesc() << "Issued a sync point: " << syncPoint;
 
     // Retrieve sync point's offset.
     bsls::Types::Uint64 syncPointJournalOffset =
@@ -4088,7 +4156,7 @@ int FileStore::issueSyncPointInternal(SyncPointType::Enum type,
 
     // Keep track of this sync point.
     bmqp_ctrlmsg::SyncPointOffsetPair spoPair;
-    spoPair.syncPoint() = *spptr;
+    spoPair.syncPoint() = syncPoint;
     spoPair.offset()    = syncPointJournalOffset;
 
     d_syncPoints.push_back(spoPair);
@@ -4096,7 +4164,7 @@ int FileStore::issueSyncPointInternal(SyncPointType::Enum type,
     // Let replicas know about it.
     replicateRecord(bmqp::StorageMessageType::e_JOURNAL_OP,
                     syncPointJournalOffset,
-                    immediateFlush);
+                    true /* immediateFlush */);
 
     // Report cluster's partition stats
     d_partitionStats_sp->setPartitionBytes(fs->d_outstandingBytesData,
@@ -4303,12 +4371,19 @@ int FileStore::writeMessageRecord(const bmqp::StorageHeader& header,
 
     StorageMapIter sit = d_storages.find(queueKey);
     if (sit == d_storages.end()) {
+        BALL_LOG_ERROR << partitionDesc() << " Received DATA record for an "
+                       << " unknown storage [queueKey: " << queueKey << "].";
+
         return rc_UNKNOWN_QUEUE_KEY;  // RETURN
     }
 
     ReplicatedStorage* rstorage = sit->second;
     BSLS_ASSERT_SAFE(rstorage);
     if (!rstorage->isPersistent()) {
+        BALL_LOG_ERROR << partitionDesc() << " Received DATA record for an "
+                       << " incompatible storage which is not persistent "
+                       << "[queueKey: " << queueKey << "].";
+
         return rc_INCOMPATIBLE_STORAGE;  // RETURN
     }
 
@@ -4437,10 +4512,16 @@ int FileStore::writeQueueCreationRecord(
     StorageMapIter sit = d_storages.find(queueKey);
     if (sit == d_storages.end()) {
         if (d_isFSMWorkflow) {
+            BALL_LOG_ERROR << partitionDesc()
+                           << " Received QLIST record for queue creation, "
+                           << "but storage does not exist [queueKey: "
+                           << queueKey << "].";
+
             return rc_QUEUE_CREATION_FAILURE;  // RETURN
         }
         else {
-            BSLS_ASSERT_SAFE(false && "Queue storage must have been created");
+            BSLS_ASSERT_SAFE(sit != d_storages.end() &&
+                             "Queue storage must have been created");
         }
     }
 
@@ -4517,7 +4598,7 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
         printNextEventRecord(os, event, recordPosition, d_allocator_p);
 
         BMQTSK_ALARMLOG_ALARM("REPLICATION")
-            << partitionDesc() << "Received journal record of type ["
+            << partitionDesc() << " Received journal record of type ["
             << messageType
             << "] with journal offset mismatch. Primary's journal offset: "
             << primaryJournalOffset << ", self journal offset: " << journalPos
@@ -4608,8 +4689,8 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
 
         StorageMapIter sit = d_storages.find(*queueKey);
         if (sit == d_storages.end()) {
-            BALL_LOG_ERROR << partitionDesc() << " received message of "
-                           << "type '" << messageType << "' for an unknown"
+            BALL_LOG_ERROR << partitionDesc() << " Received journal record "
+                           << "of type [" << messageType << "] for an unknown"
                            << " storage [queueKey: " << *queueKey << "]";
             return rc_UNKNOWN_QUEUE_KEY;  // RETURN
         }
@@ -4622,6 +4703,11 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
             // file-backed.
 
             if (!rstorage->isPersistent()) {
+                BALL_LOG_ERROR
+                    << partitionDesc() << " Received journal record of type ["
+                    << messageType << "] for an incompatible storage which "
+                    << "is not persistent [queueKey: " << queueKey << "].";
+
                 return rc_INCOMPATIBLE_STORAGE;  // RETURN
             }
         }
@@ -4629,7 +4715,8 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
         if (!appKey->isNull()) {
             if (!rstorage->hasVirtualStorage(*appKey)) {
                 BALL_LOG_ERROR << partitionDesc()
-                               << " storage does not have the key [" << *appKey
+                               << " storage for [queueKey: " << queueKey
+                               << "] does not have the key [" << *appKey
                                << "]";
 
                 return rc_UNKNOWN_APP_KEY;  // RETURN
@@ -4821,8 +4908,8 @@ int FileStore::writeJournalRecord(const bmqp::StorageHeader& header,
             return rc_INVALID_CONTENT;  // RETURN
         }
 
-        BALL_LOG_INFO << partitionDesc() << "Received QueueOpRecord of type "
-                      << queueOpType << " for queue ["
+        BALL_LOG_INFO << partitionDesc() << "Received QueueOpRecord of type ["
+                      << queueOpType << "] for queue ["
                       << (rstorage ? rstorage->queueUri() : "**UNKNOWN_URI**")
                       << "], queueKey [" << *queueKey << "], appKey ["
                       << *appKey << "].";
@@ -4949,9 +5036,9 @@ void FileStore::replicateRecord(bmqp::StorageMessageType::Enum type,
 
     if (bmqt::EventBuilderResult::e_SUCCESS != buildRc) {
         BMQTSK_ALARMLOG_ALARM("REPLICATION")
-            << partitionDesc()
-            << "Failed to pack storage record of type: " << type
-            << ", of length " << FileStoreProtocol::k_JOURNAL_RECORD_SIZE
+            << partitionDesc() << " Failed to pack storage record of type ["
+            << type << "], of length "
+            << FileStoreProtocol::k_JOURNAL_RECORD_SIZE
             << ", at JOURNAL offset: " << journalOffset << ", rc: " << buildRc
             << ". PSN was: " << printPSN(d_primaryLeaseId, sequenceNumber())
             << ". Current storage "
@@ -5056,9 +5143,8 @@ void FileStore::replicateRecord(bmqp::StorageMessageType::Enum type,
 
     if (bmqt::EventBuilderResult::e_SUCCESS != buildRc) {
         BMQTSK_ALARMLOG_ALARM("REPLICATION")
-            << partitionDesc()
-            << "Failed to pack storage record of type: " << type
-            << ", of length "
+            << partitionDesc() << " Failed to pack storage record of type ["
+            << type << "], of length "
             << bmqu::PrintUtil::prettyNumber(dataBlobBuffer.size())
             << ", at JOURNAL offset: "
             << bmqu::PrintUtil::prettyNumber(
@@ -5181,21 +5267,26 @@ void FileStore::aliasMessage(bsl::shared_ptr<bdlbb::Blob>* appData,
             deleter,
             activeFileSet->d_dataFile.block().base() + optionsOffset);
 
-        bdlbb::BlobBuffer optionsBlobBuffer(optionsBufferSp, optionsSize);
+        bdlbb::BlobBuffer optionsBlobBuffer(
+            bslmf::MovableRefUtil::move(optionsBufferSp),
+            optionsSize);
 
         *options = d_blobSpPool_p->getObject();
-        (*options)->appendDataBuffer(optionsBlobBuffer);
+        (*options)->appendDataBuffer(
+            bslmf::MovableRefUtil::move(optionsBlobBuffer));
     }
 
     bsl::shared_ptr<char> appDataBufferSp(
         deleter,
         activeFileSet->d_dataFile.block().base() + appDataOffset);
 
-    bdlbb::BlobBuffer appDataBlobBuffer(appDataBufferSp,
-                                        record.d_appDataUnpaddedLen);
+    bdlbb::BlobBuffer appDataBlobBuffer(
+        bslmf::MovableRefUtil::move(appDataBufferSp),
+        record.d_appDataUnpaddedLen);
 
     *appData = d_blobSpPool_p->getObject();
-    (*appData)->appendDataBuffer(appDataBlobBuffer);
+    (*appData)->appendDataBuffer(
+        bslmf::MovableRefUtil::move(appDataBlobBuffer));
 }
 
 void FileStore::flushIfNeeded(bool immediateFlush)
@@ -5300,7 +5391,8 @@ int FileStore::open(QueueKeyInfoMap* queueKeyInfoMap)
     enum {
         rc_SUCCESS                   = 0,
         rc_NON_RECOVERY_MODE_FAILURE = -1,
-        rc_RECOVERY_MODE_FAILURE     = -2
+        rc_RECOVERY_MODE_FAILURE     = -2,
+        rc_JOURNAL_FILE_TOO_SMALL    = -3
     };
 
     BALL_LOG_INFO_BLOCK
@@ -5313,6 +5405,17 @@ int FileStore::open(QueueKeyInfoMap* queueKeyInfoMap)
     if (d_isOpen) {
         BALL_LOG_INFO << partitionDesc() << "is already open.";
         return rc_SUCCESS;  // RETURN
+    }
+
+    const bsls::Types::Uint64 minJournalFileSize = sizeof(FileHeader) +
+                                                   sizeof(JournalFileHeader) +
+                                                   k_REQUESTED_JOURNAL_SPACE;
+    if (d_config.maxJournalFileSize() < minJournalFileSize) {
+        BALL_LOG_ERROR << partitionDesc() << "maxJournalFileSize ("
+                       << d_config.maxJournalFileSize()
+                       << ") is too small. Minimum required: "
+                       << minJournalFileSize;
+        return rc_JOURNAL_FILE_TOO_SMALL;  // RETURN
     }
 
     bmqu::MemOutStream errorDescription;
@@ -6171,6 +6274,9 @@ int FileStore::writeSyncPointRecord(const bmqp_ctrlmsg::SyncPoint& syncPoint,
         return rc_UNAVAILABLE;  // RETURN
     }
 
+    // Update the PSN only when record writing is guaranteed.
+    ++currentSeqNumRef();
+
     // Local refs for convenience.
 
     MappedFileDescriptor& journal    = activeFileSet->d_journalFile;
@@ -6232,6 +6338,26 @@ void FileStore::removeRecordRaw(const DataStoreRecordHandle& handle)
     }
 
     d_records.erase(recordIt);
+}
+
+void FileStore::onPurgeComplete()
+{
+    BSLS_ASSERT_SAFE(0 < d_fileSets.size());
+
+    FileSet* activeFileSet = d_fileSets[0].get();
+    BSLS_ASSERT_SAFE(activeFileSet);
+
+    if (activeFileSet->d_journalFileAvailable) {
+        return;  // RETURN
+    }
+
+    activeFileSet->d_journalFileAvailable = true;
+
+    rolloverIfNeeded(FileType::e_JOURNAL,
+                     activeFileSet->d_journalFile,
+                     activeFileSet->d_journalFileName,
+                     activeFileSet->d_journalFilePosition,
+                     k_REQUESTED_JOURNAL_SPACE);
 }
 
 void FileStore::processStorageEvent(const bsl::shared_ptr<bdlbb::Blob>& blob,
@@ -6486,8 +6612,8 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
                 BMQTSK_ALARMLOG_ALARM("RECOVERY")
                     << partitionDesc()
                     << "Encountered smaller primaryLeaseId in buffered "
-                       "storage message of type : "
-                    << header.messageType() << ", encountered PSN: "
+                       "storage message of type ["
+                    << header.messageType() << "], encountered PSN: "
                     << printPSN(recHeader->primaryLeaseId(),
                                 recHeader->sequenceNumber())
                     << ", self PSN: "
@@ -6507,9 +6633,9 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
                 if (recHeader->sequenceNumber() <= sequenceNumber()) {
                     BALL_LOG_INFO
                         << partitionDesc()
-                        << "Skipping a buffered storage message of type "
+                        << "Skipping a buffered storage message of type ["
                         << header.messageType()
-                        << " as it has same or smaller sequence number. "
+                        << "] as it has same or smaller sequence number. "
                         << "PSN in buffered message: "
                         << printPSN(recHeader->primaryLeaseId(),
                                     recHeader->sequenceNumber())
@@ -6734,7 +6860,7 @@ int FileStore::issueSyncPoint()
 
     bmqp_ctrlmsg::SyncPoint syncPoint;
     syncPoint.primaryLeaseId()       = d_primaryLeaseId;
-    syncPoint.sequenceNum()          = ++currentSeqNumRef();
+    syncPoint.sequenceNum()          = currentSeqNumRef() + 1;
     syncPoint.dataFileOffsetDwords() = fs->d_dataFilePosition /
                                        bmqp::Protocol::k_DWORD_SIZE;
     syncPoint.qlistFileOffsetWords() = d_qListAware
@@ -6742,9 +6868,7 @@ int FileStore::issueSyncPoint()
                                                  bmqp::Protocol::k_WORD_SIZE
                                            : 0;
 
-    int rc = issueSyncPointInternal(SyncPointType::e_REGULAR,
-                                    true,  // ImmediateFlush
-                                    &syncPoint);
+    int rc = issueSyncPointInternal(SyncPointType::e_REGULAR, syncPoint);
     if (0 != rc) {
         return 10 * rc + rc_MISC_FAILURE;  // RETURN
     }
@@ -6954,15 +7078,7 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
                 ? fs->d_qlistFilePosition / bmqp::Protocol::k_WORD_SIZE
                 : 0;
 
-        // Explicitly update the PSN, since we are passing the
-        // SyncPt ourselves, and 'issueSyncPointInternal' won't increment
-        // the sequence number in that case.
-
-        ++currentSeqNumRef();
-
-        int rc = issueSyncPointInternal(SyncPointType::e_REGULAR,
-                                        true,  // ImmediateFlush
-                                        &syncPoint);
+        int rc = issueSyncPointInternal(SyncPointType::e_REGULAR, syncPoint);
         if (0 != rc) {
             BMQTSK_ALARMLOG_ALARM("REPLICATION")
                 << partitionDesc()
