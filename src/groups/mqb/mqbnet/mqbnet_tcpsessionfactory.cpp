@@ -30,6 +30,7 @@
 #include <mqbcfg_brokerconfig.h>
 #include <mqbcfg_messages.h>
 #include <mqbcfg_tcpinterfaceconfigvalidator.h>
+#include <mqbnet_authenticationclient.h>
 #include <mqbnet_authenticationcontext.h>
 #include <mqbnet_authenticator.h>
 #include <mqbnet_cluster.h>
@@ -571,7 +572,7 @@ void TCPSessionFactory::read(ChannelInfo*       channelInfo,
     if (channelInfo->d_monitor_mp->checkData(channelInfo->d_channel_sp.get(),
                                              event)) {
         if (event.isAuthenticationEvent()) {
-            reauthnOnAuthenticationEvent(event, channelInfo);
+            onAuthenticationEvent(event, channelInfo);
         }
         else {
             channelInfo->d_eventProcessor_p->processEvent(
@@ -691,6 +692,7 @@ void TCPSessionFactory::initialConnectionComplete(
             d_allocator_p,
             channel,
             initialConnectionContext_sp->authenticationContext(),
+            initialConnectionContext_sp->authenticationClient(),
             monitoredSession,
             initialConnectionContext_sp->negotiationContext()
                 ->eventProcessor(),
@@ -952,6 +954,10 @@ void TCPSessionFactory::onClose(const bsl::shared_ptr<bmqio::Channel>& channel,
             channelInfo->d_authenticationCtx_sp->onClose();
         }
 
+        if (channelInfo->d_authenticationClient_sp) {
+            channelInfo->d_authenticationClient_sp->onClose();
+        }
+
         // TearDown the session
         int isBrokerShutdown = false;
         if (status.category() == bmqio::StatusCategory::e_SUCCESS) {
@@ -1070,7 +1076,7 @@ int TCPSessionFactory::validateTcpInterfaces() const
     return validator(*d_config_mp);
 }
 
-void TCPSessionFactory::reauthnOnAuthenticationEvent(
+void TCPSessionFactory::onAuthenticationEvent(
     const bmqp::Event& event,
     const ChannelInfo* channelInfo) const
 {
@@ -1078,14 +1084,10 @@ void TCPSessionFactory::reauthnOnAuthenticationEvent(
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(channelInfo);
-    BSLS_ASSERT_SAFE(channelInfo->d_authenticationCtx_sp);
     BSLS_ASSERT_SAFE(channelInfo->d_session_sp);
 
-    const bsl::shared_ptr<AuthenticationContext>& context =
-        channelInfo->d_authenticationCtx_sp;
     const bsl::string_view description =
         channelInfo->d_session_sp->description();
-    bmqu::MemOutStream errStream(d_allocator_p);
 
     bmqp_ctrlmsg::AuthenticationMessage authenticationMessage;
     int rc = event.loadAuthenticationEvent(&authenticationMessage);
@@ -1100,13 +1102,48 @@ void TCPSessionFactory::reauthnOnAuthenticationEvent(
 
     BALL_LOG_INFO << description << ": Received an authentication message";
 
-    context->setAuthenticationMessage(authenticationMessage);
-    context->setAuthenticationEncodingType(
-        event.authenticationEventEncodingType());
+    if (authenticationMessage.isAuthenticationResponseValue()) {
+        const bsl::shared_ptr<AuthenticationClient>& client =
+            channelInfo->d_authenticationClient_sp;
+        if (!client) {
+            BALL_LOG_ERROR << "#CLIENT_IMPROPER_BEHAVIOR " << description
+                           << ": Dropping unsolicited AuthenticationResponse: "
+                           << event;
+            return;  // RETURN
+        }
+
+        bmqu::MemOutStream errorStream(d_allocator_p);
+        rc = client->handleResponse(errorStream, authenticationMessage);
+        if (rc != 0) {
+            BALL_LOG_ERROR << "#AUTHENTICATION_FAILED " << description
+                           << ": Reauthentication failed [reason: '"
+                           << errorStream.str() << "', rc: " << rc << "]";
+
+            bmqio::Status status(bmqio::StatusCategory::e_CANCELED,
+                                 "reauthenticationError",
+                                 rc,
+                                 d_allocator_p);
+            channelInfo->d_channel_sp->close(status);
+        }
+
+        return;  // RETURN
+    }
+
+    const bsl::shared_ptr<AuthenticationContext>& context =
+        channelInfo->d_authenticationCtx_sp;
+    if (!context) {
+        BALL_LOG_ERROR << "#CLIENT_IMPROPER_BEHAVIOR " << description
+                       << ": Dropping AuthenticationRequest received on a "
+                          "channel that was not authenticated: "
+                       << event;
+        return;  // RETURN
+    }
 
     // Try to start reauthentication.  If another reauthentication is
     // in progress, drop this event.
-    if (!context->tryStartReauthentication()) {
+    if (!context->tryStartReauthentication(
+            authenticationMessage,
+            event.authenticationEventEncodingType())) {
         BALL_LOG_ERROR << "#CLIENT_IMPROPER_BEHAVIOR " << description
                        << ": Dropping Authentication event since "
                           "authentication is in progress: "
@@ -1114,11 +1151,12 @@ void TCPSessionFactory::reauthnOnAuthenticationEvent(
         return;  // RETURN
     }
 
-    bmqu::MemOutStream errorStream;
+    bmqu::MemOutStream errorStream(d_allocator_p);
     rc = d_authenticator_p->handleReauthentication(errorStream,
                                                    context,
                                                    channelInfo->d_channel_sp);
     if (rc != 0) {
+        bmqu::MemOutStream errStream(d_allocator_p);
         errStream << "#AUTHENTICATION_FAILED " << description
                   << ": Authentication failed [reason: '" << errorStream.str()
                   << "', rc: " << rc << "]";
@@ -1174,27 +1212,6 @@ TCPSessionFactory::TCPSessionFactory(
     BSLS_ASSERT_SAFE(scheduler->clockType() ==
                      bsls::SystemClockType::e_MONOTONIC);
 
-    // Resolve the default address of this host
-    bsl::string hostname;
-    ntsa::Error error = bmqio::ResolveUtil::getHostname(&hostname);
-    if (error.code() != ntsa::Error::e_OK) {
-        BALL_LOG_ERROR << "Failed to get local hostname, error: " << error;
-        BSLS_ASSERT_OPT(false && "Failed to get local host name");
-        return;  // RETURN
-    }
-
-    ntsa::Ipv4Address defaultIP;
-    error = bmqio::ResolveUtil::getIpAddress(&defaultIP, hostname);
-    if (error.code() != ntsa::Error::e_OK) {
-        BALL_LOG_ERROR << "Failed to get IP address of the host '" << hostname
-                       << "' error: " << error;
-        BSLS_ASSERT_OPT(false && "Failed to get IP address of the host.");
-        return;  // RETURN
-    }
-
-    BALL_LOG_INFO << d_name << " [Hostname: " << hostname
-                  << ", ipAddress: " << defaultIP << "]";
-
     // Thread name
     d_threadName = "bmqIO_" + d_config_mp->name().substr(0, 15 - 6);
     // on Linux, a thread name is limited to 16 characters,
@@ -1233,16 +1250,42 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
     BSLS_ASSERT_OPT(!d_isStarted &&
                     "start() can only be called once on this object");
 
+    enum RcEnum {
+        // Value for the various RC error categories
+        rc_SUCCESS                    = 0,
+        rc_HOSTNAME_FAILURE           = -1,
+        rc_IP_RESOLUTION_FAILURE      = -2,
+        rc_INVALID_CONFIG             = -3,
+        rc_RESOLUTION_CONTEXT_FAILURE = -4,
+        rc_CHANNEL_FACTORY_FAILURE    = -5
+    };
+
     BALL_LOG_INFO << d_name << ": starting";
 
-    int rc = 0;
+    // Resolve the default address of this host
+    bsl::string hostname;
+    ntsa::Error error = bmqio::ResolveUtil::getHostname(&hostname);
+    if (error.code() != ntsa::Error::e_OK) {
+        errorDescription << d_name << ": failed to get local hostname "
+                         << "[error: " << error << "]";
+        return rc_HOSTNAME_FAILURE;  // RETURN
+    }
 
-    rc = validateTcpInterfaces();
+    ntsa::Ipv4Address defaultIP;
+    error = bmqio::ResolveUtil::getIpAddress(&defaultIP, hostname);
+    if (error.code() != ntsa::Error::e_OK) {
+        errorDescription << d_name << ": failed to get IP address of the host "
+                         << "'" << hostname << "' [error: " << error << "]";
+        return rc_IP_RESOLUTION_FAILURE;  // RETURN
+    }
 
-    if (rc != 0) {
+    BALL_LOG_INFO << d_name << " [Hostname: " << hostname
+                  << ", ipAddress: " << defaultIP << "]";
+
+    if (const int rc = validateTcpInterfaces()) {
         errorDescription << d_name << ": failed to validate the TCP interface "
                          << "config [rc: " << rc << "]";
-        return rc;  // RETURN
+        return (rc * 10) + rc_INVALID_CONFIG;  // RETURN
     }
 
     ntca::InterfaceConfig interfaceConfig = ntcCreateInterfaceConfig(
@@ -1250,8 +1293,11 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
 
     bslmt::ThreadAttributes attributes;
     attributes.setThreadName("bmqDNSResolver");
-    rc = d_resolutionContext_sp->start(attributes);
-    BSLS_ASSERT_SAFE(rc == 0);
+    if (const int rc = d_resolutionContext_sp->start(attributes)) {
+        errorDescription << d_name << ": failed to start the DNS resolution "
+                         << "context [rc: " << rc << "]";
+        return (rc * 10) + rc_RESOLUTION_CONTEXT_FAILURE;  // RETURN
+    }
 
     bmqio::StatChannelFactoryConfig::StatContextCreatorFn statContextCreator(
         bdlf::BindUtil::bind(&TCPSessionFactory::channelStatContextCreator,
@@ -1299,12 +1345,10 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
         d_channelFactoryPipeline_mp = channelFactoryPipeline_mp;
     }
 
-    rc = d_channelFactoryPipeline_mp->start();
-
-    if (rc != 0) {
+    if (const int rc = d_channelFactoryPipeline_mp->start()) {
         errorDescription << d_name << ": failed starting stat channel factory "
                          << "[rc: " << rc << "]";
-        return rc;  // RETURN
+        return (rc * 10) + rc_CHANNEL_FACTORY_FAILURE;  // RETURN
     }
 
     if (d_config_mp->heartbeatIntervalMs() != 0) {
@@ -1334,7 +1378,7 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
 
     d_isStarted = true;
 
-    return 0;
+    return rc_SUCCESS;
 }
 
 int TCPSessionFactory::startListening(bsl::ostream&         errorDescription,
@@ -1665,6 +1709,7 @@ bool TCPSessionFactory::isEndpointLoopback(bsl::string_view uri) const
 TCPSessionFactory::ChannelInfo::ChannelInfo(
     const bsl::shared_ptr<bmqio::Channel>&        channel_sp,
     const bsl::shared_ptr<AuthenticationContext>& authenticationContext,
+    const bsl::shared_ptr<AuthenticationClient>&  authenticationClient,
     const bsl::shared_ptr<Session>&               monitoredSession,
     SessionEventProcessor*                        eventProcessor,
     int                                           maxMissedHeartbeats,
@@ -1672,6 +1717,7 @@ TCPSessionFactory::ChannelInfo::ChannelInfo(
     bslma::Allocator* allocator)
 : d_channel_sp(channel_sp)
 , d_authenticationCtx_sp(authenticationContext)
+, d_authenticationClient_sp(authenticationClient)
 , d_session_sp(monitoredSession)
 , d_eventProcessor_p(eventProcessor)
 , d_monitor_mp(bslma::ManagedPtrUtil::allocateManaged<bmqp::HeartbeatMonitor>(
