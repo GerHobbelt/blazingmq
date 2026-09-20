@@ -12,10 +12,6 @@ on:
       cache_key:
         description: "GH Actions Cache key associated with the built dependencies"
         value: ${{ jobs.build_dependencies.outputs.cache_key }}
-  schedule:
-    # Rebuild dependencies cache from the "main" branch at the beginning of a new day,
-    # so it is accessible from other branches' PRs
-    - cron: "10 0 * * *"
 
 concurrency:
   group: global-${{ inputs.cxx_standard }}
@@ -33,8 +29,7 @@ jobs:
       - name: Generate dependencies cache key
         id: get-cache-key
         run: |
-          BUILD_DEPS_SHA=$(cat docker/build_deps.sh | shasum)
-          echo "cache_key=deps-${{ inputs.cxx_standard }}-$BUILD_DEPS_SHA" >> $GITHUB_OUTPUT
+          echo "cache_key=deps-`date +%y-%m-%d`-`cat docker/build_deps.sh | shasum`" >> $GITHUB_OUTPUT
 
       - name: Cache lookup
         uses: actions/cache/restore@v4

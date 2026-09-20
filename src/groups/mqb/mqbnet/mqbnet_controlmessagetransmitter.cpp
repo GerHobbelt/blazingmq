@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// mqbc_controlmessagetransmitter.cpp                                 -*-C++-*-
-#include <mqbc_controlmessagetransmitter.h>
+// mqbnet_controlmessagetransmitter.cpp                               -*-C++-*-
+#include <mqbnet_controlmessagetransmitter.h>
 
 #include <mqbscm_version.h>
 // MQB
@@ -30,7 +30,7 @@
 #include <bsls_assert.h>
 
 namespace BloombergLP {
-namespace mqbc {
+namespace mqbnet {
 
 // -------------------------------
 // class ControlMessageTransmitter
@@ -47,9 +47,9 @@ void ControlMessageTransmitter::sendMessageHelper(
     int rc = schemaBuilder->setMessage(message, bmqp::EventType::e_CONTROL);
     if (0 != rc) {
         BALL_LOG_ERROR << "#CLUSTER_SEND_FAILURE "
-                       << "Failed to encode schema message: " << message
-                       << " destined to cluster node "
-                       << destination->nodeDescription() << ", rc: " << rc;
+                       << "Failed to encode schema message destined to "
+                       << "cluster node [ " << destination->nodeDescription()
+                       << " ], rc: " << rc << ", message: " << message;
         return;  // RETURN
     }
 
@@ -57,46 +57,49 @@ void ControlMessageTransmitter::sendMessageHelper(
         destination->write(schemaBuilder->blob(), bmqp::EventType::e_CONTROL);
     if (bmqt::GenericResult::e_SUCCESS != writeRc) {
         BALL_LOG_ERROR << "#CLUSTER_SEND_FAILURE "
-                       << "Failed to write schema message: " << message
-                       << " to cluster node " << destination->nodeDescription()
-                       << ", rc: " << writeRc;
+                       << "Failed to write schema message to cluster node [ "
+                       << destination->nodeDescription()
+                       << " ], rc: " << writeRc
+                       << ", length: " << schemaBuilder->blob()->length()
+                       << ", message: " << message;
     }
     else {
-        BALL_LOG_INFO << "Sent message '" << message << "' to cluster node "
-                      << destination->nodeDescription();
+        BALL_LOG_INFO << "Sent message to cluster node [ "
+                      << destination->nodeDescription()
+                      << " ], message: " << message;
     }
 }
 
 void ControlMessageTransmitter::broadcastMessageHelper(
     const bmqp_ctrlmsg::ControlMessage& message,
     bmqp::SchemaEventBuilder*           schemaBuilder,
-    bool                                broadcastToProxies)
+    mqbnet::TransportManager*           transportManager)
 {
     // executed by *ANY* thread
 
     int rc = schemaBuilder->setMessage(message, bmqp::EventType::e_CONTROL);
     if (0 != rc) {
         BALL_LOG_ERROR << "#CLUSTER_SEND_FAILURE "
-                       << "Failed to encode cluster schema message " << message
-                       << " destined to entire cluster, rc: " << rc;
+                       << "Failed to encode cluster schema message "
+                       << "destined to entire cluster, rc: " << rc
+                       << ", message: " << message;
         return;  // RETURN
     }
 
     // Broadcast to cluster, using the unicast channel to ensure ordering of
     // events.
 
-    d_cluster_p->netCluster().writeAll(schemaBuilder->blob(),
-                                       bmqp::EventType::e_CONTROL);
+    d_cluster_p->writeAll(schemaBuilder->blob(), bmqp::EventType::e_CONTROL);
 
-    BALL_LOG_INFO << "Broadcasted message '" << message
-                  << "' to all cluster nodes";
+    BALL_LOG_INFO << "Broadcasted message to all cluster nodes, message: "
+                  << message;
 
-    if (!broadcastToProxies) {
+    if (!transportManager) {
         return;  // RETURN
     }
 
     bsl::vector<bsl::weak_ptr<mqbnet::Session> > sessions;
-    for (mqbnet::TransportManagerIterator sessIt(d_transportManager_p); sessIt;
+    for (mqbnet::TransportManagerIterator sessIt(transportManager); sessIt;
          ++sessIt) {
         sessions.push_back(sessIt.session());
     }
@@ -118,14 +121,17 @@ void ControlMessageTransmitter::broadcastMessageHelper(
             bmqio::Status status;
             sessionSp->channel()->write(&status, *schemaBuilder->blob());
             if (status.category() == bmqio::StatusCategory::e_SUCCESS) {
-                BALL_LOG_INFO << "Sent message '" << message << "' to proxy "
-                              << sessionSp->description();
+                BALL_LOG_INFO << "Sent message to proxy [ "
+                              << sessionSp->description()
+                              << " ], message: " << message;
             }
             else {
-                BALL_LOG_ERROR << "#CLUSTER_SEND_FAILURE "
-                               << "Failed to write schema message: " << message
-                               << " to proxy " << sessionSp->description()
-                               << ", status: " << status;
+                BALL_LOG_ERROR
+                    << "#CLUSTER_SEND_FAILURE "
+                    << "Failed to write schema message to proxy [ "
+                    << sessionSp->description() << " ], status: " << status
+                    << ", length: " << schemaBuilder->blob()->length()
+                    << ", message: " << message;
             }
         }
     }
@@ -133,15 +139,13 @@ void ControlMessageTransmitter::broadcastMessageHelper(
 
 // CREATORS
 ControlMessageTransmitter::ControlMessageTransmitter(
-    BlobSpPool*               blobSpPool_p,
-    mqbi::Cluster*            cluster,
-    mqbnet::TransportManager* transportManager,
-    bslma::Allocator*         allocator)
+    BlobSpPool*       blobSpPool_p,
+    mqbnet::Cluster*  cluster,
+    bslma::Allocator* allocator)
 : d_allocator_p(allocator)
 , d_blobSpPool_p(blobSpPool_p)
 , d_schemaBuilder(d_blobSpPool_p, bmqp::EncodingType::e_BER, allocator)
 , d_cluster_p(cluster)
-, d_transportManager_p(transportManager)
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_allocator_p);
@@ -158,11 +162,6 @@ void ControlMessageTransmitter::sendMessage(
     const bmqp_ctrlmsg::ControlMessage& message,
     mqbnet::ClusterNode*                destination)
 {
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-
     d_schemaBuilder.reset();
     sendMessageHelper(message, destination, &d_schemaBuilder);
 }
@@ -172,19 +171,14 @@ void ControlMessageTransmitter::sendMessage(
     const bsl::shared_ptr<bmqio::Channel>& channel,
     const bsl::string&                     description)
 {
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-
     d_schemaBuilder.reset();
 
     int rc = d_schemaBuilder.setMessage(message, bmqp::EventType::e_CONTROL);
     if (0 != rc) {
         BALL_LOG_ERROR << "#CLUSTER_SEND_FAILURE "
-                       << "Failed to encode schema message: " << message
-                       << " destined to cluster node " << description
-                       << ", rc: " << rc;
+                       << "Failed to encode schema message "
+                       << "destined to session [ " << description
+                       << " ], rc: " << rc << ", message: " << message;
         return;  // RETURN
     }
 
@@ -192,13 +186,14 @@ void ControlMessageTransmitter::sendMessage(
     channel->write(&status, *d_schemaBuilder.blob());
     if (status.category() != bmqio::StatusCategory::e_SUCCESS) {
         BALL_LOG_ERROR << "#CLUSTER_SEND_FAILURE "
-                       << "Failed to write schema message: " << message
-                       << " to session " << description
-                       << ", status: " << status;
+                       << "Failed to write schema message to session [ "
+                       << description << " ], status: " << status
+                       << ", length: " << d_schemaBuilder.blob()->length()
+                       << ", message: " << message;
     }
     else {
-        BALL_LOG_INFO << "Sent message '" << message << "' to session "
-                      << description;
+        BALL_LOG_INFO << "Sent message to session [ " << description
+                      << " ], message: " << message;
     }
 }
 
@@ -220,29 +215,10 @@ void ControlMessageTransmitter::sendMessageSafe(
 
 void ControlMessageTransmitter::broadcastMessage(
     const bmqp_ctrlmsg::ControlMessage& message,
-    bool                                broadcastToProxies)
+    mqbnet::TransportManager*           transportManager)
 {
-    // executed by the cluster *DISPATCHER* thread
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-
     d_schemaBuilder.reset();
-    broadcastMessageHelper(message, &d_schemaBuilder, broadcastToProxies);
-}
-
-void ControlMessageTransmitter::broadcastMessageSafe(
-    const bmqp_ctrlmsg::ControlMessage& message)
-{
-    // executed by *ANY* thread
-
-    // Since this method can be invoked from any thread, schema event builder
-    // is created on the stack, instead of using 'd_schemaBuilder'.
-
-    bmqp::SchemaEventBuilder schemaBuilder(d_blobSpPool_p,
-                                           bmqp::EncodingType::e_BER,
-                                           d_allocator_p);
-    broadcastMessageHelper(message, &schemaBuilder, false);
+    broadcastMessageHelper(message, &d_schemaBuilder, transportManager);
 }
 
 }  // close package namespace

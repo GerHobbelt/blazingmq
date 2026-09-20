@@ -38,6 +38,7 @@
 
 #include <mqbi_dispatcher.h>
 #include <mqbnet_cluster.h>
+#include <mqbnet_controlmessagetransmitter.h>
 #include <mqbs_datastore.h>
 #include <mqbs_fileset.h>
 #include <mqbs_filestoreprotocol.h>
@@ -412,14 +413,8 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // `firstSyncPointOffsetWords`. It is used to determine if cluster node
     // missed rollover.
 
-    bmqp_ctrlmsg::PartitionMaxFileSizes d_partitionMaxFileSizes;
-    // Max file sizes for journal, data and qlist files for this partition.
-
-    bsl::optional<bmqp_ctrlmsg::PartitionMaxFileSizes>
-        d_overridenPartitionMaxFileSizes;
-    // Overriden (by storage manager) max file sizes for journal, data and
-    // qlist files for this partition. If it is not present,
-    // `d_partitionMaxFileSizes` is used.
+    /// Control message transmitter to use.
+    mqbnet::ControlMessageTransmitter d_messageTransmitter;
 
   private:
     // NOT IMPLEMENTED
@@ -954,6 +949,14 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     void setLastStrongConsistency(unsigned int        primaryLeaseId,
                                   bsls::Types::Uint64 sequenceNum);
 
+    /// Encode and broadcast the specified `message` to all cluster nodes.
+    void broadcastMessage(const bmqp_ctrlmsg::ControlMessage& message);
+
+    /// Encode and send the specified schema `message` to the specified
+    /// peer `destination`.
+    void sendMessage(const bmqp_ctrlmsg::ControlMessage& message,
+                     mqbnet::ClusterNode*                destination);
+
     /// Load into the specified `storages` the list of queue storages for
     /// which all filters from the specified `filters` are returning true.
     void getStorages(StorageList*          storages,
@@ -965,12 +968,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// THREAD: Executed by the queue dispatcher thread associated with the
     ///         specified `fileStore`'s partitionId.
     void loadSummary(mqbcmd::FileStore* fileStore) const;
-
-    /// Override the max file sizes for this partition with the specified
-    /// `maxFileSizes`. It is set by `StorageManager` when higher max file
-    /// sizes are found after quorum.
-    void overridePartitionMaxFileSizes(
-        const bmqp_ctrlmsg::PartitionMaxFileSizes& maxFileSizes);
 
     // ACCESSORS
 
@@ -1059,9 +1056,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// Return the first sync point after rollover sequence number.
     const bmqp_ctrlmsg::PartitionSequenceNumber&
     firstSyncPointAfterRolloverSeqNum() const;
-
-    /// Return the max file sizes for this partition.
-    const bmqp_ctrlmsg::PartitionMaxFileSizes& partitionMaxFileSizes() const;
 };
 
 // =======================
@@ -1247,10 +1241,24 @@ FileStore::setLastStrongConsistency(unsigned int        primaryLeaseId,
     d_lastRecoveredStrongConsistency.d_sequenceNum    = sequenceNum;
 }
 
-inline void FileStore::overridePartitionMaxFileSizes(
-    const bmqp_ctrlmsg::PartitionMaxFileSizes& maxFileSizes)
+inline void
+FileStore::broadcastMessage(const bmqp_ctrlmsg::ControlMessage& message)
 {
-    d_overridenPartitionMaxFileSizes = maxFileSizes;
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(inDispatcherThread());
+
+    flushStorage();
+    d_messageTransmitter.broadcastMessage(message);
+}
+
+inline void FileStore::sendMessage(const bmqp_ctrlmsg::ControlMessage& message,
+                                   mqbnet::ClusterNode* destination)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(inDispatcherThread());
+
+    flushStorage();
+    d_messageTransmitter.sendMessage(message, destination);
 }
 
 // ACCESSORS
@@ -1334,12 +1342,6 @@ inline const bmqp_ctrlmsg::PartitionSequenceNumber&
 FileStore::firstSyncPointAfterRolloverSeqNum() const
 {
     return d_firstSyncPointAfterRolloverSeqNum;
-}
-
-inline const bmqp_ctrlmsg::PartitionMaxFileSizes&
-FileStore::partitionMaxFileSizes() const
-{
-    return d_partitionMaxFileSizes;
 }
 
 // -----------------------

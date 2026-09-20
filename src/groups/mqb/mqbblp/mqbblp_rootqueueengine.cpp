@@ -55,6 +55,7 @@
 #include <bdlt_epochutil.h>
 #include <bdlt_timeunitratio.h>
 #include <bsl_algorithm.h>
+#include <bsl_functional.h>
 #include <bsl_ios.h>
 #include <bsl_iostream.h>
 #include <bsl_iterator.h>
@@ -878,8 +879,8 @@ mqbi::QueueHandle* RootQueueEngine::getHandle(
             BMQTSK_ALARMLOG_ALARM("FANOUT_UNREGISTERED_APPID")
                 << "AppId '" << appId << "' is not authorized for queue '"
                 << d_queueState_p->uri()
-                << "' - please contact BlazingMQ team to request configuration"
-                   " of this AppId"
+                << "' - please update the domain configuration to include "
+                   "the appId to enable consumption."
                 << BMQTSK_ALARMLOG_END;
 
             iter = makeSubStream(appId,
@@ -2251,18 +2252,15 @@ void RootQueueEngine::unregisterStorage(
     iter->second->unauthorize();
 }
 
-mqbi::StorageResult::Enum RootQueueEngine::evaluateAppSubscriptions(
+void RootQueueEngine::evaluateAppSubscriptions(
     const bmqp::PutHeader&              putHeader,
     const bsl::shared_ptr<bdlbb::Blob>& appData,
-    const bmqp::MessagePropertiesInfo&  mpi,
-    bsls::Types::Uint64                 timestamp)
+    const bmqp::MessagePropertiesInfo&  mpi)
 {
     if (!d_hasAppSubscriptions) {
         // No-op if no application subscriptions configured
-        return mqbi::StorageResult::e_SUCCESS;
+        return;  // RETURN
     }
-
-    mqbi::StorageResult::Enum result = mqbi::StorageResult::e_SUCCESS;
 
     Routers::QueueRoutingContext& queue = d_queueState_p->routingContext();
 
@@ -2280,16 +2278,9 @@ mqbi::StorageResult::Enum RootQueueEngine::evaluateAppSubscriptions(
     for (Apps::iterator it = d_apps.begin(); it != d_apps.end(); ++it) {
         AppStateSp& app = it->second;
         if (!app->evaluateAppSubcription()) {
-            result = d_queueState_p->storage()->autoConfirm(app->appKey(),
-                                                            timestamp);
-
-            if (result != mqbi::StorageResult::e_SUCCESS) {
-                return result;
-            }
+            d_queueState_p->storage()->autoConfirm(app->appKey());
         }
     }
-
-    return result;
 }
 
 bslma::ManagedPtr<mqbi::StorageIterator>

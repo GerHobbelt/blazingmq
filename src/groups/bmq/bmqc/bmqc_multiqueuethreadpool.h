@@ -66,7 +66,7 @@
 // Now, our event handler can simply push the integers it receives into its
 // context vector.
 //..
-//  void eventCb(int queueId, const MQTP::EventSp &event)
+//  void eventCb(const MQTP::EventSp &event)
 //  {
 //      if (event) {
 //          // Non-empty `event` means user event
@@ -81,6 +81,15 @@
 // a valid case and it means "queue is empty" event.  Non-empty `event` always
 // means a user event.
 //
+// Since each queue gets its own event callback, we define a creator function
+// that returns the callback for a given `queueId`.
+//..
+//  MQTP::EventFn eventCbCreator(int queueId)
+//  {
+//      return bdlf::BindUtil::bind(&eventCb, bdlf::PlaceHolders::_1);
+//  }
+//..
+//
 // Now, we're ready to create a thread pool and the MQTP using it to process
 // our messages.
 //..
@@ -94,10 +103,9 @@
 //  using namespace bdlf::PlaceHolders;
 //  MQTP mfqtp(MQTP::Config(
 //                        3,    // number of queues,
-//                        bdlf::BindUtil::bind(&eventCb, _1, _2),
-//                        bdlf::BindUtil::bind(&queueCreator, _1, _2))
-//                                                     .threadPool(&threadPool)
-//                                                     .exclusive(true));
+//                        &threadPool,
+//                        bdlf::BindUtil::bind(&eventCbCreator, _1),
+//                        bdlf::BindUtil::bind(&queueCreator, _1, _2)));
 //  mfqtp.start();
 //..
 // Now we can attempt to enqueue some events on our queues.  Since we created
@@ -188,9 +196,15 @@ class MultiQueueThreadPoolConfig {
     typedef bsl::function<Queue*(int queueId, bslma::Allocator* allocator)>
         QueueCreatorFn;
 
-    /// Callback invoked when processing the specified `event` popped from
-    /// the queue having the specified `queueId`.
-    typedef bsl::function<void(int queueId, const EventSp& event)> EventFn;
+    /// Callback invoked to process the specified `event`.
+    typedef bsl::function<void(const EventSp& event)> EventFn;
+
+    /// Create the event callback for the specified `queueId` and the
+    /// specified `lastProcessingStartTime` atomic pointer used to track
+    /// the processing start time of the last event for stuck detection.
+    typedef bsl::function<EventFn(int                queueId,
+                                  bsls::AtomicInt64* lastProcessingStartTime)>
+        EventFnCreatorFn;
 
     // FRIENDS
     template <typename T>
@@ -208,7 +222,7 @@ class MultiQueueThreadPoolConfig {
     /// queue at the requested time.
     bdlmt::EventScheduler* d_eventScheduler_p;
 
-    EventFn d_eventCallbackFn;
+    EventFnCreatorFn d_eventCallbackCreatorFn;
 
     QueueCreatorFn d_queueCreatorFn;
 
@@ -217,6 +231,8 @@ class MultiQueueThreadPoolConfig {
     bsl::string d_monitorAlarmString;
 
     bsls::TimeInterval d_monitorAlarmTimeout;
+
+    bsls::TimeInterval d_monitorWarningTimeout;
 
   public:
     // TRAITS
@@ -232,11 +248,12 @@ class MultiQueueThreadPoolConfig {
     /// process events, the specified `queueCreator` to create the queues,
     /// and the optionally specified `objectCreator` and `objectResetter` to
     /// create and reset objects of the parameterized `TYPE`.
-    explicit MultiQueueThreadPoolConfig(int                   numQueues,
-                                        bdlmt::ThreadPool*    threadPool,
-                                        const EventFn&        eventCallback,
-                                        const QueueCreatorFn& queueCreator,
-                                        bslma::Allocator* basicAllocator = 0);
+    explicit MultiQueueThreadPoolConfig(
+        int                     numQueues,
+        bdlmt::ThreadPool*      threadPool,
+        const EventFnCreatorFn& eventCallbackCreator,
+        const QueueCreatorFn&   queueCreator,
+        bslma::Allocator*       basicAllocator = 0);
 
     /// Create a `bmqc::MultiQueueThreadPoolConfig` object having the same
     /// value as the specified `original` object.  Use the optionally
@@ -267,6 +284,11 @@ class MultiQueueThreadPoolConfig {
     MultiQueueThreadPoolConfig<TYPE>&
     setMonitorAlarm(bslstl::StringRef         alarmString,
                     const bsls::TimeInterval& timeout);
+
+    /// Set the warning interval `timeout` for stuck events.
+    /// Return a reference offering modifiable access to this object.
+    MultiQueueThreadPoolConfig<TYPE>&
+    setMonitorWarningTimeout(const bsls::TimeInterval& timeout);
 };
 
 // ==========================
@@ -295,8 +317,8 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
         e_MONITOR_PENDING,
         /// A monitor event has been processed by the queue
         e_MONITOR_PROCESSED,
-        // the queue hasn't processed its event in at least one timeout
-        // interval
+        /// the queue hasn't processed its event in at least one timeout
+        /// interval
         e_MONITOR_STUCK
     };
 
@@ -323,6 +345,8 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
         /// Name of the queue
         bsl::string d_name;
 
+        EventFn d_eventCallback;
+
         bsls::AtomicInt d_monitorState;
 
         /// A thread-safe reference counter for the queue processing loop.
@@ -338,6 +362,11 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
         /// as long as `stop()` was not called.
         bsls::AtomicInt d_processQueueRefCount;
 
+        /// A thread-safe timestamp in nanoseconds of the moment when the last
+        /// event was popped from the queue and started processing. Can be 0 if
+        /// the last element has been processed and the queue is empty.
+        bsls::AtomicInt64 d_lastProcessingStartTime;
+
         /// A semaphore used to verify that a queue has stopped.
         /// Note: shared_ptr is used because copy/move are not defined for
         ///       `TimedSemaphore` and we still need to copy `QueueInfo`.
@@ -352,8 +381,10 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
         explicit QueueInfo(bslma::Allocator* basicAllocator = 0)
         : d_queue_p(0)
         , d_name(basicAllocator)
+        , d_eventCallback(bsl::allocator_arg, basicAllocator)
         , d_monitorState(e_MONITOR_PROCESSED)
         , d_processQueueRefCount(1)
+        , d_lastProcessingStartTime(0)
         , d_finished_sp(bsl::allocate_shared<bslmt::TimedSemaphore>(
               basicAllocator,
               0,
@@ -367,9 +398,13 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
                            bslma::Allocator* basicAllocator = 0)
         : d_queue_p(other.d_queue_p)
         , d_name(other.d_name, basicAllocator)
+        , d_eventCallback(bsl::allocator_arg,
+                          basicAllocator,
+                          other.d_eventCallback)
         , d_monitorState(static_cast<int>(other.d_monitorState))
         , d_processQueueRefCount(
               static_cast<int>(other.d_processQueueRefCount))
+        , d_lastProcessingStartTime(0)
         , d_finished_sp(other.d_finished_sp)
         , d_threadId(other.d_threadId)
         {
@@ -379,9 +414,11 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
         // MANIPULATORS
         void reset()
         {
-            d_queue_p               = 0;
-            d_monitorState          = e_MONITOR_PROCESSED;
-            d_threadId              = 0;
+            d_queue_p                 = 0;
+            d_monitorState            = e_MONITOR_PROCESSED;
+            d_threadId                = 0;
+            d_eventCallback           = bsl::nullptr_t();
+            d_lastProcessingStartTime = 0;
         }
     };
 
@@ -393,6 +430,10 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
     /// The timeout for `timedWait` when stopping the queues
     static const int k_MAX_WAIT_SECONDS_AT_SHUTDOWN = 300;
 
+    /// The period for the recurrently called function that controls event
+    /// processing time
+    static const double k_MONITORING_PERIOD_SEC;
+
     // DATA
     Config d_config;
 
@@ -402,7 +443,8 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
 
     bool d_started;
 
-    bdlmt::EventScheduler::RecurringEventHandle d_monitorEventHandle;
+    bdlmt::EventScheduler::RecurringEventHandle d_alarmMonitorEventHandle;
+    bdlmt::EventScheduler::RecurringEventHandle d_warningMonitorEventHandle;
 
     bslma::Allocator* d_allocator_p;
 
@@ -411,6 +453,10 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
     /// Make sure each queue has processed its `monitor` event and enqueue
     /// another one on each queue.
     void processMonitorEvents();
+
+    /// Check when each queue started processing its last event and report if
+    /// processing is taking too long.
+    void checkStuckEvents();
 
     /// Thread pool worker function.
     /// Pop and process events from the queue with the specified `queue`
@@ -449,15 +495,6 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
     /// started.
     void stop();
 
-    /// Set the timeout associated with monitoring of the queues of this
-    /// MQTP to make sure events can pass through each queue in at most the
-    /// specified `timeout` time.  If `timeout` has 0 seconds and 0
-    /// nanoseconds, simply cancel monitoring of the queues of this MQTP
-    /// altogether.  Return `0` if this MQTP is started, non-zero
-    /// otherwise. The behavior is undefined unless this MQTP was provided
-    /// an EventScheduler in its configuration upon construction.
-    int setMonitorAlarmTimeout(const bsls::TimeInterval& timeout);
-
     /// @brief Enqueue an event to the specified queue.
     /// @param event Event to enqueue.
     /// @param queueId Queue id of the destination queue for the event.
@@ -491,7 +528,12 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
     bslmt::ThreadUtil::Id queueThreadId(int queueId) const;
 
     bsls::Types::Int64 numElements(int queueId) const;
+
+    bsl::string_view queueName(int queueId) const;
 };
+
+template <typename TYPE>
+const double MultiQueueThreadPool<TYPE>::k_MONITORING_PERIOD_SEC = 5.0;
 
 // ============================================================================
 //                             INLINE DEFINITIONS
@@ -504,19 +546,22 @@ class MultiQueueThreadPool BSLS_KEYWORD_FINAL {
 // CREATORS
 template <typename TYPE>
 inline MultiQueueThreadPoolConfig<TYPE>::MultiQueueThreadPoolConfig(
-    int                   numQueues,
-    bdlmt::ThreadPool*    threadPool,
-    const EventFn&        eventCallback,
-    const QueueCreatorFn& queueCreator,
-    bslma::Allocator*     basicAllocator)
+    int                     numQueues,
+    bdlmt::ThreadPool*      threadPool,
+    const EventFnCreatorFn& eventCallbackCreator,
+    const QueueCreatorFn&   queueCreator,
+    bslma::Allocator*       basicAllocator)
 : d_numQueues(numQueues)
 , d_threadPool_p(threadPool)
 , d_eventScheduler_p(0)
-, d_eventCallbackFn(bsl::allocator_arg, basicAllocator, eventCallback)
+, d_eventCallbackCreatorFn(bsl::allocator_arg,
+                           basicAllocator,
+                           eventCallbackCreator)
 , d_queueCreatorFn(bsl::allocator_arg, basicAllocator, queueCreator)
 , d_name(basicAllocator)
 , d_monitorAlarmString(basicAllocator)
 , d_monitorAlarmTimeout()
+, d_monitorWarningTimeout()
 {
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(threadPool);
@@ -530,13 +575,14 @@ inline MultiQueueThreadPoolConfig<TYPE>::MultiQueueThreadPoolConfig(
 : d_numQueues(other.d_numQueues)
 , d_threadPool_p(other.d_threadPool_p)
 , d_eventScheduler_p(other.d_eventScheduler_p)
-, d_eventCallbackFn(bsl::allocator_arg,
-                    basicAllocator,
-                    other.d_eventCallbackFn)
+, d_eventCallbackCreatorFn(bsl::allocator_arg,
+                           basicAllocator,
+                           other.d_eventCallbackCreatorFn)
 , d_queueCreatorFn(bsl::allocator_arg, basicAllocator, other.d_queueCreatorFn)
 , d_name(other.d_name, basicAllocator)
 , d_monitorAlarmString(other.d_monitorAlarmString, basicAllocator)
 , d_monitorAlarmTimeout(other.d_monitorAlarmTimeout)
+, d_monitorWarningTimeout(other.d_monitorWarningTimeout)
 {
     // NOTHING
 }
@@ -574,6 +620,20 @@ MultiQueueThreadPoolConfig<TYPE>::setMonitorAlarm(
     return *this;
 }
 
+template <typename TYPE>
+inline MultiQueueThreadPoolConfig<TYPE>&
+MultiQueueThreadPoolConfig<TYPE>::setMonitorWarningTimeout(
+    const bsls::TimeInterval& timeout)
+{
+    BSLS_ASSERT_SAFE(d_eventScheduler_p &&
+                     "Cannot monitor queues if an event scheduler was not "
+                     "provided");
+
+    d_monitorWarningTimeout = timeout;
+
+    return *this;
+}
+
 // --------------------------
 // class MultiQueueThreadPool
 // --------------------------
@@ -598,9 +658,9 @@ inline void MultiQueueThreadPool<TYPE>::processMonitorEvents()
                     << d_queues[i].d_name
                     << "' hasn't processed an event enqueued "
                     << bmqu::PrintUtil::prettyTimeInterval(
-                           d_config.d_monitorAlarmTimeout.totalMicroseconds() *
-                           bdlt::TimeUnitRatio::k_NS_PER_US)
-                    << " ago.";
+                           d_config.d_monitorAlarmTimeout.totalNanoseconds())
+                    << " ago. Current queue size: "
+                    << d_queues[i].d_queue_p->numElements();
             }
 
             d_queues[i].d_monitorState.testAndSwap(e_MONITOR_PENDING,
@@ -631,6 +691,30 @@ inline void MultiQueueThreadPool<TYPE>::processMonitorEvents()
 }
 
 template <typename TYPE>
+inline void MultiQueueThreadPool<TYPE>::checkStuckEvents()
+{
+    const bsls::Types::Int64 now =
+        bsls::SystemTime::nowMonotonicClock().totalNanoseconds();
+    for (size_t i = 0; i < d_queues.size(); ++i) {
+        const bsls::Types::Int64 lastProcessingStartTime =
+            d_queues[i].d_lastProcessingStartTime.load();
+        if (lastProcessingStartTime != 0) {
+            const bsls::Types::Int64 processingTime = now -
+                                                      lastProcessingStartTime;
+            if (processingTime >
+                d_config.d_monitorWarningTimeout.totalNanoseconds()) {
+                BALL_LOG_WARN
+                    << "Queue '" << d_queues[i].d_name
+                    << "' started processing an event "
+                    << bmqu::PrintUtil::prettyTimeInterval(processingTime)
+                    << " ago and still has not finished. Current queue size: "
+                    << d_queues[i].d_queue_p->numElements();
+            }
+        }
+    }
+}
+
+template <typename TYPE>
 inline void MultiQueueThreadPool<TYPE>::processQueue(int queue)
 {
     QueueInfo& info = d_queues[queue];
@@ -643,8 +727,7 @@ inline void MultiQueueThreadPool<TYPE>::processQueue(int queue)
         const int popRet = info.d_queue_p->tryPopFront(&event);
         if (popRet != 0) {
             // Queue is empty
-            d_config.d_eventCallbackFn(queue, d_queueEmptyEvent_sp);
-
+            info.d_eventCallback(d_queueEmptyEvent_sp);
             info.d_queue_p->popFront(&event);
         }
 
@@ -674,7 +757,7 @@ inline void MultiQueueThreadPool<TYPE>::processQueue(int queue)
             continue;  // CONTINUE
         }
 
-        d_config.d_eventCallbackFn(queue, event);
+        info.d_eventCallback(event);
     }
 }
 
@@ -687,7 +770,8 @@ inline MultiQueueThreadPool<TYPE>::MultiQueueThreadPool(
 , d_queueEmptyEvent_sp(0, basicAllocator)
 , d_queues(config.d_numQueues, QueueInfo(), basicAllocator)
 , d_started(false)
-, d_monitorEventHandle()
+, d_alarmMonitorEventHandle()
+, d_warningMonitorEventHandle()
 , d_allocator_p(bslma::Default::allocator(basicAllocator))
 {
     // NOTHING
@@ -727,8 +811,6 @@ inline int MultiQueueThreadPool<TYPE>::start()
 
     // Create the queues
     for (size_t i = 0; i < d_queues.size(); ++i) {
-        d_queues[i].d_queue_p = d_config.d_queueCreatorFn(static_cast<int>(i),
-                                                          d_allocator_p);
         // Generate a name for the queue
         bsl::string name(d_allocator_p);
         if (!d_config.d_name.empty()) {
@@ -738,7 +820,13 @@ inline int MultiQueueThreadPool<TYPE>::start()
         name += "Queue ";
         name += bsl::to_string(i);
 
-        d_queues[i].d_name = name;
+        QueueInfo& queue      = d_queues[i];
+        queue.d_name          = name;
+        queue.d_queue_p       = d_config.d_queueCreatorFn(static_cast<int>(i),
+                                                    d_allocator_p);
+        queue.d_eventCallback = d_config.d_eventCallbackCreatorFn(
+            static_cast<int>(i),
+            &queue.d_lastProcessingStartTime);
     }
 
     BSLS_ASSERT_SAFE(d_config.d_threadPool_p->enabled());
@@ -751,12 +839,19 @@ inline int MultiQueueThreadPool<TYPE>::start()
     }
 
     // See if we have to start monitoring job
-    if (d_config.d_eventScheduler_p &&
-        d_config.d_monitorAlarmTimeout != bsls::TimeInterval()) {
-        d_config.d_eventScheduler_p->scheduleRecurringEvent(
-            &d_monitorEventHandle,
-            d_config.d_monitorAlarmTimeout,
-            bdlf::BindUtil::bind(&ThisClass::processMonitorEvents, this));
+    if (d_config.d_eventScheduler_p) {
+        if (d_config.d_monitorAlarmTimeout != bsls::TimeInterval()) {
+            d_config.d_eventScheduler_p->scheduleRecurringEvent(
+                &d_alarmMonitorEventHandle,
+                d_config.d_monitorAlarmTimeout,
+                bdlf::BindUtil::bind(&ThisClass::processMonitorEvents, this));
+        }
+        if (d_config.d_monitorWarningTimeout != bsls::TimeInterval()) {
+            d_config.d_eventScheduler_p->scheduleRecurringEvent(
+                &d_warningMonitorEventHandle,
+                bsls::TimeInterval(k_MONITORING_PERIOD_SEC),
+                bdlf::BindUtil::bind(&ThisClass::checkStuckEvents, this));
+        }
     }
 
     d_started = true;
@@ -771,9 +866,17 @@ inline void MultiQueueThreadPool<TYPE>::stop()
 
     d_started = false;
 
-    if (d_config.d_eventScheduler_p && d_monitorEventHandle) {
-        d_config.d_eventScheduler_p->cancelEventAndWait(&d_monitorEventHandle);
-        d_monitorEventHandle.release();
+    if (d_config.d_eventScheduler_p) {
+        if (d_alarmMonitorEventHandle) {
+            d_config.d_eventScheduler_p->cancelEventAndWait(
+                &d_alarmMonitorEventHandle);
+            d_alarmMonitorEventHandle.release();
+        }
+        if (d_warningMonitorEventHandle) {
+            d_config.d_eventScheduler_p->cancelEventAndWait(
+                &d_warningMonitorEventHandle);
+            d_warningMonitorEventHandle.release();
+        }
     }
 
     // If we create the queues in the constructor, and delete them in the
@@ -819,36 +922,6 @@ inline void MultiQueueThreadPool<TYPE>::stop()
         d_allocator_p->deleteObject(info.d_queue_p);
         info.reset();
     }
-}
-
-template <typename TYPE>
-inline int MultiQueueThreadPool<TYPE>::setMonitorAlarmTimeout(
-    const bsls::TimeInterval& timeout)
-{
-    BSLS_ASSERT_SAFE(d_config.d_eventScheduler_p &&
-                     "Cannot set monitor alarm timeout if an event "
-                     "scheduler was not provided");
-
-    if (d_monitorEventHandle) {
-        d_config.d_eventScheduler_p->cancelEventAndWait(&d_monitorEventHandle);
-        d_monitorEventHandle.release();
-    }
-
-    d_config.d_monitorAlarmTimeout = timeout;
-
-    if (timeout == bsls::TimeInterval()) {
-        // Disable monitoring of the queues of this MQTP altogether
-        return 0;  // RETURN
-    }
-
-    if (isStarted()) {
-        d_config.d_eventScheduler_p->scheduleRecurringEvent(
-            &d_monitorEventHandle,
-            d_config.d_monitorAlarmTimeout,
-            bdlf::BindUtil::bind(&ThisClass::processMonitorEvents, this));
-    }
-
-    return 0;
 }
 
 template <typename TYPE>
@@ -942,6 +1015,18 @@ MultiQueueThreadPool<TYPE>::numElements(int queueId) const
     BSLS_ASSERT_SAFE(d_queues[queueId].d_queue_p);
 
     return d_queues[queueId].d_queue_p->numElements();
+}
+
+template <typename TYPE>
+inline bsl::string_view
+MultiQueueThreadPool<TYPE>::queueName(int queueId) const
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(0 <= queueId);
+    BSLS_ASSERT_SAFE(queueId < numQueues());
+    BSLS_ASSERT_SAFE(d_queues[queueId].d_queue_p);
+
+    return d_queues[queueId].d_name;
 }
 
 }  // close package namespace

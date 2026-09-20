@@ -797,8 +797,9 @@ void ClusterOrchestrator::transitionToAvailable()
         bmqp_ctrlmsg::NodeStatusAdvisory& advisory =
             clusterMsg.choice().makeNodeStatusAdvisory();
         advisory.status() = bmqp_ctrlmsg::NodeStatus::E_AVAILABLE;
-        d_clusterData_p->messageTransmitter().broadcastMessage(controlMsg,
-                                                               true);
+        d_clusterData_p->messageTransmitter().broadcastMessage(
+            controlMsg,
+            d_clusterData_p->transportManager());
 
         d_wasAvailableAdvisorySent = true;
     }
@@ -1003,6 +1004,17 @@ void ClusterOrchestrator::processNodeStoppingNotification(
             mqbc::ElectorInfoLeaderStatus::e_PASSIVE);
     }
 
+    // Cancel all pending requests to this stopping node
+    bmqp_ctrlmsg::ControlMessage response;
+    bmqp_ctrlmsg::Status&        failure = response.choice().makeStatus();
+    failure.category() = bmqp_ctrlmsg::StatusCategory::E_CANCELED;
+    failure.code()     = mqbi::ClusterErrorCode::e_STOPPING;
+    failure.message()  = "Peer node is stopping";
+
+    d_clusterData_p->requestManager().cancelAllRequests(
+        response,
+        ns->clusterNode()->nodeId());
+
     // Replica makes all open queues buffer PUTs (by calling 'onOpenUpstream').
     bsl::shared_ptr<ClusterQueueHelper::StopContext> context_sp =
         d_queueHelper.processNodeStoppingNotification(ns->clusterNode(),
@@ -1013,7 +1025,7 @@ void ClusterOrchestrator::processNodeStoppingNotification(
     // about the status of a peer node.  Self may end up issuing a
     // (non-scheduled) sync point to the node.
 
-    // 'processNodeStoppingNotification' is blocking for Ptimary (non-blocking)
+    // 'processNodeStoppingNotification' is blocking for Primary (non-blocking)
     // for Replicas.
     const bsl::vector<int>& partitions =
         d_clusterData_p->membership().selfNodeSession()->primaryPartitions();
@@ -1088,11 +1100,11 @@ void ClusterOrchestrator::processNodeStatusAdvisory(
         return;  // RETURN
     }
 
-    if (bmqp_ctrlmsg::NodeStatus::E_AVAILABLE == nsAdvisory.status()) {
-        if (bmqp_ctrlmsg::NodeStatus::E_STOPPING == selfStatus) {
-            return;  // RETURN
-        }
+    if (bmqp_ctrlmsg::NodeStatus::E_STOPPING == selfStatus) {
+        return;  // RETURN
+    }
 
+    if (bmqp_ctrlmsg::NodeStatus::E_AVAILABLE == nsAdvisory.status()) {
         if (mqbnet::ElectorState::e_LEADER ==
                 d_clusterData_p->electorInfo().electorState() &&
             mqbc::ElectorInfoLeaderStatus::e_ACTIVE ==

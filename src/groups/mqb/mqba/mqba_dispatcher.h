@@ -269,6 +269,73 @@ class Dispatcher BSLS_KEYWORD_FINAL : public mqbi::Dispatcher {
 
     typedef bsl::shared_ptr<DispatcherContext> DispatcherContextSp;
 
+    /// Functor that processes dispatcher events for a specific processor
+    /// queue, pre-caching the flush list and stat context pointers to avoid
+    /// repeated lookups on the hot path.
+    class EventCallback {
+      private:
+        // DATA
+
+        /// Queue name (used for logging).
+        bsl::string_view d_queueName;
+
+        /// Stat context for this processor queue.
+        bsl::shared_ptr<bmqst::StatContext> d_stats_sp;
+
+        /// Gate controlling whether client flushing is enabled (held, not
+        /// owned).
+        bmqu::GateKeeper* d_flushClientsGate_p;
+
+        /// Flush list for this processor queue (held, not owned).
+        mqba::Dispatcher::DispatcherClientPtrVector* d_flushList_p;
+
+        /// Processor pull for logging the size of the queue (held, not owned).
+        const ProcessorPool* d_processorPool_p;
+
+        /// Timeout for warnings if processing of the event takes longer.
+        const bsls::Types::Int64 d_warningTimeoutNs;
+
+        /// Type of the dispatcher client (used for logging).
+        const mqbi::DispatcherClientType::Enum d_type;
+
+        /// Processor queue identifier (used for logging).
+        const int d_queueId;
+
+        /// Atomic timestamp tracking when the last event started processing,
+        /// used by the stuck-event monitor (held, not owned).
+        bsls::AtomicInt64* d_lastProcessingStartTime_p;
+
+        // PRIVATE MANIPULATORS
+
+        /// Flush all clients in the flush list and clear it.
+        void flushClients();
+
+      public:
+        // CREATORS
+
+        /// Create an event callback for the processor having the specified
+        /// `queueId` in charge of dispatcher clients of the specified
+        /// `type`, using the specified `flushClientsGate_p` to control
+        /// flushing, the specified `context_sp` to obtain the flush list
+        /// and stat context, and the specified
+        /// `lastProcessingStartTime` to track event processing for the
+        /// stuck-event monitor.
+        explicit EventCallback(
+            mqbi::DispatcherClientType::Enum             type,
+            int                                          queueId,
+            bmqu::GateKeeper*                            flushClientsGate_p,
+            const mqba::Dispatcher::DispatcherContextSp& context_sp,
+            bsls::Types::Int64                           warningTimeoutNs,
+            bsls::AtomicInt64* lastProcessingStartTime);
+
+        // MANIPULATORS
+
+        /// Process the specified `event`.  If `event` is non-null, dispatch
+        /// it to the destination client and update stats; otherwise flush
+        /// all clients in the flush list.
+        void operator()(const mqbi::Dispatcher::DispatcherEventSp& event);
+    };
+
   private:
     // NOT IMPLEMENTED
     Dispatcher(const Dispatcher&) BSLS_CPP11_DELETED;
@@ -334,16 +401,14 @@ class Dispatcher BSLS_KEYWORD_FINAL : public mqbi::Dispatcher {
                  int                                          processorId,
                  bslma::Allocator*                            allocator);
 
-    /// Callback when a new object in the specified `event` is dispatched
-    /// for the queue in charge of dispatcher client of the specified `type`,
-    /// having the specified `processorId`.
-    void queueEventCb(mqbi::DispatcherClientType::Enum type,
-                      int                              processorId,
-                      const ProcessorPool::EventSp&    event);
-
-    /// Flush clients of the specified `type` for the specified
-    /// `processorId`.
-    void flushClients(mqbi::DispatcherClientType::Enum type, int processorId);
+    /// Create an event callback for the processor having the specified
+    /// `queueId` in charge of dispatcher clients of the specified `type`,
+    /// using the specified `lastProcessingStartTime` to track event
+    /// processing for the stuck-event monitor.
+    ProcessorPool::EventFn
+    eventCallbackCreator(mqbi::DispatcherClientType::Enum type,
+                         int                              queueId,
+                         bsls::AtomicInt64* lastProcessingStartTime);
 
   public:
     // TRAITS

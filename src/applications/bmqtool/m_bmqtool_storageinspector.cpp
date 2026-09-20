@@ -1055,6 +1055,7 @@ void StorageInspector::readQueuesIfNeeded()
 // CREATORS
 StorageInspector::StorageInspector(bslma::Allocator* allocator)
 : d_isOpen(false)
+, d_terminalReader(allocator)
 , d_queues(allocator)
 , d_qlistFileRead(false)
 , d_dataFile(allocator)
@@ -1090,7 +1091,7 @@ int StorageInspector::initialize()
     // Print the welcome banner
     BALL_LOG_INFO << "Welcome to the BlazingMQ tool storage inspector.\n"
                   << "Type 'help' to see the list of commands supported by "
-                  << "storage inspector. Crl-D to quit.";
+                  << "storage inspector. Ctrl-D to quit.";
     return 0;
 }
 
@@ -1099,7 +1100,7 @@ int StorageInspector::mainLoop()
     while (true) {
         bsl::string input;
 
-        if (!InputUtil::getLine(&input)) {
+        if (!d_terminalReader.getLine(&input)) {
             break;  // BREAK
         }
 

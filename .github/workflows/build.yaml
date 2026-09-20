@@ -185,6 +185,7 @@ jobs:
           "negotiation_bypass_authentication",
           "negotiation",
           "open_queue",
+          "configure_stream",
           "configure_queue_stream",
           "put",
           "confirm",
@@ -241,6 +242,7 @@ jobs:
     name: Sanitize
     uses: ./.github/workflows/sanitize.yaml
     needs: integration_tests_ubuntu
+    if: ${{ !cancelled() }}
 
   integration_tests_storagetool_ubuntu:
     name: IT [Storage tool]
@@ -338,9 +340,9 @@ jobs:
           PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/opt/bb/lib64/pkgconfig
         run: |
           cmake --preset gh-prometheus-ubuntu-latest-cpp17 -S .
-          echo "::add-matcher::.github/workflows/problem-matchers/cpp.json"
+          echo "::add-matcher::.github/workflows/problem-matchers/cpp-prometheus.json"
           cmake --build --preset gh-prometheus-ubuntu-latest-cpp17
-          echo "::remove-matcher owner=cpp"
+          echo "::remove-matcher owner=cpp-prometheus"
 
       - name: Create prometheus dir
         run:  mkdir -p prometheus_dir
