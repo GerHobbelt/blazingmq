@@ -36,6 +36,7 @@
 #include <bmqt_uri.h>
 
 #include <bmqu_memoutstream.h>
+#include <bmqu_time.h>
 
 // BDE
 #include <ball_log.h>
@@ -391,7 +392,10 @@ class MockDataStore : public mqbs::DataStore {
         return d_description;
     }
 
-    int open(QueueKeyInfoMap*) BSLS_KEYWORD_OVERRIDE { return 0; }
+    int open(QueueKeyInfoMap*, unsigned int) BSLS_KEYWORD_OVERRIDE
+    {
+        return 0;
+    }
 
     int close(bool, bool) BSLS_KEYWORD_OVERRIDE { return 0; }
 

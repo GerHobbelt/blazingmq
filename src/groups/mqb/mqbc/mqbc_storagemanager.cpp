@@ -76,6 +76,23 @@ bool isPrimaryActive(const mqbi::StorageManager_PartitionInfo& pinfo)
     return pinfo.primaryStatus() == bmqp_ctrlmsg::PrimaryStatus::E_ACTIVE;
 }
 
+/// @brief Get the name of a ReplicaDataRequest flavor, as used in logs.
+///
+/// @param dataType The type of the replica data request.
+/// @returns `"Pull"`, `"Push"` or `"Drop"`, or `"Unknown"` if `dataType` is
+/// not one of those.
+const char*
+replicaDataRequestName(bmqp_ctrlmsg::ReplicaDataType::Value dataType)
+{
+    switch (dataType) {
+    case bmqp_ctrlmsg::ReplicaDataType::E_PULL: return "Pull";
+    case bmqp_ctrlmsg::ReplicaDataType::E_PUSH: return "Push";
+    case bmqp_ctrlmsg::ReplicaDataType::E_DROP: return "Drop";
+    case bmqp_ctrlmsg::ReplicaDataType::E_UNKNOWN: BSLA_FALLTHROUGH;
+    default: return "Unknown";
+    }
+}
+
 }  // close unnamed namespace
 
 // ----------------------------
@@ -1004,6 +1021,93 @@ void StorageManager::startSendDataChunksAsPrimary(
     }
 }
 
+void StorageManager::sendFailureResponse(
+    int                                 requestId,
+    mqbnet::ClusterNode*                destination,
+    bmqp_ctrlmsg::StatusCategory::Value category,
+    int                                 code,
+    const bslstl::StringRef&            reason)
+{
+    bmqp_ctrlmsg::ControlMessage controlMsg;
+    controlMsg.rId() = requestId;
+
+    bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
+    status.category()            = category;
+    status.code()                = code;
+    status.message()             = reason;
+
+    d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
+                                                          destination);
+}
+
+bool StorageManager::validateReplicaDataRequest(
+    int*                                    requestId,
+    const bmqp_ctrlmsg::ReplicaDataRequest& request,
+    const bdlb::NullableValue<int>&         rId,
+    mqbnet::ClusterNode*                    source)
+{
+    // executed by the cluster *DISPATCHER* thread
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
+    BSLS_ASSERT_SAFE(requestId);
+    BSLS_ASSERT_SAFE(source);
+
+    const char* const name = replicaDataRequestName(request.replicaDataType());
+
+    if (rId.isNull()) {
+        BALL_LOG_ERROR << d_clusterData_p->identity().description()
+                       << " Received ReplicaDataRequest" << name << ": "
+                       << request << " from " << source->nodeDescription()
+                       << " with no request id.  Dropping it.";
+
+        return false;  // RETURN
+    }
+
+    const int id = rId.value();
+
+    const int partitionId = request.partitionId();
+    if (partitionId < 0 ||
+        partitionId >= static_cast<int>(d_fileStores.size())) {
+        BALL_LOG_ERROR << d_clusterData_p->identity().description()
+                       << " Received ReplicaDataRequest" << name << ": "
+                       << request << " from " << source->nodeDescription()
+                       << " with invalid partitionId.  Sending failure "
+                       << "response.";
+
+        sendFailureResponse(id,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_REFUSED,
+                            mqbi::ClusterErrorCode::e_NO_PARTITION,
+                            "Invalid partitionId");
+        return false;  // RETURN
+    }
+    if (source->nodeId() !=
+        d_clusterState_p->partitionsInfo().at(partitionId).primaryNodeId()) {
+        const mqbnet::ClusterNode* primaryNode =
+            d_clusterState_p->partitionsInfo().at(partitionId).primaryNode();
+        BALL_LOG_ERROR << d_clusterData_p->identity().description()
+                       << " Partition [" << partitionId << "]: "
+                       << " Received ReplicaDataRequest" << name << ": "
+                       << request << " from " << source->nodeDescription()
+                       << " but self's perceived primary is "
+                       << (primaryNode ? primaryNode->nodeDescription()
+                                       : " ** NULL **")
+                       << ".  Sending failure response.";
+
+        sendFailureResponse(id,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_REFUSED,
+                            mqbi::ClusterErrorCode::e_SOURCE_NOT_PRIMARY,
+                            "Source node is not recognized as the primary");
+        return false;  // RETURN
+    }
+
+    *requestId = id;
+
+    return true;
+}
+
 void StorageManager::processReplicaDataRequestPull(
     const bmqp_ctrlmsg::ControlMessage& message,
     mqbnet::ClusterNode*                source)
@@ -1025,9 +1129,15 @@ void StorageManager::processReplicaDataRequestPull(
     BSLS_ASSERT_SAFE(replicaDataRequest.replicaDataType() ==
                      bmqp_ctrlmsg::ReplicaDataType::E_PULL);
 
+    int requestId = 0;
+    if (!validateReplicaDataRequest(&requestId,
+                                    replicaDataRequest,
+                                    message.rId(),
+                                    source)) {
+        return;  // RETURN
+    }
+
     const int partitionId = replicaDataRequest.partitionId();
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "
@@ -1040,51 +1150,37 @@ void StorageManager::processReplicaDataRequestPull(
                       << "Self node is stopping; sending a failure response "
                       << "to ReplicaDataRequestPull.";
 
-        bmqp_ctrlmsg::ControlMessage controlMsg;
-        controlMsg.rId() = message.rId();
-
-        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
-        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
-        status.code()                = mqbi::ClusterErrorCode::e_STOPPING;
-        status.message()             = "Self node is stopping";
-
-        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
-                                                              source);
+        sendFailureResponse(requestId,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_REFUSED,
+                            mqbi::ClusterErrorCode::e_STOPPING,
+                            "Self node is stopping");
         return;  // RETURN
     }
 
-    mqbnet::ClusterNode* const selfNode =
-        d_clusterData_p->membership().selfNode();
-    const bmqp_ctrlmsg::PartitionSequenceNumber selfPSN =
-        d_nodeToPSNCtxMapVec.at(partitionId).at(selfNode).d_PSN;
-    if (replicaDataRequest.endSequenceNumber() != selfPSN) {
-        bmqp_ctrlmsg::ControlMessage controlMsg;
-        controlMsg.rId() = message.rId();
+    if (replicaDataRequest.beginSequenceNumber() >=
+        replicaDataRequest.endSequenceNumber()) {
+        BALL_LOG_ERROR
+            << d_clusterData_p->identity().description() << " Partition ["
+            << partitionId << "]: "
+            << "Received ReplicaDataRequestPull from "
+            << source->nodeDescription() << " with begin PSN: "
+            << mqbs::printPSN(replicaDataRequest.beginSequenceNumber())
+            << " which is not below its end PSN: "
+            << mqbs::printPSN(replicaDataRequest.endSequenceNumber())
+            << ".  Sending failure response.";
 
-        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
-        status.category() = bmqp_ctrlmsg::StatusCategory::E_INVALID_ARGUMENT;
-        status.code()     = mqbi::ClusterErrorCode::e_STORAGE_FAILURE;
-        status.message()  = "End PSN mismatch";
-
-        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
-                                                              source);
-
-        BALL_LOG_ERROR << d_clusterData_p->identity().description()
-                       << " Partition [" << partitionId << "]: "
-                       << "Received ReplicaDataRequestPull from "
-                       << source->nodeDescription() << " with end PSN: "
-                       << mqbs::printPSN(
-                              replicaDataRequest.endSequenceNumber())
-                       << " that does not match self's current PSN: "
-                       << mqbs::printPSN(selfPSN)
-                       << ".  Sent a failure response " << controlMsg << ".";
-
+        sendFailureResponse(requestId,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_INVALID_ARGUMENT,
+                            mqbi::ClusterErrorCode::e_STORAGE_FAILURE,
+                            "Invalid sequence number range");
         return;  // RETURN
     }
 
     PartitionFSMEventData eventData(
         source,
-        message.rId().isNull() ? -1 : message.rId().value(),
+        requestId,
         partitionId,
         1,
         source,
@@ -1119,12 +1215,15 @@ void StorageManager::processReplicaDataRequestPush(
     BSLS_ASSERT_SAFE(replicaDataRequest.replicaDataType() ==
                      bmqp_ctrlmsg::ReplicaDataType::E_PUSH);
 
+    int requestId = 0;
+    if (!validateReplicaDataRequest(&requestId,
+                                    replicaDataRequest,
+                                    message.rId(),
+                                    source)) {
+        return;  // RETURN
+    }
+
     const int partitionId = replicaDataRequest.partitionId();
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
-    BSLS_ASSERT_SAFE(
-        source->nodeId() ==
-        d_clusterState_p->partitionsInfo().at(partitionId).primaryNodeId());
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "
@@ -1137,22 +1236,37 @@ void StorageManager::processReplicaDataRequestPush(
                       << "Self node is stopping; sending a failure response "
                       << "to ReplicaDataRequestPush.";
 
-        bmqp_ctrlmsg::ControlMessage controlMsg;
-        controlMsg.rId() = message.rId();
+        sendFailureResponse(requestId,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_REFUSED,
+                            mqbi::ClusterErrorCode::e_STOPPING,
+                            "Self node is stopping");
+        return;  // RETURN
+    }
 
-        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
-        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
-        status.code()                = mqbi::ClusterErrorCode::e_STOPPING;
-        status.message()             = "Self node is stopping";
+    if (replicaDataRequest.beginSequenceNumber() >
+        replicaDataRequest.endSequenceNumber()) {
+        BALL_LOG_ERROR
+            << d_clusterData_p->identity().description() << " Partition ["
+            << partitionId << "]: "
+            << "Received ReplicaDataRequestPush from "
+            << source->nodeDescription() << " with begin PSN: "
+            << mqbs::printPSN(replicaDataRequest.beginSequenceNumber())
+            << " which is above its end PSN: "
+            << mqbs::printPSN(replicaDataRequest.endSequenceNumber())
+            << ".  Sending failure response.";
 
-        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
-                                                              source);
+        sendFailureResponse(requestId,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_INVALID_ARGUMENT,
+                            mqbi::ClusterErrorCode::e_STORAGE_FAILURE,
+                            "Invalid sequence number range");
         return;  // RETURN
     }
 
     PartitionFSMEventData eventData(
         source,
-        message.rId().isNull() ? -1 : message.rId().value(),
+        requestId,
         partitionId,
         1,
         source,
@@ -1175,15 +1289,6 @@ void StorageManager::processReplicaDataRequestDrop(
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-    BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
-    BSLS_ASSERT_SAFE(
-        message.choice().clusterMessage().choice().isPartitionMessageValue());
-    BSLS_ASSERT_SAFE(message.choice()
-                         .clusterMessage()
-                         .choice()
-                         .partitionMessage()
-                         .choice()
-                         .isReplicaDataRequestValue());
 
     const bmqp_ctrlmsg::ReplicaDataRequest& replicaDataRequest =
         message.choice()
@@ -1196,52 +1301,15 @@ void StorageManager::processReplicaDataRequestDrop(
     BSLS_ASSERT_SAFE(replicaDataRequest.replicaDataType() ==
                      bmqp_ctrlmsg::ReplicaDataType::E_DROP);
 
+    int requestId = 0;
+    if (!validateReplicaDataRequest(&requestId,
+                                    replicaDataRequest,
+                                    message.rId(),
+                                    source)) {
+        return;  // RETURN
+    }
+
     const int partitionId = replicaDataRequest.partitionId();
-    if (partitionId < 0 ||
-        partitionId >= static_cast<int>(d_fileStores.size())) {
-        BALL_LOG_ERROR
-            << d_clusterData_p->identity().description()
-            << " Received ReplicaDataRequestDrop: " << message << " from "
-            << source->nodeDescription()
-            << " with invalid partitionId.  Sending failure response.";
-
-        bmqp_ctrlmsg::ControlMessage controlMsg;
-        controlMsg.rId() = message.rId();
-
-        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
-        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
-        status.code()                = mqbi::ClusterErrorCode::e_NO_PARTITION;
-        status.message()             = "Invalid partitionId";
-
-        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
-                                                              source);
-        return;  // RETURN
-    }
-    if (source->nodeId() !=
-        d_clusterState_p->partitionsInfo().at(partitionId).primaryNodeId()) {
-        const mqbnet::ClusterNode* primaryNode =
-            d_clusterState_p->partitionsInfo().at(partitionId).primaryNode();
-        BALL_LOG_ERROR << d_clusterData_p->identity().description()
-                       << " Partition [" << partitionId << "]: "
-                       << " Received ReplicaDataRequestDrop: " << message
-                       << " from " << source->nodeDescription()
-                       << " but self's perceived primary is "
-                       << (primaryNode ? primaryNode->nodeDescription()
-                                       : " ** NULL **")
-                       << ".  Sending failure response.";
-
-        bmqp_ctrlmsg::ControlMessage controlMsg;
-        controlMsg.rId() = message.rId();
-
-        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
-        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
-        status.code()    = mqbi::ClusterErrorCode::e_SOURCE_NOT_PRIMARY;
-        status.message() = "Source node is not recognized as the primary";
-
-        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
-                                                              source);
-        return;  // RETURN
-    }
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "
@@ -1254,26 +1322,20 @@ void StorageManager::processReplicaDataRequestDrop(
                       << "Self node is stopping; sending a failure response "
                       << "to ReplicaDataRequestDrop.";
 
-        bmqp_ctrlmsg::ControlMessage controlMsg;
-        controlMsg.rId() = message.rId();
-
-        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
-        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
-        status.code()                = mqbi::ClusterErrorCode::e_STOPPING;
-        status.message()             = "Self node is stopping";
-
-        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
-                                                              source);
+        sendFailureResponse(requestId,
+                            source,
+                            bmqp_ctrlmsg::StatusCategory::E_REFUSED,
+                            mqbi::ClusterErrorCode::e_STOPPING,
+                            "Self node is stopping");
         return;  // RETURN
     }
 
-    PartitionFSMEventData eventData(
-        source,
-        message.rId().isNull() ? -1 : message.rId().value(),
-        partitionId,
-        1,
-        source,
-        replicaDataRequest.primaryLeaseId());
+    PartitionFSMEventData eventData(source,
+                                    requestId,
+                                    partitionId,
+                                    1,
+                                    source,
+                                    replicaDataRequest.primaryLeaseId());
 
     enqueuePartitionFSMEvent(PartitionFSM::Event::e_REPLICA_DATA_RQST_DROP,
                              eventData);
@@ -2660,6 +2722,10 @@ void StorageManager::do_failureReplicaDataResponsePull(
         status.code()    = mqbi::ClusterErrorCode::e_IRRECONCILABLE_DATA;
         status.message() = "Primary has irreconcilable data";
     }
+    else if (eventType == PartitionFSM::Event::e_END_PSN_MISMATCH) {
+        status.code()    = mqbi::ClusterErrorCode::e_END_PSN_MISMATCH;
+        status.message() = "End PSN mismatch";
+    }
     else {
         status.code()    = mqbi::ClusterErrorCode::e_STORAGE_FAILURE;
         status.message() = "Failed to send data chunks";
@@ -2753,8 +2819,6 @@ void StorageManager::do_sendDataToPrimary(
     const bmqp_ctrlmsg::PartitionSequenceNumber endSeqNum =
         eventData.partitionSeqNumDataRange().second;
     BSLS_ASSERT_SAFE(beginSeqNum < endSeqNum);
-    BSLS_ASSERT_SAFE(endSeqNum ==
-                     d_nodeToPSNCtxMapVec[partitionId][selfNode].d_PSN);
 
     PartitionFSMEventData sendPartitionFSMEventData(
         destNode,
@@ -2762,6 +2826,36 @@ void StorageManager::do_sendDataToPrimary(
         partitionId,
         1,
         eventData.partitionSeqNumDataRange());
+
+    const NodeToPSNCtxMap& nodeToPSNCtxMap = d_nodeToPSNCtxMapVec[partitionId];
+    const NodeToPSNCtxMapCIter selfCit     = nodeToPSNCtxMap.find(selfNode);
+    if (selfCit == nodeToPSNCtxMap.cend()) {
+        BMQTSK_ALARMLOG_ALARM(PartitionFSM::k_PFSM_DEFECT_LOG_TAG)
+            << d_clusterData_p->identity().description() << " Partition ["
+            << partitionId << "]: " << "Self has no stored PSN while healing "
+            << "as a replica.  Please review Partition FSM logic."
+            << BMQTSK_ALARMLOG_END;
+
+        enqueuePartitionFSMEvent(
+            PartitionFSM::Event::e_ERROR_SENDING_DATA_CHUNKS,
+            sendPartitionFSMEventData);
+        return;  // RETURN
+    }
+
+    if (endSeqNum != selfCit->second.d_PSN) {
+        BALL_LOG_ERROR << d_clusterData_p->identity().description()
+                       << " Partition [" << partitionId << "]: "
+                       << "Primary " << destNode->nodeDescription()
+                       << " requested data up to PSN "
+                       << mqbs::printPSN(endSeqNum)
+                       << ", which does not match self's current PSN "
+                       << mqbs::printPSN(selfCit->second.d_PSN)
+                       << ". Reply with a failure ReplicaDataResponsePull.";
+
+        enqueuePartitionFSMEvent(PartitionFSM::Event::e_END_PSN_MISMATCH,
+                                 sendPartitionFSMEventData);
+        return;  // RETURN
+    }
 
     // NOTE: In case the primary has missed rollover, it has already checked
     // during `do_primaryRemoveStorageIfNeeded` and has removed its own
@@ -3244,7 +3338,17 @@ void StorageManager::do_attemptOpenStorage(
         return;  // RETURN
     }
 
-    const int rc = fs->open(d_queueKeyInfoMapVec.at(partitionId).get());
+    // Hand over the cluster state only when self is the primary.
+    QueueKeyInfoMap* const queueKeyInfoMap =
+        d_partitionFSMVec.at(partitionId)->isSelfPrimary()
+            ? d_queueKeyInfoMapVec.at(partitionId).get()
+            : 0;
+
+    // Conform may append unreplicated corrective records; they reach replicas
+    // only because storeSelfSeq and sendDataToReplicas run right after this
+    // action in the primary transitions.  Keep that order.
+    const int rc = fs->open(queueKeyInfoMap,
+                            d_partitionInfoVec[partitionId].primaryLeaseId());
     if (0 != rc) {
         BMQTSK_ALARMLOG_ALARM("FILE_IO")
             << d_clusterData_p->identity().description() << " Partition ["
@@ -4479,15 +4583,6 @@ void StorageManager::processPrimaryStateRequest(
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-    BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
-    BSLS_ASSERT_SAFE(
-        message.choice().clusterMessage().choice().isPartitionMessageValue());
-    BSLS_ASSERT_SAFE(message.choice()
-                         .clusterMessage()
-                         .choice()
-                         .partitionMessage()
-                         .choice()
-                         .isPrimaryStateRequestValue());
 
     const bmqp_ctrlmsg::PrimaryStateRequest& primaryStateRequest =
         message.choice()
@@ -4498,8 +4593,26 @@ void StorageManager::processPrimaryStateRequest(
             .primaryStateRequest();
 
     const int partitionId = primaryStateRequest.partitionId();
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
+    if (partitionId < 0 ||
+        partitionId >= static_cast<int>(d_fileStores.size())) {
+        BALL_LOG_ERROR
+            << d_clusterData_p->identity().description()
+            << " Received PrimaryStateRequest: " << message << " from "
+            << source->nodeDescription()
+            << " with invalid partitionId.  Sending failure response.";
+
+        bmqp_ctrlmsg::ControlMessage controlMsg;
+        controlMsg.rId() = message.rId();
+
+        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
+        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
+        status.code()                = mqbi::ClusterErrorCode::e_NO_PARTITION;
+        status.message()             = "Invalid partitionId";
+
+        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
+                                                              source);
+        return;  // RETURN
+    }
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "
@@ -4536,15 +4649,6 @@ void StorageManager::processReplicaStateRequest(
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
-    BSLS_ASSERT_SAFE(message.choice().isClusterMessageValue());
-    BSLS_ASSERT_SAFE(
-        message.choice().clusterMessage().choice().isPartitionMessageValue());
-    BSLS_ASSERT_SAFE(message.choice()
-                         .clusterMessage()
-                         .choice()
-                         .partitionMessage()
-                         .choice()
-                         .isReplicaStateRequestValue());
 
     const bmqp_ctrlmsg::ReplicaStateRequest& replicaStateRequest =
         message.choice()
@@ -4555,8 +4659,26 @@ void StorageManager::processReplicaStateRequest(
             .replicaStateRequest();
 
     const int partitionId = replicaStateRequest.partitionId();
-    BSLS_ASSERT_SAFE(0 <= partitionId &&
-                     partitionId < static_cast<int>(d_fileStores.size()));
+    if (partitionId < 0 ||
+        partitionId >= static_cast<int>(d_fileStores.size())) {
+        BALL_LOG_ERROR
+            << d_clusterData_p->identity().description()
+            << " Received ReplicaStateRequest: " << message << " from "
+            << source->nodeDescription()
+            << " with invalid partitionId.  Sending failure response.";
+
+        bmqp_ctrlmsg::ControlMessage controlMsg;
+        controlMsg.rId() = message.rId();
+
+        bmqp_ctrlmsg::Status& status = controlMsg.choice().makeStatus();
+        status.category()            = bmqp_ctrlmsg::StatusCategory::E_REFUSED;
+        status.code()                = mqbi::ClusterErrorCode::e_NO_PARTITION;
+        status.message()             = "Invalid partitionId";
+
+        d_clusterData_p->messageTransmitter().sendMessageSafe(controlMsg,
+                                                              source);
+        return;  // RETURN
+    }
 
     BALL_LOG_INFO << d_clusterData_p->identity().description()
                   << " Partition [" << partitionId << "]: "

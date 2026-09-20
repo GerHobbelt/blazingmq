@@ -39,6 +39,9 @@ on:
         description: "GH Actions Cache key associated with the built dependencies"
         value: ${{ jobs.build_ubuntu.outputs.artifact_key }}
 
+permissions:
+  contents: read
+
 jobs:
   get_dependencies:
     name: "Dependencies"
@@ -54,10 +57,11 @@ jobs:
       artifact_key: ${{ steps.get_cache_key.outputs.artifact_key }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
       # Since input.ref can be a branch, tag or commit SHA,
       # we need to get the commit SHA to use it in the cache key.
@@ -72,7 +76,7 @@ jobs:
           COMMIT_SHA=$(git rev-parse HEAD)
           echo "cache_key=cache-${{ inputs.cxx_standard }}-${{ inputs.target }}-${COMMIT_SHA}" >> $GITHUB_OUTPUT
           echo "artifact_key=${{ inputs.name }}-${{ inputs.target }}-${COMMIT_SHA}" >> $GITHUB_OUTPUT
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: build-cache-restore-step
         if: inputs.save_build_as_artifacts == true # Variable type is boolean, thus no quotes
         with:
@@ -84,7 +88,7 @@ jobs:
       # The following steps restore cached deps
       # If the cache is not hit, it will build and install the dependencies
       # If the cache is hit, building deps is skipped, only make install is run
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: steps.build-cache-restore-step.outputs.cache-hit != 'true' # Variable type is string, thus using quotes
         with:
           path: |
@@ -138,7 +142,7 @@ jobs:
           echo "Please set the target to include 'all.t' to build unit tests."
           exit 1
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: inputs.save_build_as_artifacts == true # Variable type is boolean, thus no quotes
         with:
           path: |
@@ -151,7 +155,7 @@ jobs:
         # Type of "save_build_as_artifacts" variable is boolean, thus no quotes
         # Type of "cache-hit" variable is string, thus using quotes
         if: inputs.save_build_as_artifacts == true && steps.build-cache-restore-step.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             build/blazingmq

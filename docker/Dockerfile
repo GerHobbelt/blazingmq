@@ -1,4 +1,6 @@
-FROM docker.io/ubuntu:24.04 AS builder
+ARG BASE_IMAGE=docker.io/ubuntu:24.04
+
+FROM ${BASE_IMAGE} AS builder
 
 # Set up CA certificates first before installing other dependencies
 RUN apt-get update && \
@@ -31,7 +33,7 @@ COPY CMakeLists.txt srcs/bmq/CMakeLists.txt
 COPY src srcs/bmq/src
 COPY etc srcs/bmq/etc
 
-RUN bin/build_deps.sh \
+RUN GIT_SSL_NO_VERIFY=true bin/build_deps.sh \
     && cd srcs/bmq  \
     && cmake -S . -B cmake.bld/Linux -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE=/workspace/srcs/bde-tools/BdeBuildSystem/toolchains/linux/gcc-default.cmake \
@@ -48,7 +50,7 @@ RUN bin/build_deps.sh \
     && mv /bmq/bin/bmqtool.tsk /bmq/bin/bmqtool \
     && rm -rf /workspace
 
-FROM docker.io/ubuntu:24.04
+FROM ${BASE_IMAGE}
 
 COPY --from=builder /bmq /usr/local
 

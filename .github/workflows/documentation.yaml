@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   documentation-main:
     name: Build Doxygen documentation on `main`
@@ -22,16 +25,20 @@ jobs:
 
     steps:
       - name: Checkout `main`
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Clear out `docs/` subdirectory
         run: rm -rf docs
 
       - name: Checkout `gh-pages` into `docs/`
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: docs
           ref: gh-pages
+          # Needed so the "Commit new API documentation" step below can `git push`.
+          persist-credentials: true
 
       - name: Set up dependencies
         run: |

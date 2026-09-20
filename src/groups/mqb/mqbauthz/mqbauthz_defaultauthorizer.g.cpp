@@ -13,10 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <mqbauthz_basicauthorizer.h>
+#include <mqbauthz_defaultauthorizer.h>
 
 // MQB
 #include <mqbact_actions.h>
+#include <mqbcfg_brokerconfig.h>
+#include <mqbcfg_messages.h>
 #include <mqbplug_authenticator.h>
 #include <mqbplug_authorizer.h>
 
@@ -58,32 +60,55 @@ const bsl::optional<bsls::Types::Uint64>
 
 }
 
-class BasicAuthorizerTest : public ::testing::Test {
+class DefaultAuthorizerTest : public ::testing::Test {
   private:
-    mqbauthz::BasicAuthorizer d_authorizer;
+    mqbauthz::DefaultAuthorizer d_authorizer;
 
   protected:
-    BasicAuthorizerTest()
+    DefaultAuthorizerTest()
     : d_authorizer()
     {
     }
 
-    ~BasicAuthorizerTest() BSLS_KEYWORD_OVERRIDE;
+    ~DefaultAuthorizerTest() BSLS_KEYWORD_OVERRIDE;
 
-    mqbauthz::BasicAuthorizer& authorizer() { return d_authorizer; }
+    mqbauthz::DefaultAuthorizer& authorizer() { return d_authorizer; }
 };
 
-BasicAuthorizerTest::~BasicAuthorizerTest()
+DefaultAuthorizerTest::~DefaultAuthorizerTest()
 {
 }
 
-TEST_F(BasicAuthorizerTest, breathingTest)
+TEST_F(DefaultAuthorizerTest, breathingTest)
 {
     bsl::string name(authorizer().name());
-    EXPECT_STREQ("BasicAuthorizer", name.c_str());
+    EXPECT_STREQ("DefaultAuthorizer", name.c_str());
 }
 
-TEST_F(BasicAuthorizerTest, allActionsAreAllowed)
+TEST(DefaultAuthorizer, acceptsPluginConfig)
+{
+    bslma::Allocator* alloc = bmqtst::TestHelperUtil::allocator();
+
+    mqbcfg::PluginSettingKeyValue setting(alloc);
+    setting.key() = "exampleSetting";
+    setting.value().makeBoolVal(true);
+
+    mqbcfg::AuthorizerPluginConfig config(alloc);
+    config.name() = "DefaultAuthorizer";
+    config.settings().push_back(setting);
+
+    mqbauthz::DefaultAuthorizer authorizer(&config);
+
+    bsl::string name(authorizer.name());
+    EXPECT_STREQ("DefaultAuthorizer", name.c_str());
+
+    mqbact::Action connectClient;
+    connectClient.makeConnectClient();
+    TestAuthenticationResult authnResult;
+    EXPECT_TRUE(authorizer.authorize(connectClient, authnResult));
+}
+
+TEST_F(DefaultAuthorizerTest, allActionsAreAllowed)
 {
     bslma::Allocator*        alloc = bmqtst::TestHelperUtil::allocator();
     TestAuthenticationResult authnResult;
@@ -132,10 +157,10 @@ TEST_F(BasicAuthorizerTest, allActionsAreAllowed)
     }
 }
 
-TEST(BasicAuthorizerFactory, factoryBreathingTest)
+TEST(DefaultAuthorizerFactory, factoryBreathingTest)
 {
-    mqbauthz::BasicAuthorizerPluginFactory factory;
-    bslma::ManagedPtr<mqbplug::Authorizer> authorizer = factory.create(
+    mqbauthz::DefaultAuthorizerPluginFactory factory;
+    bslma::ManagedPtr<mqbplug::Authorizer>   authorizer = factory.create(
         bmqtst::TestHelperUtil::allocator());
 }
 
@@ -146,6 +171,12 @@ TEST(BasicAuthorizerFactory, factoryBreathingTest)
 int main(int argc, char* argv[])
 {
     TEST_PROLOG(bmqtst::TestHelper::e_DEFAULT);
+
+    // 'DefaultAuthorizerPluginFactory::create()' looks up its settings from
+    // the broker's global authorization configuration, so it must be set
+    // before any test constructs an authorizer.
+    mqbcfg::AppConfig brokerConfig(bmqtst::TestHelperUtil::allocator());
+    mqbcfg::BrokerConfig::set(brokerConfig);
 
     ::testing::InitGoogleTest(&argc, argv);
 

@@ -13,6 +13,9 @@ on:
         description: "GH Actions Cache key associated with the built dependencies"
         value: ${{ jobs.build_dependencies.outputs.cache_key }}
 
+permissions:
+  contents: read
+
 jobs:
   build_dependencies:
     name: Build and cache dependencies [${{ inputs.cxx_standard }}]
@@ -20,7 +23,9 @@ jobs:
     outputs:
       cache_key: ${{ steps.get-cache-key.outputs.cache_key }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Generate dependencies cache key
         id: get-cache-key
@@ -28,7 +33,7 @@ jobs:
           echo "cache_key=deps-${{ inputs.cxx_standard }}-`date +%y-%m-%d`-`cat docker/build_deps.sh | shasum`" >> $GITHUB_OUTPUT
 
       - name: Cache lookup
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-lookup
         with:
           path: |
@@ -63,7 +68,7 @@ jobs:
 
       - name: Cache save
         if: steps.cache-lookup.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
