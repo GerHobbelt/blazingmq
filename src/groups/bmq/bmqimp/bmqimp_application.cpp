@@ -193,9 +193,11 @@ void Application::readCb(
         return;  // RETURN
     }
 
-    bdlbb::Blob readBlob;
+    const bsl::shared_ptr<bdlbb::Blob> readBlob = d_blobSpPool_sp->getObject();
 
-    const int rc = bmqio::ChannelUtil::handleRead(&readBlob, numNeeded, blob);
+    const int rc = bmqio::ChannelUtil::handleRead(readBlob.get(),
+                                                  numNeeded,
+                                                  blob);
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(rc != 0)) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         BALL_LOG_ERROR << id() << "#TCP_READ_ERROR " << channel->peerUri()
@@ -207,18 +209,18 @@ void Application::readCb(
         return;  // RETURN
     }
 
-    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(readBlob.length() == 0)) {
+    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(readBlob->length() == 0)) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         // Don't yet have a full blob
         return;  // RETURN
     }
 
     // Create a raw event with a cloned blob
-    bmqp::Event event(&readBlob, &d_allocator, true);
+    bmqp::Event event(readBlob, &d_allocator);
 
     if (monitor->checkData(channel.get(), event)) {
         BALL_LOG_TRACE << channel->peerUri() << ": ReadCallback got a blob\n"
-                       << bmqu::BlobStartHexDumper(&readBlob);
+                       << bmqu::BlobStartHexDumper(readBlob.get());
 
         if (event.isAuthenticationEvent()) {
             // Application received a broker response to an re-authentication
@@ -343,8 +345,7 @@ void Application::brokerSessionStopped(
         // This code assumes that there is no need to stop both factories upon
         // e_START_FAILURE.
         // If we wanted that, we would need another event.
-        d_reconnectingChannelFactory.stop();
-        d_channelFactory.stop();
+        d_negotiatedChannelFactory.stop();
     }
 
     d_scheduler.cancelAllEventsAndWait();
@@ -370,26 +371,16 @@ bmqt::GenericResult::Enum Application::startChannel()
     int rc = 0;
 
     // Start the channel factories.
-    rc = d_channelFactory.start();
-    if (rc != 0) {
-        BALL_LOG_ERROR << id() << "Failed to start channelFactory [rc: " << rc
-                       << "]";
-        return bmqt::GenericResult::e_UNKNOWN;  // RETURN
-    }
-    bdlb::ScopeExitAny tcpScopeGuard(
-        bdlf::BindUtil::bind(&bmqio::NtcChannelFactory::stop,
-                             &d_channelFactory));
-
-    rc = d_reconnectingChannelFactory.start();
+    rc = d_negotiatedChannelFactory.start();
     if (rc != 0) {
         BALL_LOG_ERROR << id()
-                       << "Failed to start reconnectingChannelFactory [rc: "
+                       << "Failed to start negotiatedChannelFactory [rc: "
                        << rc << "]";
         return bmqt::GenericResult::e_UNKNOWN;  // RETURN
     }
-    bdlb::ScopeExitAny reconnectingScopeGuard(
-        bdlf::BindUtil::bind(&bmqio::ReconnectingChannelFactory::stop,
-                             &d_reconnectingChannelFactory));
+    bdlb::ScopeExitAny negotiatedScopeGuard(
+        bdlf::BindUtil::bind(&NegotiatedChannelFactory::stop,
+                             &d_negotiatedChannelFactory));
 
     // Connect to the broker.
     bmqio::TCPEndpoint endpoint(d_sessionOptions.brokerUri());
@@ -447,8 +438,7 @@ bmqt::GenericResult::Enum Application::startChannel()
             bdlf::MemFnUtil::memFn(&Application::snapshotStats, this));
     }
 
-    reconnectingScopeGuard.release();
-    tcpScopeGuard.release();
+    negotiatedScopeGuard.release();
 
     return bmqt::GenericResult::e_SUCCESS;
 }

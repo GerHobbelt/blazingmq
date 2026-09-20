@@ -82,7 +82,7 @@ ln -sf /usr/bin/clang++-${LLVM_VERSION} /usr/bin/clang++
 ln -sf /usr/bin/llvm-symbolizer-${LLVM_VERSION} /usr/bin/llvm-symbolizer
 
 # Set some initial constants
-PARALLELISM=8
+PARALLELISM=$(nproc)
 
 # Helper function to print disk usage
 print_disk_usage() {
@@ -180,11 +180,13 @@ if [ "${FUZZER}" == "off" ]; then
             -DCMAKE_C_COMPILER="clang" \
             -DCMAKE_CXX_COMPILER="clang++" \
             -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_C_FLAGS="-Wno-reserved-macro-identifier" \
+            -DCMAKE_CXX_FLAGS="-Wno-reserved-macro-identifier" \
             -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
             -DLLVM_USE_SANITIZER="${LLVM_SANITIZER_NAME}" \
             "${LLVM_SPECIFIC_CMAKE_OPTIONS}"
 
-    cmake --build "${LIBCXX_BUILD_PATH}" -j${PARALLELISM} --target cxx cxxabi unwind generate-cxx-headers
+    cmake --build "${LIBCXX_BUILD_PATH}" -j"${PARALLELISM}" --target cxx cxxabi unwind generate-cxx-headers
 
     export LIBCXX_BUILD_PATH="${LIBCXX_BUILD_PATH}"
 
@@ -215,7 +217,7 @@ export PATH
 pushd "${DIR_SRCS_EXT}/bde"
 eval "$(bbs_build_env  -p clang -u dbg_64_safe_cpp20 -b "${DIR_BUILD_EXT}/bde")"
 bbs_build configure --toolchain "${TOOLCHAIN_PATH}"
-bbs_build build -j${PARALLELISM}
+bbs_build build -j"${PARALLELISM}"
 bbs_build --install=/opt/bb --prefix=/ install
 popd
 # Cleanup BDE build artifacts (keep source for headers if needed by later builds)
@@ -240,7 +242,7 @@ sed -i 's/fcoroutines-ts/fcoroutines/g' 'repository.cmake'
             --without-openssl \
             --ufid 'dbg_64_safe_cpp20' \
             --toolchain "${TOOLCHAIN_PATH}"
-make -j${PARALLELISM}
+make -j"${PARALLELISM}"
 make install
 popd
 # Cleanup NTF build artifacts and source
@@ -266,7 +268,7 @@ CMAKE_OPTIONS=( \
 cmake -B "${DIR_SRCS_EXT}/googletest/cmake.bld" \
       -S "${DIR_SRCS_EXT}/googletest" "${CMAKE_OPTIONS[@]}" \
       -DCMAKE_INSTALL_PREFIX=/opt/bb
-cmake --build "${DIR_SRCS_EXT}/googletest/cmake.bld" -j${PARALLELISM}
+cmake --build "${DIR_SRCS_EXT}/googletest/cmake.bld" -j"${PARALLELISM}"
 cmake --install "${DIR_SRCS_EXT}/googletest/cmake.bld" --prefix "/opt/bb"
 # Cleanup GoogleTest source and build artifacts
 rm -rf "${DIR_SRCS_EXT}/googletest"
@@ -280,7 +282,7 @@ cmake -B "${DIR_SRCS_EXT}/google-benchmark/cmake.bld" \
         -DBENCHMARK_ENABLE_GTEST_TESTS="false" \
         -DHAVE_STD_REGEX="ON" \
         -DBENCHMARK_ENABLE_TESTING="OFF"
-cmake --build "${DIR_SRCS_EXT}/google-benchmark/cmake.bld" -j${PARALLELISM}
+cmake --build "${DIR_SRCS_EXT}/google-benchmark/cmake.bld" -j"${PARALLELISM}"
 cmake --install "${DIR_SRCS_EXT}/google-benchmark/cmake.bld" --prefix "/opt/bb"
 # Cleanup Google Benchmark source and build artifacts
 rm -rf "${DIR_SRCS_EXT}/google-benchmark"
@@ -299,7 +301,7 @@ cmake -B "${DIR_SRCS_EXT}/zlib/cmake.bld" -S "${DIR_SRCS_EXT}/zlib" \
         -DZLIB_BUILD_STATIC=ON \
         -DZLIB_BUILD_MINIZIP=OFF
 # Make and install zlib.
-cmake --build "${DIR_SRCS_EXT}/zlib/cmake.bld" -j${PARALLELISM}
+cmake --build "${DIR_SRCS_EXT}/zlib/cmake.bld" -j"${PARALLELISM}"
 cmake --install "${DIR_SRCS_EXT}/zlib/cmake.bld"
 # Cleanup zlib source and build artifacts
 rm -rf "${DIR_SRCS_EXT}/zlib"
@@ -327,8 +329,8 @@ PKG_CONFIG_PATH="/opt/bb/lib64/pkgconfig:/opt/bb/lib/pkgconfig:/opt/bb/share/pkg
 cmake --preset fuzz-tests -B "${DIR_BUILD_BMQ}" -S "${DIR_SRC_BMQ}" -G Ninja \
     -DCMAKE_PREFIX_PATH="${DIR_SRCS_EXT}/bde-tools/BdeBuildSystem" \
     "${CMAKE_OPTIONS[@]}"
-cmake --build "${DIR_BUILD_BMQ}" -j${PARALLELISM} \
-      --target ${TARGETS} -v --clean-first
+cmake --build "${DIR_BUILD_BMQ}" -j"${PARALLELISM}" \
+      --target "${TARGETS}" --clean-first
 print_disk_usage "BlazingMQ"
 
 if [ "${FUZZER}" == "on" ]; then

@@ -24,7 +24,7 @@
 //  mqbs::FileStoreIterator: Iterator over records in a 'mqbs::FileStore'
 //  mqbs::FileStore_AliasedBufferDeleter
 //
-//@SEE ALSO: mqbs::FileStoreProtcol
+//@SEE ALSO: mqbs::FileStoreProtocol
 //
 //@DESCRIPTION: This component provides a mechanism, 'mqbs:FileStore', to store
 // BlazingMQ data in files on disk.  An instance of 'mqbs::FileStore' is also
@@ -385,11 +385,10 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // Whether CSL mode is enabled
 
     bool d_isFSMWorkflow;
-    // Whether CSL FSM worklow is in
-    // effect
+    // Whether FSM workflow is enabled
 
     bool d_qListAware;
-    // Whether the broker still read and writes to the to-be-deprecated Qlist
+    // Whether the broker still reads and writes to the to-be-deprecated Qlist
     // file.
 
     bool d_ignoreCrc32c;
@@ -397,7 +396,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     // calculations.  We should only set
     // this to true during testing.
 
-    int d_nagglePacketCount;
+    int d_naglePacketCount;
     // Max number of messages in the
     // 'd_storageEventBuilder' before
     // flushing the builder.  Depending
@@ -506,7 +505,7 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
     /// Return zero on success, non zero value otherwise.  The behavior is
     /// undefined unless the journal iterator `jit` is in reverse mode.
     ///
-    /// WARNING：This method invalidates all iterators.
+    /// WARNING: This method invalidates all iterators.
     int recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
                         bsls::Types::Uint64* journalOffset,
                         bsls::Types::Uint64* qlistOffset,
@@ -673,8 +672,8 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
         RecordType::Enum               recordType,
         bsls::Types::Uint64            recordOffset);
 
-    ///  if the specified `immediateFlush` is `true` or the
-    /// `d_storageEventBuilder` is over the `d_nagglePacketCount` limit.
+    /// Flush the storage if the specified `immediateFlush` is `true` or the
+    /// `d_storageEventBuilder` is over the `d_naglePacketCount` limit.
     void flushIfNeeded(bool immediateFlush);
 
     // PRIVATE ACCESSORS
@@ -754,9 +753,21 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
 
     void dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event);
 
+#if BSLS_COMPILERFEATURES_SIMULATE_CPP11_FEATURES
+    // C++03 compatibility:
+    // It is not possible to cast mqbevt movable refs to mqbi movable ref.
+    template <class EVENT_TYPE>
+    void dispatchEvent(bslmf::MovableRef<bsl::shared_ptr<EVENT_TYPE> > event)
+    {
+        mqbi::Dispatcher::DispatcherEventSp base(
+            bslmf::MovableRefUtil::access(event));
+        dispatchEvent(bslmf::MovableRefUtil::move(base));
+    }
+#endif
+
     /// Execute the specified `functor`, using the `e_CALLBACK` event
     /// type, in the processor associated to this object.
-    void execute(const mqbi::Dispatcher::VoidFunctor& functor);
+    void execute(const mqbi::Dispatcher::VoidFunction& functor);
 
     // MANIPULATORS
 
@@ -844,12 +855,6 @@ class FileStore BSLS_KEYWORD_FINAL : public DataStore {
 
     int writeSyncPointRecord(const bmqp_ctrlmsg::SyncPoint& syncPoint,
                              SyncPointType::Enum type) BSLS_KEYWORD_OVERRIDE;
-
-    /// Remove the record identified by the specified `handle`.  Return zero
-    /// on success, non-zero value if `handle` is invalid.  Behavior is
-    /// undefined unless `handle` represents a record in the data store.
-    int
-    removeRecord(const DataStoreRecordHandle& handle) BSLS_KEYWORD_OVERRIDE;
 
     /// Remove the record identified by the specified `handle`.  The
     /// behavior is undefined unless `handle` is valid and represents a
@@ -1220,7 +1225,7 @@ FileStore::dispatchEvent(mqbi::Dispatcher::DispatcherEventRvRef event)
     dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event), this);
 }
 
-inline void FileStore::execute(const mqbi::Dispatcher::VoidFunctor& functor)
+inline void FileStore::execute(const mqbi::Dispatcher::VoidFunction& functor)
 {
     dispatcher()->execute(functor,
                           this,

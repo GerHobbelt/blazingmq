@@ -613,12 +613,22 @@ class TweakFactory:
 
                         name = Name()
 
+                        class Address(metaclass=TweakMetaclass):
+                            def __call__(self, value: str) -> Callable: ...
+
+                        address = Address()
+
                         class Port(metaclass=TweakMetaclass):
                             def __call__(
                                 self, value: typing.Union[int, NoneType]
                             ) -> Callable: ...
 
                         port = Port()
+
+                        class Tls(metaclass=TweakMetaclass):
+                            def __call__(self, value: bool) -> Callable: ...
+
+                        tls = Tls()
 
                         def __call__(self, value: None) -> Callable: ...
 
@@ -850,6 +860,42 @@ class TweakFactory:
                 ) -> Callable: ...
 
             authentication = Authentication()
+
+            class TlsConfig(metaclass=TweakMetaclass):
+                class CertificateAuthority(metaclass=TweakMetaclass):
+                    def __call__(
+                        self, value: typing.Union[str, NoneType]
+                    ) -> Callable: ...
+
+                certificate_authority = CertificateAuthority()
+
+                class Certificate(metaclass=TweakMetaclass):
+                    def __call__(
+                        self, value: typing.Union[str, NoneType]
+                    ) -> Callable: ...
+
+                certificate = Certificate()
+
+                class Key(metaclass=TweakMetaclass):
+                    def __call__(
+                        self, value: typing.Union[str, NoneType]
+                    ) -> Callable: ...
+
+                key = Key()
+
+                class Versions(metaclass=TweakMetaclass):
+                    def __call__(
+                        self, value: typing.Union[str, NoneType]
+                    ) -> Callable: ...
+
+                versions = Versions()
+
+                def __call__(
+                    self,
+                    value: typing.Union[blazingmq.schemas.mqbcfg.TlsConfig, NoneType],
+                ) -> Callable: ...
+
+            tls_config = TlsConfig()
 
             def __call__(
                 self, value: typing.Union[blazingmq.schemas.mqbcfg.AppConfig, NoneType]
@@ -1451,6 +1497,26 @@ class TweakFactory:
                 def __call__(self, value: bool) -> Callable: ...
 
             does_fsmwrite_qlist = DoesFsmwriteQlist()
+
+            class ClusterFsmWatchdogTimeoutSec(metaclass=TweakMetaclass):
+                def __call__(self, value: int) -> Callable: ...
+
+            cluster_fsm_watchdog_timeout_sec = ClusterFsmWatchdogTimeoutSec()
+
+            class ClusterFsmWatchdogNumRetries(metaclass=TweakMetaclass):
+                def __call__(self, value: int) -> Callable: ...
+
+            cluster_fsm_watchdog_num_retries = ClusterFsmWatchdogNumRetries()
+
+            class PartitionFsmWatchdogTimeoutSec(metaclass=TweakMetaclass):
+                def __call__(self, value: int) -> Callable: ...
+
+            partition_fsm_watchdog_timeout_sec = PartitionFsmWatchdogTimeoutSec()
+
+            class PartitionFsmWatchdogNumRetries(metaclass=TweakMetaclass):
+                def __call__(self, value: int) -> Callable: ...
+
+            partition_fsm_watchdog_num_retries = PartitionFsmWatchdogNumRetries()
 
             def __call__(
                 self,

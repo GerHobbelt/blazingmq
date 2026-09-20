@@ -807,7 +807,11 @@ QueueEngineTester::getHandle(const bsl::string& clientText)
                 mqbi::QueueHandleRequesterContext(d_allocator_p),
             d_allocator_p);
 
+        bmqp_ctrlmsg::ClientIdentity identity(d_allocator_p);
+        identity.clientType() = bmqp_ctrlmsg::ClientType::E_TCPCLIENT;
+
         clientContext->setClient(d_mockDispatcherClient_mp.get())
+            .setIdentity(identity)
             .setDescription("test.tsk:1")
             .setIsClusterMember(true)
             .setRequesterId(mqbi::QueueHandleRequesterContext ::
@@ -1032,7 +1036,7 @@ void QueueEngineTester::post(const bslstl::StringRef& messages,
     }
 }
 
-void QueueEngineTester::afterNewMessage(const int numMessages)
+void QueueEngineTester::afterNewMessage(int numMessages)
 {
     // PRECONDITIONS
     BSLS_ASSERT_OPT(d_queueEngine_mp &&
@@ -1175,7 +1179,7 @@ void QueueEngineTester::reject(const bsl::string&       clientText,
     }
 }
 
-void QueueEngineTester::garbageCollectMessages(const int numMessages)
+void QueueEngineTester::garbageCollectMessages(int numMessages)
 {
     // PRECONDITIONS
     BSLS_ASSERT_OPT(d_queueEngine_mp &&

@@ -20,9 +20,6 @@
 // BMQ
 #include <bmqp_compression.h>
 #include <bmqp_queueid.h>
-#include <bmqt_queueflags.h>
-
-#include <bmqc_array.h>
 #include <bmqu_blobiterator.h>
 #include <bmqu_blobobjectproxy.h>
 #include <bmqu_memoutstream.h>
@@ -33,11 +30,10 @@
 #include <bdlbb_blobutil.h>
 #include <bsl_algorithm.h>
 #include <bsl_cstring.h>
-#include <bsl_iostream.h>
 #include <bsl_memory.h>
 #include <bsl_utility.h>
 #include <bslma_default.h>
-#include <bslmt_qlock.h>
+#include <bslmt_once.h>
 #include <bsls_objectbuffer.h>
 
 namespace BloombergLP {
@@ -58,25 +54,28 @@ const char k_PADDING_DATA[9][8] = {
     {8, 8, 8, 8, 8, 8, 8, 8},
 };
 
-/// Array of all potential padding buffers used for word and dword padding.
-bsls::ObjectBuffer<bdlbb::BlobBuffer> g_paddingBlobBuffer[9];
+/// Return a reference to the pre-built padding `BlobBuffer` for the
+/// specified `numPaddingBytes`.  The padding buffers are lazily initialized
+/// on first call.
+const bdlbb::BlobBuffer& getPaddingBlobBuffer(int numPaddingBytes)
+{
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(1 <= numPaddingBytes && numPaddingBytes <= 8);
 
-/// Static prefilled blobs respectively containing a heartbeat request and
-/// a heartbeat response.
-bsls::ObjectBuffer<bdlbb::Blob> g_heartbeatReqBlob;
-bsls::ObjectBuffer<bdlbb::Blob> g_heartbeatRspBlob;
-
-/// Integer to keep track of the number of calls to `initialize` for the
-/// `ProtocolUtil`.  If the value is non-zero, then it has already been
-/// initialized, otherwise it can be initialized.  Each call to `initialize`
-/// increments the value of this integer by one.  Each call to `shutdown`
-/// decrements the value of this integer by one.  If the decremented value
-/// is zero, then the objects held by `g_paddingBlobBuffer` are destroyed.
-int g_initialized = 0;
-
-/// Lock used to provide thread-safe protection for accessing the
-/// `g_initialized` counter.
-bslmt::QLock g_initLock = BSLMT_QLOCK_INITIALIZER;
+    static bsls::ObjectBuffer<bdlbb::BlobBuffer> buffers[9];
+    BSLMT_ONCE_DO
+    {
+        bslma::Allocator* alloc = bslma::Default::globalAllocator();
+        for (int i = 0; i < 9; ++i) {
+            bsl::shared_ptr<char> data;
+            data.reset(const_cast<char*>(k_PADDING_DATA[i]),
+                       bslstl::SharedPtrNilDeleter(),
+                       alloc);
+            new (buffers[i].buffer()) bdlbb::BlobBuffer(data, i);
+        }
+    }
+    return buffers[numPaddingBytes].object();
+}
 
 }  // close unnamed namespace
 
@@ -88,80 +87,23 @@ const char ProtocolUtil::k_NULL_APP_ID[] = "";
 
 const char ProtocolUtil::k_DEFAULT_APP_ID[] = "__default";
 
-void ProtocolUtil::initialize(bslma::Allocator* allocator)
+void ProtocolUtil::initialize(bslma::Allocator*)
 {
-    bslmt::QLockGuard qlockGuard(&g_initLock);
-
-    // NOTE: We pre-increment here instead of post-incrementing inside the
-    //       conditional check below because the post-increment of an int does
-    //       not work correctly with versions of IBM xlc12 released following
-    //       the 'Dec 2015 PTF'.
-    ++g_initialized;
-    if (g_initialized > 1) {
-        return;  // RETURN
-    }
-
-    bslma::Allocator* alloc = bslma::Default::globalAllocator(allocator);
-
-    // Prefill the padding blob buffers
-    for (int i = 0; i < 9; ++i) {
-        bsl::shared_ptr<char> data;
-        data.reset(const_cast<char*>(k_PADDING_DATA[i]),
-                   bslstl::SharedPtrNilDeleter(),
-                   alloc);
-        new (g_paddingBlobBuffer[i].buffer()) bdlbb::BlobBuffer(data, i);
-    }
-
-    // Prefill the heartbeat blobs
-    {
-        static const EventHeader header(EventType::e_HEARTBEAT_REQ);
-        bsl::shared_ptr<char>    data;
-        data.reset(static_cast<char*>(
-                       const_cast<void*>(static_cast<const void*>(&header))),
-                   bslstl::SharedPtrNilDeleter(),
-                   alloc);
-        bdlbb::BlobBuffer buffer(data, sizeof(header));
-        new (g_heartbeatReqBlob.buffer()) bdlbb::Blob(alloc);
-        g_heartbeatReqBlob.object().appendDataBuffer(buffer);
-    }
-    {
-        static const EventHeader header(EventType::e_HEARTBEAT_RSP);
-        bsl::shared_ptr<char>    data;
-        data.reset(static_cast<char*>(
-                       const_cast<void*>(static_cast<const void*>(&header))),
-                   bslstl::SharedPtrNilDeleter(),
-                   alloc);
-        bdlbb::BlobBuffer buffer(data, sizeof(header));
-        new (g_heartbeatRspBlob.buffer()) bdlbb::Blob(alloc);
-        g_heartbeatRspBlob.object().appendDataBuffer(buffer);
-    }
+    // No-op.  Padding blob buffers are now lazily initialized via
+    // 'getPaddingBlobBuffer'.  This method is retained for API compatibility.
 }
 
 void ProtocolUtil::shutdown()
 {
-    bslmt::QLockGuard qlockGuard(&g_initLock);
-
-    // PRECONDITIONS
-    BSLS_ASSERT_SAFE(g_initialized > 0 && "Not initialized");
-
-    if (--g_initialized != 0) {
-        return;  // RETURN
-    }
-
-    g_heartbeatRspBlob.object().bdlbb::Blob::~Blob();
-    g_heartbeatReqBlob.object().bdlbb::Blob::~Blob();
-
-    for (int i = 0; i < 9; ++i) {
-        g_paddingBlobBuffer[i].object().reset();
-    }
+    // No-op.  Padding blob buffers are now lazily initialized and never
+    // destroyed.  This method is retained for API compatibility.
 }
 
 void ProtocolUtil::appendPaddingRaw(bdlbb::Blob* destination,
                                     int          numPaddingBytes)
 {
     // PRECONDITIONS
-    BSLS_ASSERT_SAFE(g_initialized && "Not initialized");
-    BSLS_ASSERT_SAFE(numPaddingBytes >= 1 && numPaddingBytes <= 8);
+    BSLS_ASSERT_SAFE(1 <= numPaddingBytes && numPaddingBytes <= 8);
     BSLS_ASSERT_SAFE(destination->numDataBuffers() >= 1);
     // It doesn't make sense to add padding to an empty blob, and assuming at
     // least one buffer simplifies the logic below.
@@ -182,8 +124,7 @@ void ProtocolUtil::appendPaddingRaw(bdlbb::Blob* destination,
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         // The last buffer doesn't have enough capacity, append the already
         // pre-formatted padding-bytes blob buffer.
-        destination->appendDataBuffer(
-            g_paddingBlobBuffer[numPaddingBytes].object());
+        destination->appendDataBuffer(getPaddingBlobBuffer(numPaddingBytes));
     }
 }
 
@@ -217,16 +158,6 @@ int ProtocolUtil::calcUnpaddedLength(const bdlbb::Blob& blob, int length)
     BSLS_ASSERT(pos.second < buf.size());
 
     return length - buf.data()[pos.second];
-}
-
-const bdlbb::Blob& ProtocolUtil::heartbeatReqBlob()
-{
-    return g_heartbeatReqBlob.object();
-}
-
-const bdlbb::Blob& ProtocolUtil::heartbeatRspBlob()
-{
-    return g_heartbeatRspBlob.object();
 }
 
 int ProtocolUtil::ackResultToCode(bmqt::AckResult::Enum value)

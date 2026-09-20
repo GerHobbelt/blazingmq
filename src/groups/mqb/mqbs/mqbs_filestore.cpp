@@ -21,6 +21,7 @@
 // MQB
 #include <mqbcmd_humanprinter.h>
 #include <mqbcmd_messages.h>
+#include <mqbevt_callbackevent.h>
 #include <mqbi_domain.h>
 #include <mqbi_queue.h>
 #include <mqbi_queueengine.h>
@@ -2342,8 +2343,8 @@ int FileStore::recoverMessages(QueueKeyInfoMap*     queueKeyInfoMap,
             }
 
             if (1 == purgedQueueKeys.count(rec.queueKey())) {
-                // Queue has been purge.  No need to keep track of confirmed
-                // guid.
+                // Queue has been purged.
+                // No need to keep track of confirmed guid.
                 continue;  // CONTINUE
             }
 
@@ -3150,10 +3151,10 @@ int FileStore::rolloverIfNeeded(FileType::Enum              fileType,
         }
 
         unsigned int availableSpacePercent = 0;
-        if (FileType::e_JOURNAL == fileType) {
+        if (FileType::e_JOURNAL == cannotRolloverFileType) {
             availableSpacePercent = availableSpacePercentJournal;
         }
-        else if (FileType::e_QLIST == fileType) {
+        else if (FileType::e_QLIST == cannotRolloverFileType) {
             BSLS_ASSERT_SAFE(d_qListAware);
             availableSpacePercent = availableSpacePercentQlist;
         }
@@ -3300,6 +3301,7 @@ void FileStore::truncate(FileSet* fileSet)
             << "Failed to truncate data file [" << fileSet->d_dataFileName
             << "], rc: " << rc << ", error: " << errorDesc.str()
             << BMQTSK_ALARMLOG_END;
+        errorDesc.reset();
     }
 
     rc = FileSystemUtil::truncate(&fileSet->d_journalFile,
@@ -3310,6 +3312,7 @@ void FileStore::truncate(FileSet* fileSet)
             << partitionDesc() << "Failed to truncate journal ["
             << fileSet->d_journalFileName << "], rc: " << rc
             << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
+        errorDesc.reset();
     }
 
     if (d_qListAware) {
@@ -3321,6 +3324,7 @@ void FileStore::truncate(FileSet* fileSet)
                 << partitionDesc() << "Failed to truncate qlist file ["
                 << fileSet->d_qlistFileName << "], rc: " << rc
                 << ", error: " << errorDesc.str() << BMQTSK_ALARMLOG_END;
+            errorDesc.reset();
         }
     }
 }
@@ -3779,7 +3783,7 @@ void FileStore::writeRolledOverRecord(DataStoreRecord*    record,
 
             if (QueueOpType::e_CREATION == fromRec->type()) {
                 // Create an entry of this queueKey if its a queue creation
-                // record.  No need to this it in case of addition record.
+                // record.  No need to do this it in case of addition record.
 
                 queueKeyCounterMap->insert(
                     bsl::make_pair(toRec->queueKey(),
@@ -5146,7 +5150,7 @@ void FileStore::aliasMessage(bsl::shared_ptr<bdlbb::Blob>* appData,
 void FileStore::flushIfNeeded(bool immediateFlush)
 {
     if (immediateFlush ||
-        d_storageEventBuilder.messageCount() >= d_nagglePacketCount) {
+        d_storageEventBuilder.messageCount() >= d_naglePacketCount) {
         // Should notify weak consistency queues after replicated batch
         flushStorage();
         notifyQueuesOnReplicatedBatch();
@@ -5203,7 +5207,7 @@ FileStore::FileStore(
 , d_isFSMWorkflow(isFSMWorkflow)
 , d_qListAware(!d_isFSMWorkflow || doesFSMwriteQLIST)
 , d_ignoreCrc32c(false)
-, d_nagglePacketCount(k_NAGLE_PACKET_COUNT)
+, d_naglePacketCount(k_NAGLE_PACKET_COUNT)
 , d_storageEventBuilder(FileStoreProtocol::k_VERSION,
                         bmqp::EventType::e_STORAGE,
                         d_blobSpPool_p,
@@ -5603,10 +5607,7 @@ int FileStore::writeMessageRecord(mqbi::StorageMessageAttributes* attributes,
         flags = bmqp::StorageHeaderFlags::e_RECEIPT_REQUESTED;
     }
     else {
-        if (d_replicationNotifications.find(queueKey) ==
-            d_replicationNotifications.end()) {
-            d_replicationNotifications.insert(queueKey);
-        }
+        d_replicationNotifications.insert(queueKey);
     }
 
     // Replicate the message.
@@ -6111,32 +6112,6 @@ int FileStore::writeSyncPointRecord(const bmqp_ctrlmsg::SyncPoint& syncPoint,
     return rc_SUCCESS;
 }
 
-int FileStore::removeRecord(const DataStoreRecordHandle& handle)
-{
-    enum RcEnum {
-        // Value for the various RC error categories
-        /// Success
-        rc_SUCCESS = 0,
-        /// Invalid handle
-        rc_INVALID_HANDLE = -1,
-        /// Handle not found
-        rc_HANDLE_NOT_FOUND = -2
-    };
-
-    if (!handle.isValid()) {
-        return rc_INVALID_HANDLE;  // RETURN
-    }
-
-    const RecordIterator& recordIt = *reinterpret_cast<const RecordIterator*>(
-        &handle);
-    if (d_records.end() == d_records.find(recordIt->first)) {
-        return rc_HANDLE_NOT_FOUND;  // RETURN
-    }
-
-    removeRecordRaw(handle);
-    return rc_SUCCESS;
-}
-
 void FileStore::removeRecordRaw(const DataStoreRecordHandle& handle)
 {
     BSLS_ASSERT_SAFE(handle.isValid());
@@ -6183,7 +6158,7 @@ void FileStore::processStorageEvent(const bsl::shared_ptr<bdlbb::Blob>& blob,
         return;  // RETURN
     }
 
-    bmqp::Event                  rawEvent(blob.get(), d_allocator_p);
+    bmqp::Event                  rawEvent(blob, d_allocator_p);
     bmqp::StorageMessageIterator iter;
 
     rawEvent.loadStorageMessageIterator(&iter);
@@ -6346,7 +6321,7 @@ int FileStore::processRecoveryEvent(const bsl::shared_ptr<bdlbb::Blob>& blob)
         rc_WRITE_FAILURE            = -5
     };
 
-    bmqp::Event                  rawEvent(blob.get(), d_allocator_p);
+    bmqp::Event                  rawEvent(blob, d_allocator_p);
     bmqp::StorageMessageIterator iter;
 
     rawEvent.loadStorageMessageIterator(&iter);
@@ -6668,6 +6643,15 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
         return;  // RETURN
     }
 
+    // Idempotent
+    if (d_primaryLeaseId == primaryLeaseId && d_primaryNode_p == primaryNode) {
+        BALL_LOG_INFO << partitionDesc() << " already has primary as "
+                      << primaryNode->nodeDescription()
+                      << " with primaryLeaseId: " << d_primaryLeaseId
+                      << ", and sequence number: " << d_sequenceNum << ".";
+        return;  // RETURN
+    }
+
     if (primaryLeaseId > d_primaryLeaseId) {
         // Reset the sequence number only if primary leaseId has been bumped
         // up.
@@ -6713,18 +6697,23 @@ void FileStore::setActivePrimary(mqbnet::ClusterNode* primaryNode,
         sIt->second->setPrimary();
     }
 
-    // Schedule a sync point issue recurring event every 1 second, starting
-    // after 1 second.
-    d_config.scheduler()->scheduleRecurringEvent(
-        &d_syncPointEventHandle,
-        bsls::TimeInterval(1),  // 1 sec. TBD: make configurable
-        bdlf::BindUtil::bind(&FileStore::issueSyncPointCb, this));
+    // Schedule recurring timers only if not already scheduled.  This avoids
+    // leaking duplicate events when 'setActivePrimary' is called multiple
+    // times for the same primary node and leaseId.
+    if (!d_syncPointEventHandle) {
+        d_config.scheduler()->scheduleRecurringEvent(
+            &d_syncPointEventHandle,
+            bsls::TimeInterval(1),  // 1 sec. TBD: make configurable
+            bdlf::BindUtil::bind(&FileStore::issueSyncPointCb, this));
+    }
 
-    // Schedule a periodic alarm highwatermark check
-    d_config.scheduler()->scheduleRecurringEvent(
-        &d_partitionHighwatermarkEventHandle,
-        bsls::TimeInterval(k_PARTITION_AVAILABLESPACE_SECS),
-        bdlf::BindUtil::bind(&FileStore::alarmHighwatermarkIfNeededCb, this));
+    if (!d_partitionHighwatermarkEventHandle) {
+        d_config.scheduler()->scheduleRecurringEvent(
+            &d_partitionHighwatermarkEventHandle,
+            bsls::TimeInterval(k_PARTITION_AVAILABLESPACE_SECS),
+            bdlf::BindUtil::bind(&FileStore::alarmHighwatermarkIfNeededCb,
+                                 this));
+    }
 
     // New primary needs to issue a sync point with old leaseId, if previous
     // primary disappeared w/o issuing a sync point (crash, etc).  It is
@@ -6966,13 +6955,13 @@ void FileStore::flushStorage()
     const int maxChannelPendingItems = d_cluster_p->broadcast(
         d_storageEventBuilder.blob());
     if (maxChannelPendingItems > 0) {
-        if (d_nagglePacketCount < k_NAGLE_PACKET_COUNT) {
+        if (d_naglePacketCount < k_NAGLE_PACKET_COUNT) {
             // back off
-            ++d_nagglePacketCount;
+            ++d_naglePacketCount;
         }
     }
-    else if (d_nagglePacketCount) {
-        --d_nagglePacketCount;
+    else if (d_naglePacketCount) {
+        --d_naglePacketCount;
     }
     d_storageEventBuilder.reset();
 }
@@ -7179,8 +7168,8 @@ void FileStore::onDispatcherEvent(const mqbi::DispatcherEvent& event)
 
     switch (event.type()) {
     case mqbi::DispatcherEventType::e_CALLBACK: {
-        const mqbi::DispatcherCallbackEvent* realEvent =
-            event.asCallbackEvent();
+        const mqbevt::CallbackEvent* const realEvent =
+            event.the<mqbevt::CallbackEvent>();
         BSLS_ASSERT_SAFE(!realEvent->callback().empty());
         realEvent->callback()();
     } break;  // BREAK
@@ -7338,7 +7327,7 @@ void FileStore::loadSummary(mqbcmd::FileStore* fileStore) const
                                     d_sequenceNum,
                                     d_records.size(),
                                     d_unreceipted.size(),
-                                    d_nagglePacketCount,
+                                    d_naglePacketCount,
                                     d_fileSets,
                                     d_storages);
 }

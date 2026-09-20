@@ -363,7 +363,22 @@ void Queue::convertToLocalDispatched()
 
     // PRECONDITIONS
     BSLS_ASSERT_SAFE(inDispatcherThread());
+
+    if (d_localQueue_mp) {
+        BSLS_ASSERT_SAFE(!d_remoteQueue_mp);
+
+        BALL_LOG_INFO << d_state.uri() << ": has already converted to local "
+                      << "[handlesCount: "
+                      << d_state.handleCatalog().handlesCount()
+                      << ", handle parameters: " << d_state.handleParameters()
+                      << ", stream parameters: "
+                      << d_state.subQueuesParameters() << "]";
+
+        return;  // RETURN
+    }
+
     BSLS_ASSERT_SAFE(d_remoteQueue_mp);
+    BSLS_ASSERT_SAFE(!d_localQueue_mp);
 
     BALL_LOG_INFO << d_state.uri() << ": converting to local "
                   << "[handlesCount: "
@@ -793,10 +808,9 @@ void Queue::onPushMessage(
     //       LocalQueue dispatcherEvent method to event warn on that invalid
     //       usage.
 
-    mqbi::Dispatcher::DispatcherEventSp dispEvent =
-        domain()->cluster()->getEvent();
-    (*dispEvent)
-        .setType(mqbi::DispatcherEventType::e_PUSH)
+    bsl::shared_ptr<mqbevt::PushEvent> event_sp =
+        domain()->cluster()->getEvent<mqbevt::PushEvent>();
+    (*event_sp)
         .setSource(this)
         .setBlob(appData)
         .setOptions(options)
@@ -805,7 +819,7 @@ void Queue::onPushMessage(
         .setCompressionAlgorithmType(compressionAlgorithmType)
         .setOutOfOrderPush(isOutOfOrder);
 
-    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(dispEvent), this);
+    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event_sp), this);
 }
 
 void Queue::confirmMessage(const bmqt::MessageGUID& msgGUID,
@@ -867,13 +881,11 @@ void Queue::onAckMessage(const bmqp::AckMessage& ackMessage)
     //       LocalQueue dispatcherEvent method to event warn on that invalid
     //       usage.
 
-    mqbi::Dispatcher::DispatcherEventSp dispEvent =
-        domain()->cluster()->getEvent();
-    (*dispEvent)
-        .setType(mqbi::DispatcherEventType::e_ACK)
-        .setAckMessage(ackMessage);
+    bsl::shared_ptr<mqbevt::AckEvent> event_sp =
+        domain()->cluster()->getEvent<mqbevt::AckEvent>();
+    (*event_sp).setAckMessage(ackMessage);
 
-    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(dispEvent), this);
+    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event_sp), this);
 }
 
 int Queue::processCommand(mqbcmd::QueueResult*        result,

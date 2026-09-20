@@ -460,6 +460,10 @@ class ClusterStateTable
                 CSL_CMT_SUCCESS,
                 logUnexpectedCSLCommit_and_abort,
                 UNKNOWN);
+        CST_CFG(UNKNOWN,
+                CSL_CMT_FAIL,
+                logUnexpectedCSLCommit_and_abort,
+                UNKNOWN);
         CST_CFG(UNKNOWN, STOP_NODE, stopPFSMs, STOPPED);
         CST_CFG(UNKNOWN, RST_PRIMARY, updatePrimaryInPFSMs, UNKNOWN);
         CST_CFG(FOL_HEALING,
@@ -490,7 +494,7 @@ class ClusterStateTable
                 CSL_CMT_SUCCESS,
                 stopWatchDog_initializeQueueKeyInfoMap_updatePrimaryInPFSMs,
                 FOL_HEALED);
-        CST_CFG(FOL_HEALING, CSL_CMT_FAIL, triggerWatchDog, UNKNOWN);
+        CST_CFG(FOL_HEALING, CSL_CMT_FAIL, triggerWatchDog, FOL_HEALING);
         CST_CFG(FOL_HEALING,
                 RST_UNKNOWN,
                 stopWatchDog_cancelRequests,
@@ -546,6 +550,10 @@ class ClusterStateTable
                 LDR_HEALING_STG2);
         CST_CFG(LDR_HEALING_STG1,
                 CSL_CMT_SUCCESS,
+                logUnexpectedCSLCommit_and_abort,
+                LDR_HEALING_STG1);
+        CST_CFG(LDR_HEALING_STG1,
+                CSL_CMT_FAIL,
                 logUnexpectedCSLCommit_and_abort,
                 LDR_HEALING_STG1);
         CST_CFG(LDR_HEALING_STG1,
@@ -617,7 +625,10 @@ class ClusterStateTable
                 CSL_CMT_SUCCESS,
                 stopWatchDog_initializeQueueKeyInfoMap_updatePrimaryInPFSMs,
                 LDR_HEALED);
-        CST_CFG(LDR_HEALING_STG2, CSL_CMT_FAIL, triggerWatchDog, UNKNOWN);
+        CST_CFG(LDR_HEALING_STG2,
+                CSL_CMT_FAIL,
+                triggerWatchDog,
+                LDR_HEALING_STG2);
         CST_CFG(LDR_HEALING_STG2,
                 RST_UNKNOWN,
                 stopWatchDog_cleanupLSNs_cancelRequests,

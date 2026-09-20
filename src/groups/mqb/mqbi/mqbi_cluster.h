@@ -65,6 +65,9 @@ namespace BloombergLP {
 namespace bdlmt {
 class FixedThreadPool;
 }
+namespace bmqu {
+class AtomicState;
+}
 namespace bmqt {
 class Uri;
 }
@@ -371,6 +374,10 @@ class Cluster : public DispatcherClient {
     /// Purge and force GC queues in this cluster on a given domain.
     virtual void purgeAndGCQueueOnDomain(mqbcmd::ClusterResult* result,
                                          const bsl::string& domainName) = 0;
+
+    /// PFSM signals when it transfers into `REPLICA_HEALED`.  Previously
+    /// buffered PrimaryStatusAdvisories should be reread.
+    virtual void processBufferedPrimaryStatusAdvisories(int partitionId) = 0;
 
     // ACCESSORS
 

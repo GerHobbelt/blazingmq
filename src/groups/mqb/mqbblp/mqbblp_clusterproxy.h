@@ -74,7 +74,6 @@
 #include <ball_log.h>
 #include <bdlbb_blob.h>
 #include <bdlcc_objectpool.h>
-#include <bdlcc_sharedobjectpool.h>
 #include <bdld_manageddatum.h>
 #include <bsl_deque.h>
 #include <bsl_functional.h>
@@ -122,16 +121,6 @@ class ClusterProxy : public mqbc::ClusterStateObserver,
   private:
     // CLASS-SCOPE CATEGORY
     BALL_LOG_SET_CLASS_CATEGORY("MQBBLP.CLUSTERPROXY");
-
-  public:
-    // TYPES
-
-    /// Pool of shared pointers to Blobs
-    typedef bdlcc::SharedObjectPool<
-        bdlbb::Blob,
-        bdlcc::ObjectPoolFunctors::DefaultCreator,
-        bdlcc::ObjectPoolFunctors::RemoveAll<bdlbb::Blob> >
-        BlobSpPool;
 
   private:
     // PRIVATE TYPES
@@ -306,11 +295,11 @@ class ClusterProxy : public mqbc::ClusterStateObserver,
     // PRIVATE MANIPULATORS
     //   (Event processing)
 
-    void onPushEvent(const mqbi::DispatcherPushEvent& event);
+    void onPushEvent(const mqbevt::PushEvent& event);
 
-    void onAckEvent(const mqbi::DispatcherAckEvent& event);
+    void onAckEvent(const mqbevt::AckEvent& event);
 
-    void onRelayRejectEvent(const mqbi::DispatcherRejectEvent& event);
+    void onRelayRejectEvent(const mqbevt::RejectEvent& event);
 
     // PRIVATE MANIPULATORS
     //   (virtual: mqbnet::SessionEventProcessor)
@@ -516,6 +505,11 @@ class ClusterProxy : public mqbc::ClusterStateObserver,
     /// Purge and force GC queues in this cluster on a given domain.
     void purgeAndGCQueueOnDomain(mqbcmd::ClusterResult* result,
                                  const bsl::string&     domainName)
+        BSLS_KEYWORD_OVERRIDE;
+
+    /// PFSM signals when it is `e_DONE_RECEIVING_DATA_CHUNKS`.  Previously
+    /// buffered PrimaryStatusAdvisories should be reread.
+    void processBufferedPrimaryStatusAdvisories(int partitionId)
         BSLS_KEYWORD_OVERRIDE;
 
     void getPrimaryNodes(int*                               rc,

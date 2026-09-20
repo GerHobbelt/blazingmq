@@ -62,6 +62,7 @@
 #include <ball_log.h>
 #include <bdlb_scopeexit.h>
 #include <bdlb_string.h>
+#include <bdlbb_blobutil.h>
 #include <bdlf_bind.h>
 #include <bdlf_placeholder.h>
 #include <bdlma_localsequentialallocator.h>
@@ -110,6 +111,8 @@ const int k_SESSION_DESTROY_WAIT = 20;
 const int k_CLIENT_CLOSE_WAIT = 20;
 // Time to wait incrementally (in seconds) for all clients and
 // proxies to be destroyed during stop sequence.
+
+const int k_BLOB_POOL_GROWTH_STRATEGY = 1024;
 
 int calculateInitialMissedHbCounter(const mqbcfg::TcpInterfaceConfig& config)
 {
@@ -229,14 +232,6 @@ bool isClientOrProxy(const mqbnet::Session* session)
     return mqbnet::ClusterUtil::isClientOrProxy(session->negotiationMessage());
 }
 
-void stopChannelFactory(bmqio::ChannelFactory* channelFactory)
-{
-    bmqio::NtcChannelFactory* factory =
-        dynamic_cast<bmqio::NtcChannelFactory*>(channelFactory);
-    BSLS_ASSERT_SAFE(factory);
-    factory->stop();
-}
-
 /// A predicate functor for comparing a [mqbcfg::TcpInterfaceListener] by their
 /// `port()` member.
 struct PortMatcher {
@@ -252,6 +247,7 @@ struct PortMatcher {
         return listener.port() == d_port;
     }
 };
+
 }  // close unnamed namespace
 
 // -----------------------------------------
@@ -432,19 +428,10 @@ void TCPSessionFactory::readCallback(const bmqio::Status& status,
         return;  // RETURN
     }
 
-    bdlma::LocalSequentialAllocator<32 * sizeof(bdlbb::Blob) +
-                                    sizeof(bsl::vector<bdlbb::Blob>)>
-        lsa(d_allocator_p);
+    Reader reader(this, channelInfo);
 
-    bsl::vector<bdlbb::Blob> readBlobs(&lsa);
-    readBlobs.reserve(32);
+    const int rc = bmqio::ChannelUtil::handleRead(reader, numNeeded, blob);
 
-    const int rc = bmqio::ChannelUtil::handleRead(&readBlobs, numNeeded, blob);
-    // NOTE: The blobs in readBlobs will be created using the vector's
-    //       allocator, which is LSA, but that is ok because the blobs at the
-    //       end are passed as pointer (through bmqp::Event) to the
-    //       'eventProcess::processEvent' which makes a full copy if it needs
-    //       to async process the blob.
     if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(rc != 0)) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
         BALL_LOG_ERROR << "#TCP_READ_ERROR "
@@ -458,43 +445,45 @@ void TCPSessionFactory::readCallback(const bmqio::Status& status,
         channelInfo->d_channel_sp->close();
         return;  // RETURN
     }
+}
+
+void TCPSessionFactory::read(ChannelInfo*       channelInfo,
+                             const bdlbb::Blob& source,
+                             int                offset,
+                             int                length)
+{
+    // executed by one of the *IO* threads
+
+    const bsl::shared_ptr<bdlbb::Blob> readBlob = d_blobSpPool.getObject();
+
+    bdlbb::BlobUtil::append(readBlob.get(), source, offset, length);
+
+    BALL_LOG_TRACE << channelInfo->d_session_sp->description()
+                   << ": ReadCallback got a blob\n"
+                   << bmqu::BlobStartHexDumper(readBlob.get());
 
     // Not updating d_heartbeatMonitor until there is a valid event
 
-    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(readBlobs.empty())) {
+    bmqp::Event event(readBlob, d_allocator_p);
+    if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(!event.isValid())) {
         BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
-        // Don't yet have a full blob
+
+        BALL_LOG_ERROR << "#TCP_INVALID_PACKET "
+                       << channelInfo->d_session_sp->description()
+                       << ": Received an invalid packet:\n"
+                       << bmqu::BlobStartHexDumper(readBlob.get());
         return;  // RETURN
     }
 
-    for (size_t i = 0; i < readBlobs.size(); ++i) {
-        const bdlbb::Blob& readBlob = readBlobs[i];
-
-        BALL_LOG_TRACE << channelInfo->d_session_sp->description()
-                       << ": ReadCallback got a blob\n"
-                       << bmqu::BlobStartHexDumper(&readBlob);
-
-        bmqp::Event event(&readBlob, d_allocator_p);
-        if (BSLS_PERFORMANCEHINT_PREDICT_UNLIKELY(!event.isValid())) {
-            BSLS_PERFORMANCEHINT_UNLIKELY_HINT;
-
-            BALL_LOG_ERROR << "#TCP_INVALID_PACKET "
-                           << channelInfo->d_session_sp->description()
-                           << ": Received an invalid packet:\n"
-                           << bmqu::BlobStartHexDumper(&readBlob);
-            continue;  // CONTINUE
+    if (channelInfo->d_monitor.checkData(channelInfo->d_channel_sp.get(),
+                                         event)) {
+        if (event.isAuthenticationEvent()) {
+            reauthnOnAuthenticationEvent(event, channelInfo);
         }
-
-        if (channelInfo->d_monitor.checkData(channelInfo->d_channel_sp.get(),
-                                             event)) {
-            if (event.isAuthenticationEvent()) {
-                reauthnOnAuthenticationEvent(event, channelInfo);
-            }
-            else {
-                channelInfo->d_eventProcessor_p->processEvent(
-                    event,
-                    channelInfo->d_session_sp->clusterNode());
-            }
+        else {
+            channelInfo->d_eventProcessor_p->processEvent(
+                event,
+                channelInfo->d_session_sp->clusterNode());
         }
     }
 }
@@ -640,6 +629,7 @@ void TCPSessionFactory::initialConnectionComplete(
 
     // Do not initiate reading from the channel.  Transport observer(s) will
     // enable the read when they are ready.
+
     const bool result = operationContext->d_resultCb(
         bmqio::ChannelFactoryEvent::e_CHANNEL_UP,
         bmqio::Status(),
@@ -830,9 +820,11 @@ void TCPSessionFactory::onClose(const bsl::shared_ptr<bmqio::Channel>& channel,
                 //       'disableHeartbeat' in this case.
                 d_scheduler_p->scheduleEvent(
                     bsls::SystemTime::nowMonotonicClock(),
-                    bdlf::BindUtil::bind(&TCPSessionFactory::disableHeartbeat,
-                                         this,
-                                         channel.get()));
+                    bdlf::BindUtil::bind(
+                        bmqu::WeakMemFnUtil::weakMemFn(
+                            &TCPSessionFactory::disableHeartbeat,
+                            d_self.acquireWeak()),
+                        channel.get()));
             }
         }
 
@@ -1050,6 +1042,7 @@ TCPSessionFactory::TCPSessionFactory(
 , d_config(config, allocator)
 , d_scheduler_p(scheduler)
 , d_blobBufferFactory_p(blobBufferFactory)
+, d_blobSpPool(k_BLOB_POOL_GROWTH_STRATEGY, allocator)
 , d_authenticator_p(authenticator)
 , d_negotiator_p(negotiator)
 , d_statController_p(statController)
@@ -1166,19 +1159,7 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
                                                   bdlf::PlaceHolders::_1,
                                                   bdlf::PlaceHolders::_2));
 
-    rc = channelFactory->start();
-    if (rc != 0) {
-        errorDescription << "Failed starting channel pool for "
-                         << "TCPSessionFactory '" << d_config.name()
-                         << "' [rc: " << rc << "]";
-        return rc;  // RETURN
-    }
-
     d_tcpChannelFactory_mp = channelFactory;
-
-    bdlb::ScopeExitAny tcpScopeGuard(
-        bdlf::BindUtil::bind(&stopChannelFactory,
-                             d_tcpChannelFactory_mp.get()));
 
     bslmt::ThreadAttributes attributes =
         bmqsys::ThreadUtil::defaultAttributes();
@@ -1218,18 +1199,6 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
             d_allocator_p),
         d_allocator_p);
 
-    rc = d_reconnectingChannelFactory_mp->start();
-    if (rc != 0) {
-        errorDescription << "Failed starting reconnecting channel factory for "
-                         << "TCPSessionFactory '" << d_config.name()
-                         << "' [rc: " << rc << "]";
-        return rc;  // RETURN
-    }
-
-    bdlb::ScopeExitAny reconnectingScopeGuard(
-        bdlf::BindUtil::bind(&bmqio::ReconnectingChannelFactory::stop,
-                             d_reconnectingChannelFactory_mp.get()));
-
     d_statChannelFactory_mp.load(
         new (*d_allocator_p) bmqio::StatChannelFactory(
             bmqio::StatChannelFactoryConfig(
@@ -1242,6 +1211,15 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
                 d_allocator_p),
             d_allocator_p),
         d_allocator_p);
+
+    rc = d_statChannelFactory_mp->start();
+
+    if (rc != 0) {
+        errorDescription << "Failed starting stat channel factory for "
+                         << "TCPSessionFactory '" << d_config.name()
+                         << "' [rc: " << rc << "]";
+        return rc;  // RETURN
+    }
 
     if (d_config.heartbeatIntervalMs() != 0) {
         BALL_LOG_INFO
@@ -1272,9 +1250,6 @@ int TCPSessionFactory::start(bsl::ostream& errorDescription)
                   << "successfully started";
 
     d_isStarted = true;
-
-    reconnectingScopeGuard.release();
-    tcpScopeGuard.release();
 
     return 0;
 }
@@ -1406,12 +1381,8 @@ void TCPSessionFactory::stop()
     d_resolutionContext.stop();
     d_resolutionContext.join();
 
-    if (d_reconnectingChannelFactory_mp) {
-        d_reconnectingChannelFactory_mp->stop();
-    }
-
-    if (d_tcpChannelFactory_mp) {
-        stopChannelFactory(d_tcpChannelFactory_mp.get());
+    if (d_statChannelFactory_mp) {
+        d_statChannelFactory_mp->stop();
     }
 
     // Wait for all sessions to have been destroyed

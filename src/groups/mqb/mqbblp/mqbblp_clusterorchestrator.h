@@ -46,6 +46,7 @@
 #include <bmqma_countingallocatorstore.h>
 #include <bmqp_ctrlmsg_messages.h>
 #include <bmqp_event.h>
+#include <bmqu_managedcallback.h>
 
 // BDE
 #include <ball_log.h>
@@ -126,13 +127,23 @@ class ClusterOrchestrator {
       public:
         // CREATORS
         explicit OnElectorEventFunctor(ClusterOrchestrator* orchestrator,
-                                       bslmf::MovableRef<bmqp::Event> event,
+                                       const bmqp::Event&   event,
                                        mqbnet::ClusterNode* source_p);
 
         ~OnElectorEventFunctor() BSLS_KEYWORD_OVERRIDE;
 
         void operator()() const BSLS_KEYWORD_OVERRIDE;
     };
+
+    /// Vector of pairs of buffered primary status advisories and their source
+    typedef bsl::vector<
+        bsl::pair<bmqp_ctrlmsg::PrimaryStatusAdvisory, mqbnet::ClusterNode*> >
+        PrimaryStatusAdvisoryInfos;
+    typedef PrimaryStatusAdvisoryInfos::const_iterator
+        PrimaryStatusAdvisoryInfosCIter;
+
+    typedef bsl::vector<PrimaryStatusAdvisoryInfos>
+        PrimaryStatusAdvisoryInfosVec;
 
   private:
     // DATA
@@ -169,6 +180,10 @@ class ClusterOrchestrator {
     mqbi::StorageManager* d_storageManager_p;
 
     RecurringEventHandle d_consumptionMonitorEventHandle;
+
+    /// Vector, indexed by partitionId, of vectors of pairs of buffered primary
+    /// status advisories and their source.
+    PrimaryStatusAdvisoryInfosVec d_bufferedPrimaryStatusAdvisoryInfosVec;
 
   private:
     // NOT IMPLEMENTED
@@ -360,8 +375,7 @@ class ClusterOrchestrator {
     ///
     /// THREAD: This method is invoked in the associated cluster's
     ///         dispatcher thread.
-    void
-    processClusterStateEvent(const mqbi::DispatcherClusterStateEvent& event);
+    void processClusterStateEvent(const mqbevt::ClusterStateEvent& event);
 
     /// Process the queue assignment in the specified `request`, received
     /// from the specified `requester`.
@@ -415,6 +429,9 @@ class ClusterOrchestrator {
     void
     processPrimaryStatusAdvisory(const bmqp_ctrlmsg::ControlMessage& message,
                                  mqbnet::ClusterNode*                source);
+    void processPrimaryStatusAdvisoryImpl(
+        const bmqp_ctrlmsg::PrimaryStatusAdvisory& primaryAdv,
+        mqbnet::ClusterNode*                       source);
 
     /// Process the specified `notification` (StateNotification) from the
     /// specified `notifier`.
@@ -489,6 +506,10 @@ class ClusterOrchestrator {
     void onPartitionPrimaryStatus(int          partitionId,
                                   int          status,
                                   unsigned int primaryLeaseId);
+
+    /// PFSM signals when it is `e_DONE_RECEIVING_DATA_CHUNKS`.  Previously
+    /// buffered PrimaryStatusAdvisories should be reread.
+    void processBufferedPrimaryStatusAdvisories(int partitionId);
 
     /// Process the specified `command`, and write the result to the
     /// clusterResult object.  Return 0 if the command was successfully

@@ -25,6 +25,8 @@
 #include <mqbc_clusterutil.h>
 #include <mqbc_incoreclusterstateledger.h>
 #include <mqbcmd_messages.h>
+#include <mqbevt_callbackevent.h>
+#include <mqbevt_clusterstateevent.h>
 #include <mqbi_queueengine.h>
 #include <mqbi_storagemanager.h>
 #include <mqbnet_cluster.h>
@@ -57,22 +59,16 @@ class Domain;
 
 namespace mqbblp {
 
-namespace {
-/// Timeout duration for Cluster FSM watchdog -- 5 minutes
-const bsls::Types::Int64 k_WATCHDOG_TIMEOUT_DURATION = 60 * 5;
-
-}  // close unnamed namespace
-
 // ------------------------------------------------
 // class ClusterOrchestrator::OnElectorEventFunctor
 // ------------------------------------------------
 
 ClusterOrchestrator::OnElectorEventFunctor::OnElectorEventFunctor(
-    ClusterOrchestrator*           orchestrator_p,
-    bslmf::MovableRef<bmqp::Event> event,
-    mqbnet::ClusterNode*           source_p)
+    ClusterOrchestrator* orchestrator_p,
+    const bmqp::Event&   event,
+    mqbnet::ClusterNode* source_p)
 : d_orchestrator_p(orchestrator_p)
-, d_event(bslmf::MovableRefUtil::move(event))
+, d_event(event)
 , d_source_p(source_p)
 {
     // PRECONDITIONS
@@ -593,7 +589,10 @@ ClusterOrchestrator::ClusterOrchestrator(
                             d_clusterData_p,
                             clusterState,
                             &d_clusterData_p->blobSpPool())),
-                    k_WATCHDOG_TIMEOUT_DURATION,
+                    clusterConfig.clusterAttributes()
+                        .clusterFsmWatchdogTimeoutSec(),
+                    clusterConfig.clusterAttributes()
+                        .clusterFsmWatchdogNumRetries(),
                     d_allocators.get("ClusterStateManager")))
           : static_cast<mqbi::ClusterStateManager*>(
                 new(*d_allocator_p) ClusterStateManager(
@@ -617,6 +616,7 @@ ClusterOrchestrator::ClusterOrchestrator(
                 allocator)
 , d_elector_mp()
 , d_storageManager_p(0)
+, d_bufferedPrimaryStatusAdvisoryInfosVec(allocator)
 {
     // executed by *ANY* thread
 
@@ -624,6 +624,10 @@ ClusterOrchestrator::ClusterOrchestrator(
     BSLS_ASSERT_SAFE(allocator);
     BSLS_ASSERT_SAFE(d_cluster_p);
     BSLS_ASSERT_SAFE(d_clusterData_p);
+
+    d_bufferedPrimaryStatusAdvisoryInfosVec.resize(
+        d_clusterConfig.partitionConfig().numPartitions(),
+        PrimaryStatusAdvisoryInfos(allocator));
 }
 
 ClusterOrchestrator::~ClusterOrchestrator()
@@ -1307,18 +1311,16 @@ void ClusterOrchestrator::processElectorEvent(const bmqp::Event&   event,
     // certain events "out of order" (some cases were found out while testing).
 
     // TODO(678098): revisit, make per-IO thread contexts
-    mqbi::Dispatcher::DispatcherEventSp clusterEvent =
-        dispatcher()->getDefaultEventSource()->getEvent();
-    (*clusterEvent).setType(mqbi::DispatcherEventType::e_CALLBACK);
+    bsl::shared_ptr<mqbevt::CallbackEvent> event_sp =
+        dispatcher()
+            ->getDefaultEventSource()
+            ->getEvent<mqbevt::CallbackEvent>();
+    event_sp->callback()
+        .createInplace<ClusterOrchestrator::OnElectorEventFunctor>(this,
+                                                                   event,
+                                                                   source);
 
-    bmqp::Event clonedEvent = event.clone(d_allocator_p);
-    clusterEvent->callback()
-        .createInplace<ClusterOrchestrator::OnElectorEventFunctor>(
-            this,
-            bslmf::MovableRefUtil::move(clonedEvent),
-            source);
-
-    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(clusterEvent),
+    dispatcher()->dispatchEvent(bslmf::MovableRefUtil::move(event_sp),
                                 d_cluster_p);
 }
 
@@ -1359,7 +1361,7 @@ void ClusterOrchestrator::processLeaderSyncDataQuery(
 }
 
 void ClusterOrchestrator::processClusterStateEvent(
-    const mqbi::DispatcherClusterStateEvent& event)
+    const mqbevt::ClusterStateEvent& event)
 {
     // executed by *CLUSTER DISPATCHER* thread
 
@@ -1571,6 +1573,21 @@ void ClusterOrchestrator::processPrimaryStatusAdvisory(
     const bmqp_ctrlmsg::PrimaryStatusAdvisory& primaryAdv =
         message.choice().clusterMessage().choice().primaryStatusAdvisory();
 
+    processPrimaryStatusAdvisoryImpl(primaryAdv, source);
+}
+
+void ClusterOrchestrator::processPrimaryStatusAdvisoryImpl(
+    const bmqp_ctrlmsg::PrimaryStatusAdvisory& primaryAdv,
+    mqbnet::ClusterNode*                       source)
+{
+    // executed by the cluster *DISPATCHER* thread
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
+
+    // This routine is invoked when the status of a primary 'source' node has
+    // changed.
+
     if (d_clusterData_p->membership().selfNodeStatus() ==
         bmqp_ctrlmsg::NodeStatus::E_STOPPING) {
         // No need to process the advisory since self is stopping.
@@ -1625,13 +1642,17 @@ void ClusterOrchestrator::processPrimaryStatusAdvisory(
                     BALL_LOG_OUTPUT_STREAM << " Ignoring advisory.";
                 }
                 else {
-                    BALL_LOG_OUTPUT_STREAM << " Since we have not received any"
-                                           << " information regarding the true"
-                                           << " primary, this advisory could "
-                                           << "be from the true one. Will"
-                                           << " buffer the advisory for now.";
-                    d_storageManager_p->bufferPrimaryStatusAdvisory(primaryAdv,
-                                                                    source);
+                    BALL_LOG_OUTPUT_STREAM
+                        << d_clusterData_p->identity().description()
+                        << " Partition [" << primaryAdv.partitionId()
+                        << "]: buffering primary status advisory: "
+                        << primaryAdv << " from " << source->nodeDescription()
+                        << " since we have not received any information "
+                           "regarding the true primary";
+
+                    d_bufferedPrimaryStatusAdvisoryInfosVec
+                        .at(primaryAdv.partitionId())
+                        .push_back(bsl::make_pair(primaryAdv, source));
                 }
             }
             return;  // RETURN
@@ -1928,6 +1949,49 @@ void ClusterOrchestrator::onPartitionPrimaryStatus(int          partitionId,
             status,
             primaryLeaseId),
         d_cluster_p);
+}
+
+void ClusterOrchestrator::processBufferedPrimaryStatusAdvisories(
+    int partitionId)
+{
+    // executed by the cluster *DISPATCHER* thread
+
+    // PRECONDITIONS
+    BSLS_ASSERT_SAFE(d_cluster_p->inDispatcherThread());
+
+    BALL_LOG_INFO
+        << d_clusterData_p->identity().description() << " Partition ["
+        << partitionId << "]: " << "Processing "
+        << d_bufferedPrimaryStatusAdvisoryInfosVec[partitionId].size()
+        << " buffered primary status advisory.";
+
+    const mqbc::ClusterStatePartitionInfo& pinfo = clusterState()->partition(
+        partitionId);
+
+    for (PrimaryStatusAdvisoryInfosCIter cit =
+             d_bufferedPrimaryStatusAdvisoryInfosVec[partitionId].cbegin();
+         cit != d_bufferedPrimaryStatusAdvisoryInfosVec[partitionId].cend();
+         ++cit) {
+        BSLS_ASSERT_SAFE(cit->first.partitionId() == partitionId);
+
+        if (cit->second->nodeId() != pinfo.primaryNodeId() ||
+            cit->first.primaryLeaseId() != pinfo.primaryLeaseId()) {
+            BALL_LOG_INFO << d_clusterData_p->identity().description()
+                          << " Partition [" << partitionId
+                          << "]: " << "Ignoring primary status advisory "
+                          << cit->first
+                          << " because primary node or leaseId is invalid. "
+                          << "Self-perceived [primary, leaseId] is: ["
+                          << (pinfo.primaryNode()
+                                  ? pinfo.primaryNode()->nodeDescription()
+                                  : "** null **")
+                          << "," << pinfo.primaryLeaseId() << "]";
+            continue;  // CONTINUE
+        }
+        processPrimaryStatusAdvisoryImpl(cit->first, cit->second);
+    }
+
+    d_bufferedPrimaryStatusAdvisoryInfosVec[partitionId].clear();
 }
 
 int ClusterOrchestrator::processCommand(

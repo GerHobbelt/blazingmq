@@ -202,7 +202,7 @@ int StorageManager::configureStorage(
 }
 
 void StorageManager::processStorageEvent(
-    BSLA_MAYBE_UNUSED const mqbi::DispatcherStorageEvent& event)
+    BSLA_MAYBE_UNUSED const mqbevt::StorageEvent& event)
 {
     // NOTHING
 }
@@ -236,20 +236,13 @@ void StorageManager::processPartitionSyncDataRequestStatus(
 }
 
 void StorageManager::processRecoveryEvent(
-    BSLA_MAYBE_UNUSED const mqbi::DispatcherRecoveryEvent& event)
+    BSLA_MAYBE_UNUSED const mqbevt::RecoveryEvent& event)
 {
     // NOTHING
 }
 
 void StorageManager::processReceiptEvent(
     BSLA_MAYBE_UNUSED const bmqp::Event& event,
-    BSLA_MAYBE_UNUSED mqbnet::ClusterNode* source)
-{
-    // NOTHING
-}
-
-void StorageManager::bufferPrimaryStatusAdvisory(
-    BSLA_MAYBE_UNUSED const bmqp_ctrlmsg::PrimaryStatusAdvisory& advisory,
     BSLA_MAYBE_UNUSED mqbnet::ClusterNode* source)
 {
     // NOTHING

@@ -52,6 +52,7 @@ if(DEFINED ENV{LIBCXX_BUILD_PATH})
           )
     string(CONCAT TOOLCHAIN_LINKER_FLAGS
            "${CMAKE_LINKER_FLAGS_DEBUG}"
+           "-fuse-ld=lld "
            "-stdlib=libc++ "
            "-L$ENV{LIBCXX_BUILD_PATH}/lib "
            "-Wl,-rpath,$ENV{LIBCXX_BUILD_PATH}/lib "
@@ -65,6 +66,7 @@ else()
     # and libFuzzer ourselves with LLVM's libc++, but this takes too much time.
     string(CONCAT TOOLCHAIN_LINKER_FLAGS
            "${CMAKE_LINKER_FLAGS_DEBUG}"
+           "-fuse-ld=lld "
            "-stdlib=libstdc++ "
            )
 endif()
@@ -85,6 +87,7 @@ string(CONCAT TOOLCHAIN_CXX_FLAGS
        "-Wno-undef "
        "-Wno-zero-as-null-pointer-constant "
        "-Wno-unsafe-buffer-usage "
+       "-Wno-reserved-macro-identifier "
        )
 
 set( TOOLCHAIN_EXE_FLAGS "${TOOLCHAIN_LINKER_FLAGS}" )

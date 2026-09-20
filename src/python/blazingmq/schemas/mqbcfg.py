@@ -43,14 +43,27 @@ class BmqconfConfig:
 class ClusterAttributes:
     """Type representing the attributes specific to a cluster.
 
-    isCSLModeEnabled.: indicates if CSL is enabled for this cluster
-    isFSMWorkflow....: indicates if CSL FSM workflow is enabled for this
-    cluster.  This flag *must* be false if
-    'isCSLModeEnabled' is false.
-    doesFSMwriteQLIST: indicates whether the broker still writes to the
-    to-be-deprecated QLIST file when FSM workflow is
-    enabled.  If above 'isFSMWorkflow' flag is false,
-    this flag is ignored.
+    isCSLModeEnabled...............:
+    indicates if CSL is enabled for this cluster
+    isFSMWorkflow..................:
+    indicates if CSL FSM workflow is enabled for this cluster.  This
+    flag *must* be false if 'isCSLModeEnabled' is false.
+    doesFSMwriteQLIST..............:
+    indicates whether the broker still writes to the to-be-deprecated
+    QLIST file when FSM workflow is enabled.  If above 'isFSMWorkflow'
+    flag is false, this flag is ignored.
+    clusterFsmWatchdogTimeoutSec...:
+    timeout duration in seconds for Cluster FSM watchdog. Only applies
+    when 'isFSMWorkflow' is true.
+    clusterFsmWatchdogNumRetries...:
+    number of retries for Cluster FSM watchdog before we give up and
+    terminate the broker.  Only applies when 'isFSMWorkflow' is true.
+    partitionFsmWatchdogTimeoutSec.:
+    timeout duration in seconds for Partition FSM watchdog. Only
+    applies when 'isFSMWorkflow' is true.
+    partitionFsmWatchdogNumRetries.:
+    number of retries for Partition FSM watchdog before we give up and
+    terminate the broker.  Only applies when 'isFSMWorkflow' is true.
     """
 
     is_cslmode_enabled: bool = field(
@@ -75,6 +88,42 @@ class ClusterAttributes:
         default=True,
         metadata={
             "name": "doesFSMwriteQLIST",
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    cluster_fsm_watchdog_timeout_sec: int = field(
+        default=300,
+        metadata={
+            "name": "clusterFsmWatchdogTimeoutSec",
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    cluster_fsm_watchdog_num_retries: int = field(
+        default=1,
+        metadata={
+            "name": "clusterFsmWatchdogNumRetries",
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    partition_fsm_watchdog_timeout_sec: int = field(
+        default=300,
+        metadata={
+            "name": "partitionFsmWatchdogTimeoutSec",
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    partition_fsm_watchdog_num_retries: int = field(
+        default=1,
+        metadata={
+            "name": "partitionFsmWatchdogNumRetries",
             "type": "Element",
             "namespace": "http://bloomberg.com/schemas/mqbcfg",
             "required": True,
@@ -1103,8 +1152,12 @@ class TcpInterfaceListener:
 
     name.................:
     A name to associate this listener to.
+    address..............:
+    The IPv4 address this listener will accept connections on.
     port.................:
     The port this listener will accept connections on.
+    tls..................:
+    Use TLS on this interface.
     """
 
     name: Optional[str] = field(
@@ -1115,7 +1168,74 @@ class TcpInterfaceListener:
             "required": True,
         },
     )
+    address: str = field(
+        default="0.0.0.0",
+        metadata={
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
     port: Optional[int] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    tls: bool = field(
+        default=False,
+        metadata={
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class TlsConfig:
+    """certificateAuthority.:
+
+    A path to the FILE, containing concatenation of known certificates
+    the server can use to reference as its certificate store.
+    certificate..........:
+    A path to the FILE, containing the certificate the broker will use
+    to identify itself to other clients.
+    key..................:
+    A path to the FILE, containing the private key that the broker uses
+    to read the certificate.
+    versions.............:
+    A string with a comma-separated list of supported protocol versions.
+    """
+
+    certificate_authority: Optional[str] = field(
+        default=None,
+        metadata={
+            "name": "certificateAuthority",
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    certificate: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    key: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
+            "required": True,
+        },
+    )
+    versions: Optional[str] = field(
         default=None,
         metadata={
             "type": "Element",
@@ -2112,6 +2232,7 @@ class AppConfig:
     advertiseSubscriptions.: temporarily control use of ConfigureStream in SDK
     routeCommandTimeoutMs: maximum amount of time to wait for a routed command's response
     authentication.......: configuration for authentication
+    tlsConfig............: optional configuration for TLS
     """
 
     broker_instance_name: Optional[str] = field(
@@ -2280,6 +2401,14 @@ class AppConfig:
             "type": "Element",
             "namespace": "http://bloomberg.com/schemas/mqbcfg",
             "required": True,
+        },
+    )
+    tls_config: Optional[TlsConfig] = field(
+        default=None,
+        metadata={
+            "name": "tlsConfig",
+            "type": "Element",
+            "namespace": "http://bloomberg.com/schemas/mqbcfg",
         },
     )
 
