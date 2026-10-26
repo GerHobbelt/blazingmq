@@ -44,7 +44,6 @@
 #include <ball_severity.h>
 #include <bdlbb_blob.h>
 #include <bdlbb_blobutil.h>
-#include <bdlbb_pooledblobbufferfactory.h>
 #include <bsl_algorithm.h>
 #include <bsl_ostream.h>
 #include <bsl_string.h>
@@ -89,6 +88,7 @@ using namespace bsl;
 //   capacityMeter_limitBytes
 // - garbageCollect
 // - proxyRemoveVirtualStorage_refCountOfUnpushedApp
+// - proxyConfirm_refCountOfUnpushedApp
 // - addQueueOpRecordHandle
 //-----------------------------------------------------------------------------
 
@@ -255,7 +255,8 @@ struct Tester {
                 const int                       msgCount,
                 int                             dataOffset   = 0,
                 bool                            useSameGuids = false,
-                int                             refCount     = 1)
+                int                             refCount     = 1,
+                int                             numPushApps  = 0)
     {
         // PRECONDITIONS
         BSLS_ASSERT_OPT(guidHolder);
@@ -299,14 +300,21 @@ struct Tester {
                 bmqp::MessagePropertiesInfo::makeNoSchema(),
                 bmqt::CompressionAlgorithmType::e_NONE);
 
+            mqbi::DataStreamMessage*  dataStreamMessage = 0;
             mqbi::StorageResult::Enum rc = d_replicatedStorage_mp->put(
                 &attributes,
                 guid,
                 appDataPtr,
-                appDataPtr);
+                appDataPtr,
+                &dataStreamMessage);
 
             if (rc != mqbi::StorageResult::e_SUCCESS) {
                 return rc;  // RETURN
+            }
+
+            // Mark the Apps this message was pushed to, as a proxy does.
+            for (int app = 0; app < numPushApps; ++app) {
+                dataStreamMessage->app(app).setPushState();
             }
         }
 
@@ -1070,11 +1078,12 @@ BMQTST_TEST(confirm)
 
     bsl::vector<bmqt::MessageGUID> guids(bmqtst::TestHelperUtil::allocator());
 
-    // Check 'put': To physical storage (StorageKeys = NULL)
-    BMQTST_ASSERT_EQ(tester.addMessages(&guids, k_MSG_COUNT),
+    // Check 'put': To physical storage (StorageKeys = NULL).  app1 is pushed,
+    // so its CONFIRM releases a reference.
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, k_MSG_COUNT, 0, false, 1, 1),
                      mqbi::StorageResult::e_SUCCESS);
 
-    BMQTST_ASSERT_EQ(tester.addMessages(&guids, k_MSG_COUNT, 0, true),
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, k_MSG_COUNT, 0, true, 1, 1),
                      mqbi::StorageResult::e_SUCCESS);
 
     mqbi::StorageMessageAttributes attributes;
@@ -1215,14 +1224,16 @@ BMQTST_TEST(getIterator_withVirtualStorages)
 
     bsl::vector<bmqt::MessageGUID> guids(bmqtst::TestHelperUtil::allocator());
 
-    // Check 'put': To physical storage (StorageKeys = NULL)
-    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 20),
+    // Check 'put': To physical storage (StorageKeys = NULL).  Each message is
+    // pushed to both app1 and app2 (refCount 2), so confirming one App leaves
+    // the message for the other.
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 20, 0, false, 2, 2),
                      mqbi::StorageResult::e_SUCCESS);
 
-    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 20, 20),
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 20, 20, false, 2, 2),
                      mqbi::StorageResult::e_SUCCESS);
 
-    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 20, 40),
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 20, 40, false, 2, 2),
                      mqbi::StorageResult::e_SUCCESS);
 
     // Check Iterator
@@ -1438,12 +1449,9 @@ BMQTST_TEST(garbageCollect)
 
 BMQTST_TEST(proxyRemoveVirtualStorage_refCountOfUnpushedApp)
 // ------------------------------------------------------------------------
-// Proxy has 3 Apps.  A PUSH arrives for app1 and app2 only (refCount 2),
-// as done by 'RelayQueueEngine::storePushIfProxy'.  Removing app3's
-// virtual storage must not release a reference app3 never held.
-//
-// Every App slot of a new 'DataStreamMessage' starts as 'e_PUT', which
-// counts as pending, so app3's untouched slot looks like it holds a ref.
+// Proxy with 3 Apps.  A message is pushed to app1 and app2 only, so its
+// refCount is 2.  Removing app3 must not decrement the refCount, since
+// app3 was never counted in it.
 // ------------------------------------------------------------------------
 {
     bmqtst::TestHelper::printTestName(
@@ -1460,44 +1468,56 @@ BMQTST_TEST(proxyRemoveVirtualStorage_refCountOfUnpushedApp)
     storage.addVirtualStorage(errDescription, k_APP_ID2, k_APP_KEY2);
     storage.addVirtualStorage(errDescription, k_APP_ID3, k_APP_KEY3);
 
-    bdlbb::PooledBlobBufferFactory bufferFactory(
-        1024,
-        bmqtst::TestHelperUtil::allocator());
-    const bmqt::MessageGUID            guid = generateRandomGUID();
-    const int                          data = 0;
-    const bsl::shared_ptr<bdlbb::Blob> appData(
-        new (*bmqtst::TestHelperUtil::allocator())
-            bdlbb::Blob(&bufferFactory, bmqtst::TestHelperUtil::allocator()),
-        bmqtst::TestHelperUtil::allocator());
-    bdlbb::BlobUtil::append(appData.get(),
-                            reinterpret_cast<const char*>(&data),
-                            static_cast<int>(sizeof(int)));
-
-    mqbi::StorageMessageAttributes attributes(
-        0,
-        2,  // refCount: app1 and app2
-        static_cast<unsigned int>(appData->length()),
-        bmqp::MessagePropertiesInfo::makeNoSchema(),
-        bmqt::CompressionAlgorithmType::e_NONE);
-
-    mqbi::DataStreamMessage* dataStreamMessage = 0;
-    BMQTST_ASSERT_EQ(storage.put(&attributes,
-                                 guid,
-                                 appData,
-                                 bsl::shared_ptr<bdlbb::Blob>(),
-                                 &dataStreamMessage),
+    // refCount 2, pushed to app1 and app2.
+    bsl::vector<bmqt::MessageGUID> guids(bmqtst::TestHelperUtil::allocator());
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 1, 0, false, 2, 2),
                      mqbi::StorageResult::e_SUCCESS);
-    BMQTST_ASSERT(dataStreamMessage);
+    const bmqt::MessageGUID& guid = guids[0];
 
-    // Ordinals follow 'addVirtualStorage' order: app1 is 0, app2 is 1.
-    // app3's slot (ordinal 2) stays 'e_PUT'.
-    dataStreamMessage->app(0).setPushState();
-    dataStreamMessage->app(1).setPushState();
-
-    // app3 never received the PUSH; its last reader goes away.
     BMQTST_ASSERT(storage.removeVirtualStorage(k_APP_KEY3, false));
 
-    // app2 still holds the message, so app1's CONFIRM must not reach zero.
+    // app2 still holds the message.
+    BMQTST_ASSERT_EQ(storage.confirm(guid, k_APP_KEY1, 0),
+                     mqbi::StorageResult::e_NON_ZERO_REFERENCES);
+    BMQTST_ASSERT_EQ(storage.confirm(guid, k_APP_KEY2, 0),
+                     mqbi::StorageResult::e_ZERO_REFERENCES);
+}
+
+BMQTST_TEST(proxyConfirm_refCountOfUnpushedApp)
+// ------------------------------------------------------------------------
+// Proxy with 3 Apps.  A message is pushed to app1 and app2 only, so its
+// refCount is 2.  A CONFIRM from app3 must not decrement the refCount,
+// since app3 was never counted in it.
+// ------------------------------------------------------------------------
+{
+    bmqtst::TestHelper::printTestName("proxyConfirm_refCountOfUnpushedApp");
+
+    bmqu::MemOutStream errDescription(bmqtst::TestHelperUtil::allocator());
+
+    Tester tester(k_PROXY_PARTITION_ID, bmqtst::TestHelperUtil::allocator());
+    tester.configure(k_INT64_MAX, k_INT64_MAX);
+
+    mqbs::ReplicatedStorage& storage = tester.storage();
+
+    storage.addVirtualStorage(errDescription, k_APP_ID1, k_APP_KEY1);
+    storage.addVirtualStorage(errDescription, k_APP_ID2, k_APP_KEY2);
+    storage.addVirtualStorage(errDescription, k_APP_ID3, k_APP_KEY3);
+
+    // refCount 2, pushed to app1 and app2.
+    bsl::vector<bmqt::MessageGUID> guids(bmqtst::TestHelperUtil::allocator());
+    BMQTST_ASSERT_EQ(tester.addMessages(&guids, 1, 0, false, 2, 2),
+                     mqbi::StorageResult::e_SUCCESS);
+    const bmqt::MessageGUID& guid = guids[0];
+
+    BMQTST_ASSERT_EQ(storage.confirm(guid, k_APP_KEY3, 0),
+                     mqbi::StorageResult::e_NON_ZERO_REFERENCES);
+
+    mqbi::StorageMessageAttributes current;
+    BMQTST_ASSERT_EQ(storage.get(&current, guid),
+                     mqbi::StorageResult::e_SUCCESS);
+    BMQTST_ASSERT_EQ(current.refCount(), 2U);
+
+    // app2 still holds the message.
     BMQTST_ASSERT_EQ(storage.confirm(guid, k_APP_KEY1, 0),
                      mqbi::StorageResult::e_NON_ZERO_REFERENCES);
     BMQTST_ASSERT_EQ(storage.confirm(guid, k_APP_KEY2, 0),
